@@ -86,6 +86,8 @@ threlium_litellm:
       target_score: 1.0
     enrich_plan:
       target_score: 0.0
+    summarize_context:
+      target_score: 0.0
     lightrag_llm:
       target_score: 0.0
     lightrag_embedding:
@@ -97,9 +99,16 @@ threlium_litellm:
 threlium_e2e:
   litellm_route_correlation: true
 
-# enrich: только override context_max_chars для e2e trim-сценария
+# enrich: context budget + summarize overflow (e2e summarize / trim сценарии)
 threlium_enrich:
   context_max_chars: 8000
+  summarize_enabled: true
+  summarize_trigger_min_excess_chars: 100
+  summarize_batch_max_messages: 5
+
+# knowledge: e2e trim-сценарий observation-note
+threlium_knowledge:
+  observation_max_chars: 8000
 
 # lightrag: только overrides для e2e (insert_batch=1, query_api без llm)
 threlium_lightrag:

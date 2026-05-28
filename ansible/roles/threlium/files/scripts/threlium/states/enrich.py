@@ -21,7 +21,6 @@ from dataclasses import dataclass, replace
 from email.message import EmailMessage
 from typing import Any
 
-from litellm.types.utils import Message
 from lightrag import QueryParam
 
 from threlium import nm as nmlib
@@ -29,6 +28,7 @@ from threlium.context_budget import (
     BucketConfig,
     BucketConfigTier,
     ContextMessageType,
+    SERVICE_TRANSITION_STAGES,
     assign_tiers,
     classify_message_type,
     estimate_unified_weight,
@@ -36,14 +36,14 @@ from threlium.context_budget import (
     score_messages,
     solve_mckp,
 )
-from threlium.settings import ThreliumSettings, resolve_llm_endpoint
-from threlium.litellm_client import litellm_acompletion
+from threlium.settings import ThreliumSettings
+from threlium.litellm_client import litellm_site_acompletion_text
 from threlium.litellm_route_context import e2e_route_wire_tail, get_litellm_http_correlation
 from threlium.enrich_context import build_unified_email_messages, trim_context_text, UnifiedEmailContext
+from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
 from threlium.irt_chain import iter_in_reply_to_ancestors_from_inner_id
 from threlium.logutil import logger
-from threlium.litellm_wire import require_chat_model_response
 from threlium.mime_reform import (
     EnrichPartId,
     build_enriched_multipart,
@@ -59,11 +59,10 @@ from threlium.types import (
     EnrichGraphAnswerText,
     EnrichThreadMemoryText,
     EnrichUnifiedMailContextText,
+    FsmTransitionPlainBody,
     LightragPromptLibraryKey,
     LitellmCallSite,
-    LiteLlmAcompletionKwargs,
     LiteLlmChatMessage,
-    lite_llm_acompletion_to_dict,
     FsmStage,
     LightragLiteLlmCompletionBody,
     LitellmRoutingSite,
@@ -102,30 +101,12 @@ def _query_param(cfg: ThreliumSettings) -> QueryParam:
 
 async def _enrich_llm_plan(cfg: ThreliumSettings, user_prompt: str) -> str:
     """Один LLM-вызов для формулировки запроса к LightRAG (маршрутизация LiteLLM)."""
-    ep = resolve_llm_endpoint(cfg.litellm, LitellmRoutingSite.ENRICH_PLAN)
-    mr = ep.max_retries if ep.max_retries is not None else cfg.litellm.max_retries
-    log.info("litellm_routing", site=LitellmRoutingSite.ENRICH_PLAN.value, score=ep.score)
-    call = LiteLlmAcompletionKwargs(
-        model=ep.model,
-        messages=[LiteLlmChatMessage(role="user", content=user_prompt)],
-        timeout=float(ep.timeout),
-        max_retries=mr,
-        api_key=ep.api_key,
-        api_base=ep.api_base,
-        max_tokens=ep.max_tokens,
-        chat_template_kwargs=ep.chat_template_kwargs or None,
+    raw = await litellm_site_acompletion_text(
+        cfg,
+        LitellmRoutingSite.ENRICH_PLAN,
+        [LiteLlmChatMessage(role="user", content=user_prompt)],
     )
-    call_kwargs = lite_llm_acompletion_to_dict(call)
-    resp = require_chat_model_response(
-        await litellm_acompletion(settings=cfg, **call_kwargs, stream=False)
-    )
-    choice = resp.choices[0]
-    msg_obj: Message | None = choice.message
-    content = ""
-    if msg_obj is not None:
-        raw_c = msg_obj.content
-        content = LightragLiteLlmCompletionBody.parse(raw_c).value if isinstance(raw_c, str) else ""
-    return str(content)
+    return LightragLiteLlmCompletionBody.parse(raw).value if raw else ""
 
 
 def _build_lightrag_envelope(
@@ -229,6 +210,7 @@ def _render_mail_context(
         tier_assignments_types=tier_assignments_types or {},
         preview_chars=preview_chars,
         total_messages=total_messages,
+        service_stage_mailboxes=[s.rfc822_mailbox for s in SERVICE_TRANSITION_STAGES],
     ).strip()
     return trim_context_text(raw, limit)
 
@@ -254,7 +236,7 @@ def _is_empty_rag_result(raw_result: dict[str, Any] | str | None, api: str) -> b
     return False
 
 
-def _estimate_msgs_weight(msgs: list[EmailMessage]) -> int:
+def _estimate_msgs_weight(msgs: list[EmailMessage], tool_obs_cap: int = 500) -> int:
     """Оценка веса списка сообщений в full-body режиме (без Jinja)."""
     total = 0
     for m in msgs:
@@ -265,7 +247,7 @@ def _estimate_msgs_weight(msgs: list[EmailMessage]) -> int:
             part = m.get_body(preferencelist=("plain", "html"))
             body_chars = len(part.get_content()) if part else 0
             if msg_type == ContextMessageType.TOOL_OBSERVATION:
-                total += min(body_chars, 500) + 100
+                total += min(body_chars, tool_obs_cap) + 100
             else:
                 total += body_chars + 100
     return total
@@ -397,10 +379,7 @@ async def _enrich_async(
     if llm_text and isinstance(llm_text, str) and llm_text.strip():
         graph_answer_raw = llm_text.strip()
     else:
-        graph_answer_raw = json.dumps(
-            lightrag_envelope.get("lightrag", {}).get("raw"),
-            indent=2, ensure_ascii=False,
-        ) if lightrag_envelope.get("lightrag", {}).get("raw") else ""
+        graph_answer_raw = ""
 
     _preview = cfg.enrich.tier_preview_chars
     _tier1 = cfg.enrich.tier1_full
@@ -410,8 +389,9 @@ async def _enrich_async(
 
     # --- Phase 1: estimate weights for MCKP (no Jinja rendering) ---
 
-    _tier1_med = max(1, _tier1 // 2)
-    _tier2_med = max(1, _tier2 // 2)
+    _med_ratio = cfg.enrich.tier1_medium_ratio
+    _tier1_med = max(1, _tier1 // _med_ratio)
+    _tier2_med = max(1, _tier2 // _med_ratio)
 
     unified_configs = [
         BucketConfig(bucket=EnrichPartId.UNIFIED_MAIL_CONTEXT, tier=BucketConfigTier.FULL,
@@ -439,6 +419,7 @@ async def _enrich_async(
 
     def _make_bucket_configs(
         bucket: EnrichPartId, full_weight: int, medium_weight: int, signal: float,
+        *, allow_empty: bool = True,
     ) -> list[BucketConfig]:
         configs = [
             BucketConfig(bucket=bucket, tier=BucketConfigTier.FULL,
@@ -449,13 +430,15 @@ async def _enrich_async(
             configs.append(BucketConfig(bucket=bucket, tier=BucketConfigTier.MEDIUM,
                                         weight=medium_weight, value=0.5 * signal,
                                         tier1_count=0, tier2_count=0))
-        configs.append(BucketConfig(bucket=bucket, tier=BucketConfigTier.EMPTY,
-                                    weight=0, value=0.0, tier1_count=0, tier2_count=0))
+        if allow_empty:
+            configs.append(BucketConfig(bucket=bucket, tier=BucketConfigTier.EMPTY,
+                                        weight=0, value=0.0, tier1_count=0, tier2_count=0))
         return configs
 
     bucket_configs_map: dict[EnrichPartId, list[BucketConfig]] = {
         EnrichPartId.GRAPH_ANSWER: _make_bucket_configs(
-            EnrichPartId.GRAPH_ANSWER, graph_full_weight, graph_medium_weight, graph_signal),
+            EnrichPartId.GRAPH_ANSWER, graph_full_weight, graph_medium_weight, graph_signal,
+            allow_empty=not bool(graph_answer_raw.strip())),
         EnrichPartId.UNIFIED_MAIL_CONTEXT: unified_configs,
         EnrichPartId.THREAD_MEMORY: _make_bucket_configs(
             EnrichPartId.THREAD_MEMORY,
@@ -548,6 +531,50 @@ async def _enrich_async(
     )
 
 
+def _emit_summarize_overflow(
+    msg: EmailMessage,
+    stage: FsmStage,
+    *,
+    config: ThreliumSettings,
+    ctx: UnifiedEmailContext,
+    mckp_capacity: int,
+) -> EmailMessage:
+    """Build JSON payload for summarize_context when unified overflows budget."""
+    batch_max = config.enrich.summarize_batch_max_messages
+    candidates = ctx.all_messages[:batch_max]
+
+    mids: list[str] = []
+    bodies: list[str] = []
+    for m in candidates:
+        raw_mid = m.get(MailHeaderName.MESSAGE_ID)
+        if not raw_mid:
+            continue
+        w = RfcMessageIdWire.parse_present_optional(str(raw_mid))
+        if w is None:
+            continue
+        inner = NotmuchMessageIdInner.from_optional_wire(w)
+        if inner is None:
+            continue
+        part = m.get_body(preferencelist=("plain", "html"))
+        body_text = part.get_content() if part else ""
+        mids.append(inner.value)
+        bodies.append(body_text)
+
+    payload = json.dumps({"summarize": {"mids": mids, "bodies": bodies}}, ensure_ascii=False)
+    log.info(
+        "overflow_to_summarize",
+        candidate_count=len(mids),
+        mckp_capacity=mckp_capacity,
+    )
+    return build_fsm_plain_to_stage(
+        msg,
+        to_addr=FsmStage.SUMMARIZE_CONTEXT,
+        from_stage=stage,
+        body=FsmTransitionPlainBody.parse(payload),
+        settings=config,
+    )
+
+
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
@@ -617,6 +644,18 @@ def main(
             message_id=mid_w.value if mid_w else None,
         )
     mckp_capacity = max(0, limit - budget_user - budget_extra)
+
+    if config.enrich.summarize_enabled and ctx.all_messages:
+        raw_weight = _estimate_msgs_weight(
+            ctx.all_messages, config.enrich.tool_observation_estimate_cap_chars
+        )
+        excess = raw_weight - mckp_capacity
+        if excess > config.enrich.summarize_trigger_min_excess_chars:
+            return _emit_summarize_overflow(
+                msg, stage, config=config, ctx=ctx,
+                mckp_capacity=mckp_capacity,
+            )
+
     mckp_priorities = {
         EnrichPartId.GRAPH_ANSWER: config.enrich.priority_graph,
         EnrichPartId.UNIFIED_MAIL_CONTEXT: config.enrich.priority_unified,

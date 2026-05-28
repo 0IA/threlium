@@ -353,3 +353,80 @@ def litellm_completion_sync(
         correlation_override=correlation_override,
     )
     return litellm_completion(**merged, stream=stream)
+
+
+def _site_call_kwargs(
+    settings: ThreliumSettings,
+    site: LitellmRoutingSite,
+    messages: list["LiteLlmChatMessage"],
+) -> tuple["LlmEndpoint", dict[str, object]]:
+    """Build LiteLLM kwargs from routing *site* — shared by sync/async helpers."""
+    from threlium.types import (
+        LiteLlmAcompletionKwargs as _Kw,
+        lite_llm_acompletion_to_dict as _to_dict,
+    )
+
+    ep = resolve_llm_endpoint(settings.litellm, site)
+    mr = ep.max_retries if ep.max_retries is not None else settings.litellm.max_retries
+    log.info("litellm_routing", site=site.value, score=ep.score)
+
+    call = _Kw(
+        model=ep.model,
+        messages=list(messages),
+        timeout=float(ep.timeout),
+        max_retries=mr,
+        api_key=ep.api_key,
+        api_base=ep.api_base,
+        max_tokens=ep.max_tokens,
+        chat_template_kwargs=ep.chat_template_kwargs or None,
+    )
+    return ep, _to_dict(call)
+
+
+def _extract_completion_text(resp: object) -> str:
+    from threlium.litellm_wire import require_chat_model_response as _require
+
+    mr = _require(resp)
+    choice = mr.choices[0]
+    msg_obj = choice.message
+    if msg_obj is not None:
+        raw_c = msg_obj.content
+        if isinstance(raw_c, str) and raw_c.strip():
+            return raw_c.strip()
+    return ""
+
+
+def litellm_site_completion_text(
+    settings: ThreliumSettings,
+    site: LitellmRoutingSite,
+    messages: list["LiteLlmChatMessage"],
+    *,
+    correlation_override: dict[str, str] | None = None,
+) -> str:
+    """Sync: resolve endpoint for *site*, call LLM, return stripped text."""
+    _, kwargs = _site_call_kwargs(settings, site, messages)
+    resp = litellm_completion_sync(
+        settings=settings,
+        **kwargs,
+        stream=False,
+        correlation_override=correlation_override,
+    )
+    return _extract_completion_text(resp)
+
+
+async def litellm_site_acompletion_text(
+    settings: ThreliumSettings,
+    site: LitellmRoutingSite,
+    messages: list["LiteLlmChatMessage"],
+    *,
+    correlation_override: dict[str, str] | None = None,
+) -> str:
+    """Async: resolve endpoint for *site*, call LLM, return stripped text."""
+    _, kwargs = _site_call_kwargs(settings, site, messages)
+    resp = await litellm_acompletion(
+        settings=settings,
+        **kwargs,
+        stream=False,
+        correlation_override=correlation_override,
+    )
+    return _extract_completion_text(resp)

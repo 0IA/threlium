@@ -15,6 +15,25 @@ import numpy as np
 from scipy.optimize import LinearConstraint, Bounds, milp
 
 from threlium.mime_reform import EnrichPartId
+from threlium.types import FsmStage
+
+# Стадии FSM-переходов, исключаемые из unified ``all_messages`` и классифицируемые как SERVICE.
+SERVICE_TRANSITION_STAGES: frozenset[FsmStage] = frozenset({
+    FsmStage.ENRICH,
+    FsmStage.ENRICH_FAST,
+    FsmStage.RESPONSE_OBSERVE,
+    FsmStage.RESPONSE_EDIT,
+    FsmStage.RESPONSE_APPEND,
+    FsmStage.REFLECT,
+    FsmStage.SUMMARIZE_CONTEXT,
+})
+
+_USER_INPUT_STAGES: frozenset[FsmStage] = frozenset({FsmStage.INGRESS})
+_AGENT_RESPONSE_STAGES: frozenset[FsmStage] = frozenset({
+    FsmStage.REASONING,
+    FsmStage.RESPONSE_FINALIZE,
+})
+_TOOL_OBSERVATION_STAGES: frozenset[FsmStage] = frozenset({FsmStage.CLI_EXEC})
 
 
 class ContextMessageType(StrEnum):
@@ -107,15 +126,17 @@ def _normalize_type_weights(weights: ContextMessageTypeWeights) -> ContextMessag
 
 
 def classify_message_type(msg: EmailMessage) -> ContextMessageType:
-    """Classify by To: header — единственное место определения типа для scoring."""
-    to_addr = (msg.get("To") or "").lower()
-    if "ingress" in to_addr:
+    """Classify by canonical ``To:`` FSM stage — единственное место определения типа для scoring."""
+    stage = FsmStage.try_from_incoming_to(msg)
+    if stage is None:
+        return ContextMessageType.SYSTEM
+    if stage in _USER_INPUT_STAGES:
         return ContextMessageType.USER_INPUT
-    if "reasoning" in to_addr or "response_finalize" in to_addr:
+    if stage in _AGENT_RESPONSE_STAGES:
         return ContextMessageType.AGENT_RESPONSE
-    if "cli_exec" in to_addr:
+    if stage in _TOOL_OBSERVATION_STAGES:
         return ContextMessageType.TOOL_OBSERVATION
-    if any(s in to_addr for s in ("enrich", "reflect", "response_observe", "enrich_fast")):
+    if stage in SERVICE_TRANSITION_STAGES:
         return ContextMessageType.SERVICE
     return ContextMessageType.SYSTEM
 

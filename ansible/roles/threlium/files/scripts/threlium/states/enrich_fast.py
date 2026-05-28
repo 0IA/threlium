@@ -68,7 +68,7 @@ def main(
         trimmed_summary,
     )
 
-    _RELAY_PART_IDS = frozenset({EnrichPartId.PLAN_STATE, EnrichPartId.MEMORY_NOTE})
+    _RELAY_PART_IDS = frozenset({EnrichPartId.PLAN_STATE, EnrichPartId.MEMORY_NOTE, EnrichPartId.OBSERVATION_NOTE})
     relayed: list[str] = []
     for part_id in _RELAY_PART_IDS:
         text = extract_part_by_content_id(msg, part_id)

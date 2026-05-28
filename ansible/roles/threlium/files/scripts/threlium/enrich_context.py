@@ -8,10 +8,9 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from threlium import nm
+from threlium.context_budget import SERVICE_TRANSITION_STAGES
 from threlium.logutil import logger
 from threlium.settings import ThreliumSettings
-
-log = logger.bind(stage="enrich_context")
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.mime_reform import email_message_from_path
 from threlium.types import (
@@ -20,10 +19,19 @@ from threlium.types import (
     NotmuchMessageIdInner,
     NotmuchQueryConnective,
     NotmuchQueryField,
+    NotmuchTag,
     RfcMessageIdWire,
 )
 
+log = logger.bind(stage="enrich_context")
+
 _HDR = MailHeaderName
+
+
+def _is_service_transition(m: EmailMessage) -> bool:
+    """True when the message is addressed to a SERVICE FSM transition stage."""
+    stage = FsmStage.try_from_incoming_to(m)
+    return stage is not None and stage in SERVICE_TRANSITION_STAGES
 
 
 def _sort_email_messages_oldest_first(msgs: list[EmailMessage]) -> list[EmailMessage]:
@@ -126,11 +134,19 @@ def build_unified_email_messages(
     for p in itertools.chain(tm_paths_chrono, gm_paths_chrono):
         memory_path_keys.add(str(p.resolve()))
 
+    summarized_q = NotmuchQueryConnective.join_and(
+        NotmuchQueryField.THREAD.term(thread_id),
+        NotmuchTag.CONTEXT_SUMMARIZED.as_tag_query_term(),
+    )
+    summarized_path_keys: set[str] = {
+        str(p.resolve()) for p in nm.message_paths(summarized_q, limit=None, sort_newest_first=False)
+    }
+
     ordered_paths: list[Path] = []
     seen: set[str] = set()
     for p in tail_paths_chrono:
         key = str(p.resolve())
-        if key in seen or key in memory_path_keys:
+        if key in seen or key in memory_path_keys or key in summarized_path_keys:
             continue
         seen.add(key)
         ordered_paths.append(p)
@@ -145,6 +161,8 @@ def build_unified_email_messages(
 
     by_mid: dict[str, EmailMessage] = {}
     for m in loaded:
+        if _is_service_transition(m):
+            continue
         k = _dedupe_mid_key(m) or f"__noid_{id(m)}"
         if k not in by_mid:
             by_mid[k] = m

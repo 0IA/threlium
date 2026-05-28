@@ -156,7 +156,10 @@ def _build_smtp_message(
         if h.lower() == _HDR.REFERENCES.lower():
             del smtp_msg[h]
     if refs_combined:
-        rs = truncate_rfc_references_wire(RfcReferencesWire.parse(refs_combined)).value.strip()
+        rs = truncate_rfc_references_wire(
+            RfcReferencesWire.parse(refs_combined),
+            max_len=config.egress.references_max_chars,
+        ).value.strip()
         if rs:
             smtp_msg[_HDR.REFERENCES] = rs
 

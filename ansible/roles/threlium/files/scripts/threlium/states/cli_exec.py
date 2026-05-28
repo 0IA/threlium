@@ -24,9 +24,6 @@ from threlium.types import (
 
 log = logger.bind(stage="cli_exec")
 
-_STDOUT_LIMIT = 8000
-_STDERR_LIMIT = 4000
-
 
 def _peek_cap_top(
     line: ThreliumCapabilitiesBudgetLine | None,
@@ -86,8 +83,8 @@ def main(
         )
         observation = (
             f"exit_code={result.returncode}\n"
-            f"stdout:\n{result.stdout[:_STDOUT_LIMIT]}\n"
-            f"stderr:\n{result.stderr[:_STDERR_LIMIT]}"
+            f"stdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
         )
     except subprocess.TimeoutExpired:
         observation = f"TIMEOUT after {config.cli.exec_timeout}s"

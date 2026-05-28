@@ -5,13 +5,10 @@
     - Tier 2: headers + truncated body (preview)
     - Tier 3: headers only (From/Date/Subject)
     When tier_assignments is empty, all messages render with full body (backwards-compatible).
-    Service messages (response_observe, response_edit, response_append, enrich,
-    enrich_fast, reflect) are collapsed to a single-line marker. -#}
+    Service transitions are excluded at collection level; service_stages is a safety fallback. -#}
 {% set body_preview_chars = preview_chars %}
 {% set total = total_messages %}
-{% set service_stages = ['response_observe@localhost', 'response_edit@localhost', 'response_append@localhost', 'enrich@localhost', 'enrich_fast@localhost', 'reflect@localhost'] %}
-{% set cli_stages = ['cli_exec@localhost'] %}
-{% set cli_truncate_lines = 5 %}
+{% set service_stages = service_stage_mailboxes | default([]) %}
 {% set t1_count = tier_assignments.values() | select('equalto', 1) | list | length if tier_assignments else 0 %}
 {% set t2_count = tier_assignments.values() | select('equalto', 2) | list | length if tier_assignments else 0 %}
 {% if tier_assignments and t1_count > 0 %}
@@ -22,20 +19,6 @@
 {% set tier = tier_assignments.get(loop.index0, 1) if tier_assignments else 1 %}
 {% if to_addr in service_stages %}
 --- message {{ loop.index }} [service: {{ to_addr.split('@')[0] }}] ---
-{% elif to_addr in cli_stages %}
---- message {{ loop.index }} [type: tool_observation, tool: cli_exec] ---
-Subject: {{ msg.get('Subject', '') }}
-{% set part = msg.get_body(preferencelist=('plain', 'html')) %}
-{% if part %}
-{% set lines = part.get_content().splitlines() %}
-{% if lines | length > cli_truncate_lines * 2 %}
-{{ lines[:cli_truncate_lines] | join('\n') }}
-... ({{ lines | length - cli_truncate_lines * 2 }} lines omitted) ...
-{{ lines[-cli_truncate_lines:] | join('\n') }}
-{% else %}
-{{ part.get_content() }}
-{% endif %}
-{% endif %}
 {% elif tier == 1 %}
 {% set msg_type = tier_assignments_types.get(loop.index0, 'system') if tier_assignments_types is defined else 'system' %}
 --- message {{ loop.index }} [type: {{ msg_type }}] ---

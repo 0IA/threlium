@@ -270,6 +270,7 @@ class RoutingTargets(BaseModel):
     reasoning: LlmSiteTarget = Field(default_factory=LlmSiteTarget, description="Маршрут стадии reasoning.")
     enrich_plan: LlmSiteTarget = Field(default_factory=LlmSiteTarget, description="Маршрут LLM плана enrich.")
     response_observe: LlmSiteTarget = Field(default_factory=LlmSiteTarget, description="Маршрут LLM суммаризации response_observe.")
+    summarize_context: LlmSiteTarget = Field(default_factory=LlmSiteTarget, description="Маршрут LLM суммаризации контекста (score 0).")
     lightrag_llm: LlmSiteTarget = Field(
         default_factory=LlmSiteTarget,
         description="Маршрут LLM внутри LightRAG (не embedding).",
@@ -307,6 +308,8 @@ def resolve_llm_endpoint(
         target = settings.targets.enrich_plan.target_score
     elif site == LitellmRoutingSite.RESPONSE_OBSERVE:
         target = settings.targets.response_observe.target_score
+    elif site == LitellmRoutingSite.SUMMARIZE_CONTEXT:
+        target = settings.targets.summarize_context.target_score
     else:
         target = settings.targets.lightrag_llm.target_score
 
@@ -603,6 +606,25 @@ class EnrichSettings(BaseModel):
     priority_global_mem: float = Field(default=3.0, description="Вес global_memory.")
     priority_extra: float = Field(default=5.0, description="Вес response_state + plan_state.")
 
+    tool_observation_estimate_cap_chars: int = Field(
+        default=500, ge=1,
+        description="Потолок символов тела tool_observation при оценке веса MCKP (не рендеринг).",
+    )
+    tier1_medium_ratio: int = Field(
+        default=2, ge=1,
+        description="Делитель tier1_full для MEDIUM-варианта unified MCKP (tier1_med = tier1_full // ratio).",
+    )
+
+    summarize_enabled: bool = Field(default=True, description="Включить LLM-суммаризацию при overflow unified.")
+    summarize_batch_max_messages: int = Field(
+        default=10, ge=1,
+        description="Макс. писем в одном батче суммаризации (JSON payload → summarize_context).",
+    )
+    summarize_trigger_min_excess_chars: int = Field(
+        default=500, ge=0,
+        description="Минимальный избыток символов для запуска суммаризации (порог overflow).",
+    )
+
     type_weight_user_input: float = Field(default=1.0, description="Вес ContextMessageType.USER_INPUT.")
     type_weight_agent_response: float = Field(default=0.7, description="Вес ContextMessageType.AGENT_RESPONSE.")
     type_weight_tool_observation: float = Field(default=0.5, description="Вес ContextMessageType.TOOL_OBSERVATION.")
@@ -665,6 +687,21 @@ class CliSettings(BaseModel):
         return s
 
 
+class KnowledgeSettings(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    logic_report_max_chars: int = Field(
+        default=4000,
+        ge=1,
+        description="Макс. символов pySHACL-отчёта / syntax error в observation logic_validate.",
+    )
+    observation_max_chars: int = Field(
+        default=180_000,
+        ge=0,
+        description="Макс. символов тела observation-note (memory_query answer и др.).",
+    )
+
+
 class HopSettings(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -689,6 +726,10 @@ class EgressSettings(BaseModel):
         default="agent@localhost",
         min_length=1,
         description="RFC5322 From для исходящей почты агента (egress_email). Пример: agent@localhost",
+    )
+    references_max_chars: int = Field(
+        default=8000, ge=100,
+        description="Макс. длина заголовка References (RFC truncation) в символах.",
     )
 
 
@@ -761,6 +802,7 @@ class ThreliumSettings(BaseSettings):
     lightrag: LightragSettings = Field(default_factory=LightragSettings)
     bridges: BridgesSettings = Field(default_factory=BridgesSettings)
     enrich: EnrichSettings = Field(default_factory=EnrichSettings)
+    knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
     cli: CliSettings = Field(default_factory=CliSettings)
     hop: HopSettings = Field(default_factory=HopSettings)
     cap: CapSettings = Field(default_factory=CapSettings)
@@ -786,6 +828,7 @@ class ThreliumSettings(BaseSettings):
         "lightrag",
         "bridges",
         "enrich",
+        "knowledge",
         "cli",
         "hop",
         "cap",
