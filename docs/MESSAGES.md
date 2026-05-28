@@ -120,7 +120,7 @@ Bridge / ingress не конструирует искусственных дом
 
 Результат: `<b62(…)@localhost>`. И внешний email, и internal FSM используют один маркер `@localhost`; различие только в содержимом поля `message_id` в JSON.
 
-Routing ответа (B) для SMTP: получатель и внешний `In-Reply-To` берутся из полей `EmailIngressRoute` (`origin`, `reply_target_rfc_message_id`), см. `egress_email`. Recovery (C) в email не нужна — IMAP не использует курсор уровня приложения вне `X-Threlium-Route`. Internal-сообщения наружу не уходят — egress для них не вызывается вовсе, а тредовые связи в FSM строятся `In-Reply-To`-заголовками между каноничными id.
+Routing ответа (B) для SMTP: получатель и внешний `In-Reply-To` берутся из полей `EmailIngressRoute` (`origin`, `reply_target_rfc_message_id`), см. `egress_email`. Recovery (C) в email — watermark IMAP UID: `imap_uid` / `imap_uidvalidity` доставленного письма хранятся в `EmailIngressRoute` (`X-Threlium-Route`); при рестарте мост берёт максимальный `imap_uid` из union-notmuch (`tag:route AND from:email@localhost`, непустой uid) и продолжает с `UID <uid+1>:*` (см. `IDENTITY_AND_CHECKPOINTS.md` § Email). Internal-сообщения наружу не уходят — egress для них не вызывается вовсе, а тредовые связи в FSM строятся `In-Reply-To`-заголовками между каноничными id.
 
 #### 2.2.2. Telegram — `TelegramIngressRoute` в `X-Threlium-Route`
 

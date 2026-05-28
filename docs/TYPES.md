@@ -138,7 +138,7 @@ class RfcInReplyToWire(_OptionalStripEmpty):
 
 Union `NativeId = EmailNativeId | TelegramNativeId | MatrixNativeId`. Все каналы (email, telegram, matrix) строят канонический `<b62@localhost>` через **единый** путь `RfcMessageIdWire.from_native(native: NativeId)` → `msgspec.json.encode` → `base62.encodebytes`. Канонический `<b62@localhost>` далее может занять любую роль в FSM-заголовках: `Message-ID`, `In-Reply-To`, `References`.
 
-`NativeId` содержит **только identity-поля** — минимальный набор, уникально идентифицирующий сообщение на стороне канала. Checkpoint-данные (`update_id` для Telegram, `sync_batch` / `reply_to_event_id` для Matrix) — только в `TelegramIngressRoute` / `MatrixIngressRoute`, не в `NativeId`. Фабрика `.from_route(r)` извлекает identity из маршрута, отбрасывая checkpoint.
+`NativeId` содержит **только identity-поля** — минимальный набор, уникально идентифицирующий сообщение на стороне канала. Checkpoint-данные (`update_id` для Telegram, `sync_batch` / `reply_to_event_id` для Matrix, `imap_uid` / `imap_uidvalidity` для email) — только в `TelegramIngressRoute` / `MatrixIngressRoute` / `EmailIngressRoute`, не в `NativeId`. Фабрика `.from_route(r)` извлекает identity из маршрута, отбрасывая checkpoint. Пара `(imap_uidvalidity, imap_uid)` email-моста опциональна (`int | None`): её ставит только IMAP-мост на ingress, у legacy / e2e писем ключи отсутствуют.
 
 **Контракт:** в `threlium.types` **нет** публичных функций `str → b62` / `b62 → str`. b62-кодек — только внутри VO-методов: `from_native` / `native_from_canonical_str` (для MID) и `from_ingress_route` / `to_ingress_route` (для route).
 

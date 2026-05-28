@@ -46,7 +46,7 @@ TelegramNativeId(v=1, chat_id=42, message_id=7, message_thread_id=None)
 |-----------|------|------------|
 | **Дискриминация** | `channel`, `v` | Выбор egress-канала |
 | **Identity** | `chat_id`+`message_id`+`message_thread_id` (TG), `room_id`+`event_id` (MX), `origin`+`reply_target_rfc_message_id` (email) | Маршрутизация ответа |
-| **Checkpoint** | `update_id` (TG), `sync_batch` (MX) | Восстановление позиции long-poll/sync |
+| **Checkpoint** | `update_id` (TG), `sync_batch` (MX), `imap_uid`+`imap_uidvalidity` (email) | Восстановление позиции long-poll/sync/IMAP-watermark |
 
 ### EmailIngressRoute
 
@@ -55,11 +55,13 @@ TelegramNativeId(v=1, chat_id=42, message_id=7, message_thread_id=None)
   "channel": "email",
   "origin": "user@example.com",
   "v": 1,
-  "reply_target_rfc_message_id": {"value": "<original-mid@mail.com>"}
+  "reply_target_rfc_message_id": {"value": "<original-mid@mail.com>"},
+  "imap_uid": 1234,
+  "imap_uidvalidity": 1779998802
 }
 ```
 
-Checkpoint-данных **нет**. Email-мост использует IMAP `\Seen` как внешний checkpoint (см. ниже).
+`imap_uid` / `imap_uidvalidity` — checkpoint INBOX моста (опциональны: `int | None`). Их ставит только IMAP-мост на ingress; у legacy / e2e писем ключи отсутствуют. Пара по RFC 3501/9051: UID монотонен и валиден лишь в связке с `UIDVALIDITY` папки (см. ниже § Email).
 
 ### TelegramIngressRoute
 
@@ -160,27 +162,29 @@ Matrix CS API гарантирует: `next_batch` — opaque pagination token; 
 
 **Если проект был остановлен:** события на homeserver сохраняются. При запуске `since=last_sync_batch` → инкрементальный sync с точки остановки. Если `sync_batch` нет (первый запуск или потеря индекса) → initial sync, дедупликация через notmuch.
 
-### Email: IMAP `\Seen` — внешний checkpoint
+### Email: `imap_uid` → IMAP UID watermark
 
-Email-мост **не хранит** checkpoint в `X-Threlium-Route`. Позицию хранит сам IMAP-сервер через флаг `\Seen`.
+Email-мост, как Telegram/Matrix, хранит checkpoint в `X-Threlium-Route`: `imap_uid` + `imap_uidvalidity` доставленного письма. Флаг `\Seen` больше не используется как позиция (Gmail помечает письма в прочитанном треде / self-mail как `\Seen` — `UNSEEN`-выборка их теряла).
 
 При старте процесса (`threlium-bridge@email.service`):
 
-1. Подключение к IMAP → `process_unseen_emails()` **до** первого IDLE
-2. `fetch(seen=False)` → все непрочитанные письма
-3. Для каждого: canonical wire MID → lookup в notmuch → если дубль → `\Seen` + skip
-4. Если новое → canonicalize → deliver (fdm) → `\Seen`
-5. Далее: `idle.wait(timeout=1740s)` → при событии → снова `process_unseen_emails()`
+1. Запрос notmuch: `tag:route AND from:email@localhost`, newest first → `EmailIngressRoute.imap_uid` / `imap_uidvalidity` первого письма с непустым uid (исходящие/legacy без uid пропускаются)
+2. `STATUS INBOX (UIDVALIDITY)`: если `imap_uidvalidity` не совпадает → watermark сбрасывается в `0` (полный хвост + notmuch-дедуп)
+3. `effective_start = max(checkpoint_uid, session_high_uid) + 1`; raw `UID SEARCH UID <effective_start>:*` (фильтр `>= effective_start` по возрастанию)
+4. Для каждого UID: canonical wire MID → lookup в notmuch → дубль → `\Seen` + skip; новое → canonicalize (`imap_uid`/`imap_uidvalidity` в Route) → deliver (fdm) → `\Seen`
+5. `idle.wait(timeout=1740s)` → при событии → снова `process_inbox_tail()` (переносит `session_high_uid`)
 
 ```
-Реализация: bridges/email.py → process_unseen_emails(), run_bridge()
+Реализация: bridges/email.py → process_inbox_tail(), run_bridge()
 
-    IMAP server               notmuch dedup           fdm
-    fetch(UNSEEN)  →  UID  →  wire MID exists?  →  deliver + \Seen
-                               yes → skip + \Seen
+    notmuch checkpoint        IMAP UID search          notmuch dedup        fdm
+    tag:route from:email  →  UID <wm+1>:*  →  UID  →  wire MID exists?  →  deliver + \Seen (uid в Route)
+    .imap_uid = wm                                     yes → skip + \Seen
 ```
 
-**Если проект был остановлен:** письма копятся на IMAP как `UNSEEN`. При запуске `process_unseen_emails()` вызывается первым (до IDLE) и обрабатывает весь backlog. Дедупликация через notmuch предотвращает повторную доставку.
+`session_high_uid` (в рамках сессии) двигается на **каждом** обработанном UID, включая `duplicate_skip`: `UID SEARCH` не фильтрует по `\Seen`, иначе дубли в хвосте крутились бы на каждом IDLE.
+
+**Если проект был остановлен:** письма копятся на IMAP. При запуске watermark = последний `imap_uid` из notmuch → `UID <wm+1>:*` забирает весь backlog. Дедупликация по `Message-ID` через notmuch предотвращает повторную доставку.
 
 ---
 

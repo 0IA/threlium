@@ -486,17 +486,20 @@ reasoning call: первый возвращает `tool_calls`, второй —
 | `/chat/completions` `071` entity chunk | `hasContext` + `lightrag_index_entity` + body `X-Threlium-LightRAG-Chunk` |
 | `/chat/completions` `055/056` naive chunk | `hasContext` + `lightrag_query_response` + body negative lookahead |
 | `/chat/completions` `060/061` kg chunk | `hasContext` + `lightrag_query_response` + body `Knowledge Graph Data` |
-| `/chat/completions` enrich plan (`080`) | composite `hasContext` + body хвоста плана (``Reply with ONLY…``, FSM, не lightrag) |
-| `/chat/completions` reasoning (`100`) | composite `hasContext` + phase properties (FSM)      |
+| `/chat/completions` enrich plan (`080`) | composite `hasContext` + body хвоста плана (``Reply with ONLY…``, `X-Threlium-Call-Site: fsm`) |
+| `/chat/completions` summarize_context | composite `hasContext` + `X-Threlium-Call-Site: summarize_context` (+ body якорь промпта) |
+| `/chat/completions` reasoning (`100`) | composite `hasContext` + phase properties (`X-Threlium-Call-Site: fsm`) |
 | `/sync` (matrix)      | Bootstrap, всегда отвечает; state `matrix_rooms` через `#each` |
 | `/getUpdates` (tg)    | `telegram_updates` list (response-template, без `listSizeMoreThan`) |
 | `room_send` (matrix)  | URL path (room_id)                                   |
 | `sendMessage` (tg)    | Request body (chat_id)                               |
 
-Гранулярные значения `X-Threlium-Call-Site` определяются в рантайме
+Гранулярные значения `X-Threlium-Call-Site` для LightRAG определяются в рантайме
 функцией `runners/lightrag._detect_lightrag_phase` по сигналам `llm_func`:
 `keyword_extraction`, `history_messages`, `system_prompt` — без инспекции
-prompt content. Enum — `LitellmCallSite` в `types/litellm_call_site.py`.
+prompt content. Стадия ``summarize_context`` выставляет ``summarize_context``
+явно в handler (как ``memory_query`` → ``lightrag_query``). Enum —
+`LitellmCallSite` в `types/litellm_call_site.py`.
 Body patterns `071/055/056/060/061` — из структуры документа (`X-Threlium-LightRAG-Chunk`)
 и KG контекста (`Knowledge Graph Data`), не из lightrag промптов — **безопасны**
 при редактировании промптов.
