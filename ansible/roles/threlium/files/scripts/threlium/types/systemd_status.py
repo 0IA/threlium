@@ -106,6 +106,27 @@ class SystemdStatusBody(_RequiredNonEmpty):
         return cls.require(name=_VO, raw=f"LightRAG: boot failed: {message}")
 
     @classmethod
+    def lightrag_bootstrap_indexing(cls, *, doc_count: int) -> Self:
+        return cls.require(
+            name=_VO,
+            raw=f"LightRAG: bootstrap indexing knowledge ({doc_count} docs)",
+        )
+
+    @classmethod
+    def lightrag_bootstrap_complete(cls, *, doc_count: int, elapsed_sec: float) -> Self:
+        return cls.require(
+            name=_VO,
+            raw=f"LightRAG: bootstrap complete ({doc_count} docs, {elapsed_sec:.0f}s)",
+        )
+
+    @classmethod
+    def lightrag_bootstrap_timeout(cls, *, timeout_sec: float) -> Self:
+        return cls.require(
+            name=_VO,
+            raw=f"LightRAG: bootstrap timed out after {timeout_sec:.0f}s (will resume on restart)",
+        )
+
+    @classmethod
     def lightrag_idle_no_pending(cls) -> Self:
         return cls.require(name=_VO, raw="LightRAG: idle (no pending)")
 

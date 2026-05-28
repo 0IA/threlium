@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
@@ -18,6 +19,7 @@ from threlium.systemd_notify import notify_status
 from threlium.types import LitellmRoutingSite
 from threlium.types.systemd_status import SystemdStatusBody
 
+from threlium.runners.lightrag._bootstrap import bootstrap_knowledge_dir
 from threlium.runners.lightrag._construction import build_rag, install_e2e_correlation_bridge
 from threlium.runners.lightrag._drain import schedule_on_loop, reset_drain_task
 
@@ -29,6 +31,7 @@ _rag_loop: asyncio.AbstractEventLoop | None = None
 _rag_thread: threading.Thread | None = None
 _daemon_rag: LightRAG | None = None
 _drain_lock: asyncio.Lock | None = None
+_bootstrap_task: asyncio.Task[None] | None = None
 _start_lock = threading.Lock()
 _ready_event = threading.Event()
 _boot_error: list[BaseException] = []
@@ -92,6 +95,85 @@ def run_rag_coroutine(
     return fut.result(timeout=timeout)
 
 
+def _bootstrap_timeout_sec(settings: ThreliumSettings) -> float | None:
+    """Дедлайн всей bootstrap-индексации (НЕ per-call LLM timeout). 0/неположит. — без лимита."""
+    v = float(settings.lightrag.bootstrap_timeout_sec)
+    return v if v > 0 else None
+
+
+async def _run_bootstrap_guarded(
+    rag: LightRAG,
+    settings: ThreliumSettings,
+    lock: asyncio.Lock,
+    correlation: dict[str, str] | None,
+) -> None:
+    """Фоновая bootstrap-индексация knowledge/ на RAG-loop (после ``notify_ready``).
+
+    Не валит engine: истечение ``bootstrap_timeout_sec`` или ошибка только логируются —
+    остаток доиндексируется на следующем старте (дедуп через ``doc_status``). Сериализация
+    с drain — общий ``lock`` (на каждый батч, внутри ``bootstrap_knowledge_dir``).
+    """
+    timeout = _bootstrap_timeout_sec(settings)
+    token = None
+    if settings.e2e.litellm_route_correlation and correlation is not None:
+        token = set_litellm_correlation_ctxvar(correlation)
+    t0 = time.monotonic()
+    try:
+        coro = bootstrap_knowledge_dir(rag, settings, lock=lock)
+        count = await (asyncio.wait_for(coro, timeout=timeout) if timeout is not None else coro)
+        elapsed = time.monotonic() - t0
+        if count > 0:
+            notify_status(
+                SystemdStatusBody.lightrag_bootstrap_complete(doc_count=count, elapsed_sec=elapsed)
+            )
+            log.info("bootstrap_knowledge_complete", docs=count, elapsed_sec=round(elapsed, 1))
+        else:
+            log.info("bootstrap_knowledge_empty", elapsed_sec=round(elapsed, 1))
+    except asyncio.CancelledError:
+        log.info("bootstrap_knowledge_cancelled")
+        raise
+    except asyncio.TimeoutError:
+        notify_status(SystemdStatusBody.lightrag_bootstrap_timeout(timeout_sec=timeout or 0.0))
+        log.error(
+            "bootstrap_knowledge_timeout",
+            timeout_sec=timeout,
+            elapsed_sec=round(time.monotonic() - t0, 1),
+        )
+    except BaseException as ex:
+        log.error("bootstrap_knowledge_failed", exc_info=ex)
+    finally:
+        if token is not None:
+            reset_litellm_correlation_ctxvar(token)
+
+
+def schedule_bootstrap_knowledge(
+    settings: ThreliumSettings,
+    *,
+    correlation: dict[str, str] | None = None,
+) -> None:
+    """Запланировать bootstrap knowledge/ на RAG-loop без блокировки старта engine.
+
+    Вызывать ПОСЛЕ ``notify_ready`` (sd_notify READY): systemd видит сервис готовым сразу,
+    а тяжёлая индексация идёт в фоне на выделенном loop с собственным длинным таймаутом.
+    """
+    global _bootstrap_task
+    if _rag_loop is None or _daemon_rag is None or _drain_lock is None:
+        log.warning("schedule_bootstrap_not_ready")
+        return
+    rag = _daemon_rag
+    lock = _drain_lock
+
+    def _spawn() -> None:
+        global _bootstrap_task
+        if _bootstrap_task is not None and not _bootstrap_task.done():
+            return
+        _bootstrap_task = asyncio.create_task(
+            _run_bootstrap_guarded(rag, settings, lock, correlation)
+        )
+
+    _rag_loop.call_soon_threadsafe(_spawn)
+
+
 def schedule_index_pending(settings: ThreliumSettings) -> None:
     """Запланировать drain pending на RAG-loop (после ``nm_settle``) без ожидания.
 
@@ -107,12 +189,13 @@ def schedule_index_pending(settings: ThreliumSettings) -> None:
 
 
 def _rag_thread_main(settings: ThreliumSettings) -> None:
-    global _rag_loop, _daemon_rag, _drain_lock
+    global _rag_loop, _daemon_rag, _drain_lock, _bootstrap_task
     notify_status(SystemdStatusBody.lightrag_thread_starting())
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     _rag_loop = loop
     _drain_lock = asyncio.Lock()
+    _bootstrap_task = None
     _boot_error.clear()
     try:
 
@@ -141,6 +224,7 @@ def _rag_thread_main(settings: ThreliumSettings) -> None:
             pass
         _rag_loop = None
         _drain_lock = None
+        _bootstrap_task = None
         reset_drain_task()
 
 
@@ -169,13 +253,14 @@ def start_rag_loop_thread(settings: ThreliumSettings) -> None:
 
 def stop_rag_loop_thread(*, settings: ThreliumSettings | None = None) -> None:
     """Остановить loop: cancel work-задач, ``finalize_storages``, ``loop.stop`` с MainThread."""
-    global _rag_thread, _daemon_rag, _drain_lock
+    global _rag_thread, _daemon_rag, _drain_lock, _bootstrap_task
     loop = _rag_loop
     th = _rag_thread
     if loop is None or th is None or not th.is_alive():
         _rag_thread = None
         _daemon_rag = None
         _drain_lock = None
+        _bootstrap_task = None
         return
     shutdown_timeout = _rag_loop_shutdown_timeout_sec(settings)
 
@@ -193,4 +278,5 @@ def stop_rag_loop_thread(*, settings: ThreliumSettings | None = None) -> None:
     _rag_thread = None
     _daemon_rag = None
     _drain_lock = None
+    _bootstrap_task = None
     reset_drain_task()

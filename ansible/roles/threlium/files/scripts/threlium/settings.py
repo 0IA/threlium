@@ -447,6 +447,16 @@ class LightragSettings(BaseModel):
             "Не путать с litellm LLM timeout."
         ),
     )
+    bootstrap_timeout_sec: float = Field(
+        default=1800.0,
+        gt=0,
+        description=(
+            "Дедлайн всей фоновой bootstrap-индексации knowledge/ при старте engine (сек). "
+            "Это wall-clock на весь корпус (десятки LLM/embed вызовов), а НЕ таймаут одного "
+            "completion (llm_endpoints[].timeout). Истечение не валит engine — задача фоновая, "
+            "остаток доиндексируется на следующем старте (дедуп через doc_status)."
+        ),
+    )
     prompts_overlay: bool = Field(
         default=True,
         description="Включить оверлей Jinja-промптов LightRAG из репозитория.",

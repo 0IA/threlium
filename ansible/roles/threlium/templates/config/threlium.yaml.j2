@@ -21,12 +21,12 @@ log_level: "{{ threlium_log_level }}"
 # litellm — маршрутизация LiteLLM (completion + embedding каталоги)
 # =============================================================================
 litellm:
-{{ threlium_litellm | to_nice_yaml(indent=2) | indent(2, first=true) }}
+{{ threlium_litellm_effective | to_nice_yaml(indent=2) | indent(2, first=true) }}
 # =============================================================================
 # lightrag — граф RAG, чанкинг, enrich/aquery
 # =============================================================================
 lightrag:
-{{ threlium_lightrag | to_nice_yaml(indent=2) | indent(2, first=true) }}
+{{ threlium_lightrag_effective | to_nice_yaml(indent=2) | indent(2, first=true) }}
 # =============================================================================
 # bridges — только каналы из threlium_channels
 # =============================================================================
@@ -41,12 +41,12 @@ bridges:
 # enrich — контекст для стадии enrich → reasoning
 # =============================================================================
 enrich:
-{{ threlium_enrich | to_nice_yaml(indent=2) | indent(2, first=true) }}
+{{ threlium_enrich_effective | to_nice_yaml(indent=2) | indent(2, first=true) }}
 # =============================================================================
 # knowledge — лимиты observation-note для knowledge-стадий
 # =============================================================================
 knowledge:
-{{ threlium_knowledge | to_nice_yaml(indent=2) | indent(2, first=true) }}
+{{ threlium_knowledge_effective | to_nice_yaml(indent=2) | indent(2, first=true) }}
 # =============================================================================
 # cli — песочница systemd-run для cli_exec
 # =============================================================================

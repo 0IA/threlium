@@ -21,14 +21,8 @@
           threlium_user должен быть задан и не равен 'root' (получено {{ threlium_user | default('(undefined)') }}).
       tags: [deploy, refresh]
 
-    - name: Merge user overrides with base defaults (partial override support)
-      ansible.builtin.set_fact:
-        threlium_litellm: "{{ _threlium_litellm_base | combine(threlium_litellm, recursive=True, list_merge='replace') }}"
-        threlium_lightrag: "{{ _threlium_lightrag_base | combine(threlium_lightrag, recursive=True, list_merge='replace') }}"
-        threlium_enrich: "{{ _threlium_enrich_base | combine(threlium_enrich, recursive=True, list_merge='replace') }}"
-        threlium_knowledge: "{{ _threlium_knowledge_base | combine(threlium_knowledge, recursive=True, list_merge='replace') }}"
-      tags: [deploy, refresh]
-
+    # Merge base ⊕ overrides вынесен в role-vars threlium_*_effective (vars/main.yml):
+    # set_fact в то же имя не работает при `-e @host_vars/<host>.yml` (extra-vars > set_fact).
     - name: Derive bridge readiness from channels and secrets
       ansible.builtin.import_tasks: tasks/bridge_readiness.yml
       tags: [deploy, refresh]

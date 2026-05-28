@@ -88,6 +88,7 @@ _threlium_lightrag_base:
   query_response_type: "Concise Bullet Points"
   enable_rerank: true
   rag_loop_shutdown_timeout_sec: 30
+  bootstrap_timeout_sec: 1800
   llm_max_tokens: 0
 
 _threlium_knowledge_base:
@@ -119,6 +120,17 @@ _threlium_enrich_base:
   summarize_enabled: true
   summarize_batch_max_messages: 10
   summarize_trigger_min_excess_chars: 500
+
+# Эффективная конфигурация = base ⊕ пользовательские overrides (host_vars / group_vars / -e).
+# Отдельные имена (*_effective) принципиальны: при запуске `ansible-playbook … -e @host_vars/<host>.yml`
+# переменные threlium_litellm / threlium_lightrag / threlium_enrich / threlium_knowledge приходят как
+# extra-vars (высший приоритет) — set_fact их НЕ перекрывает, поэтому merge нельзя писать обратно в то же
+# имя (ключи из *_base, отсутствующие в host_vars, терялись → в threlium.yaml попадал «сырой» host_vars).
+# Role-vars вычисляются лениво на момент использования в шаблоне: combine видит и base, и overrides.
+threlium_litellm_effective: "{{ _threlium_litellm_base | combine(threlium_litellm, recursive=True, list_merge='replace') }}"
+threlium_lightrag_effective: "{{ _threlium_lightrag_base | combine(threlium_lightrag, recursive=True, list_merge='replace') }}"
+threlium_enrich_effective: "{{ _threlium_enrich_base | combine(threlium_enrich, recursive=True, list_merge='replace') }}"
+threlium_knowledge_effective: "{{ _threlium_knowledge_base | combine(threlium_knowledge, recursive=True, list_merge='replace') }}"
 
 # Внутренний контракт: обязательные Jinja2-промпты (не user-facing настройка).
 threlium_required_prompts:

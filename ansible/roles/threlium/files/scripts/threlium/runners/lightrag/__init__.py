@@ -15,6 +15,7 @@
 from threlium.runners.lightrag._lifecycle import (
     daemon_lightrag,
     run_rag_coroutine,
+    schedule_bootstrap_knowledge,
     schedule_index_pending,
     start_rag_loop_thread,
     stop_rag_loop_thread,
@@ -23,6 +24,7 @@ from threlium.runners.lightrag._lifecycle import (
 __all__ = [
     "daemon_lightrag",
     "run_rag_coroutine",
+    "schedule_bootstrap_knowledge",
     "schedule_index_pending",
     "start_rag_loop_thread",
     "stop_rag_loop_thread",

@@ -8,13 +8,8 @@
   when: threlium_posix_home is not defined
   tags: [deploy, refresh]
   block:
-    - name: Merge user overrides with base defaults (partial override support)
-      ansible.builtin.set_fact:
-        threlium_litellm: "{{ _threlium_litellm_base | combine(threlium_litellm, recursive=True, list_merge='replace') }}"
-        threlium_lightrag: "{{ _threlium_lightrag_base | combine(threlium_lightrag, recursive=True, list_merge='replace') }}"
-        threlium_enrich: "{{ _threlium_enrich_base | combine(threlium_enrich, recursive=True, list_merge='replace') }}"
-        threlium_knowledge: "{{ _threlium_knowledge_base | combine(threlium_knowledge, recursive=True, list_merge='replace') }}"
-
+    # Merge base ⊕ overrides — в role-vars threlium_*_effective (vars/main.yml), не set_fact:
+    # при `-e @host_vars/<host>.yml` extra-vars перекрывают set_fact, ключи из *_base терялись.
     - name: Derive bridge readiness from channels and secrets
       ansible.builtin.import_tasks: bridge_readiness.yml
 

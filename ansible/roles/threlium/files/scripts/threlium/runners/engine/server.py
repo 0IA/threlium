@@ -9,7 +9,6 @@ import signal
 import socketserver
 import threading
 import traceback
-from pathlib import Path
 
 from threlium.logutil import setup_logging, shutdown_logging
 from threlium.prompts import init_prompts_root
@@ -28,9 +27,11 @@ from threlium.runners.engine.wire_io import (
     encode_wire_line,
     read_wire_line,
 )
-from threlium.runners.lightrag import start_rag_loop_thread, stop_rag_loop_thread
-from threlium.runners.lightrag._bootstrap import bootstrap_knowledge_dir
-from threlium.runners.lightrag import run_rag_coroutine, daemon_lightrag
+from threlium.runners.lightrag import (
+    schedule_bootstrap_knowledge,
+    start_rag_loop_thread,
+    stop_rag_loop_thread,
+)
 from threlium.systemd_notify import notify_ready, notify_status, notify_stopping
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 from threlium.types.litellm_call_site import LitellmCallSite
@@ -76,19 +77,12 @@ def main() -> None:
     notify_status(SystemdStatusBody.engine_starting_lightrag_loop())
     start_rag_loop_thread(GLOBAL_CFG)
 
-    rag = daemon_lightrag()
-    if rag is not None:
-        bootstrap_correlation: dict[str, str] | None = None
-        if GLOBAL_CFG.e2e.litellm_route_correlation:
-            bootstrap_correlation = {
-                LitellmCorrelationHeader.THREAD_ROOT_MID.value: "e2e-bootstrap",
-                LitellmCorrelationHeader.CALL_SITE.value: LitellmCallSite.LIGHTRAG_INDEX.value,
-            }
-        run_rag_coroutine(
-            bootstrap_knowledge_dir(rag, GLOBAL_CFG),
-            settings=GLOBAL_CFG,
-            correlation=bootstrap_correlation,
-        )
+    bootstrap_correlation: dict[str, str] | None = None
+    if GLOBAL_CFG.e2e.litellm_route_correlation:
+        bootstrap_correlation = {
+            LitellmCorrelationHeader.THREAD_ROOT_MID.value: "e2e-bootstrap",
+            LitellmCorrelationHeader.CALL_SITE.value: LitellmCallSite.LIGHTRAG_INDEX.value,
+        }
 
     sock_path = engine_socket_path(GLOBAL_CFG.home)
     notify_status(SystemdStatusBody.engine_preparing_socket(sock_path))
@@ -134,6 +128,9 @@ def main() -> None:
     notify_status(SystemdStatusBody.engine_listening_on(sock_path))
     notify_ready()
     notify_status(SystemdStatusBody.engine_idle_waiting_fsm_requests())
+    # Индексация knowledge/ — ПОСЛЕ READY: не блокирует старт под Type=notify и не падает
+    # по per-call LLM timeout. Фоновая задача на RAG-loop со своим bootstrap_timeout_sec.
+    schedule_bootstrap_knowledge(GLOBAL_CFG, correlation=bootstrap_correlation)
     try:
         server.serve_forever()
     finally:
