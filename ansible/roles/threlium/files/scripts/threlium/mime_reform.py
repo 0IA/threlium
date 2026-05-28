@@ -41,6 +41,7 @@ class EnrichPartId(StrEnum):
     RESPONSE_STATE = "<response-state>"
     PLAN_STATE = "<plan-state>"
     MEMORY_NOTE = "<memory-note>"
+    OBSERVATION_NOTE = "<observation-note>"
 
 _HDR = MailHeaderName
 

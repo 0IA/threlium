@@ -29,7 +29,11 @@ from threlium.runners.engine.wire_io import (
     read_wire_line,
 )
 from threlium.runners.lightrag import start_rag_loop_thread, stop_rag_loop_thread
+from threlium.runners.lightrag._bootstrap import bootstrap_knowledge_dir
+from threlium.runners.lightrag import run_rag_coroutine, daemon_lightrag
 from threlium.systemd_notify import notify_ready, notify_status, notify_stopping
+from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
+from threlium.types.litellm_call_site import LitellmCallSite
 from threlium.types.systemd_status import SystemdStatusBody
 
 
@@ -71,6 +75,20 @@ def main() -> None:
     notify_status(SystemdStatusBody.engine_config_loaded())
     notify_status(SystemdStatusBody.engine_starting_lightrag_loop())
     start_rag_loop_thread(GLOBAL_CFG)
+
+    rag = daemon_lightrag()
+    if rag is not None:
+        bootstrap_correlation: dict[str, str] | None = None
+        if GLOBAL_CFG.e2e.litellm_route_correlation:
+            bootstrap_correlation = {
+                LitellmCorrelationHeader.THREAD_ROOT_MID.value: "e2e-bootstrap",
+                LitellmCorrelationHeader.CALL_SITE.value: LitellmCallSite.LIGHTRAG_INDEX.value,
+            }
+        run_rag_coroutine(
+            bootstrap_knowledge_dir(rag, GLOBAL_CFG),
+            settings=GLOBAL_CFG,
+            correlation=bootstrap_correlation,
+        )
 
     sock_path = engine_socket_path(GLOBAL_CFG.home)
     notify_status(SystemdStatusBody.engine_preparing_socket(sock_path))

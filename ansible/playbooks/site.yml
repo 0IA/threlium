@@ -26,6 +26,7 @@
         threlium_litellm: "{{ _threlium_litellm_base | combine(threlium_litellm, recursive=True, list_merge='replace') }}"
         threlium_lightrag: "{{ _threlium_lightrag_base | combine(threlium_lightrag, recursive=True, list_merge='replace') }}"
         threlium_enrich: "{{ _threlium_enrich_base | combine(threlium_enrich, recursive=True, list_merge='replace') }}"
+        threlium_knowledge: "{{ _threlium_knowledge_base | combine(threlium_knowledge, recursive=True, list_merge='replace') }}"
       tags: [deploy, refresh]
 
     - name: Derive bridge readiness from channels and secrets
@@ -217,6 +218,7 @@
         - stages
         - prompts
         - config
+        - knowledge
       tags: [deploy, refresh]
 
     - name: Ensure Maildir parent directories exist
@@ -403,6 +405,62 @@
           delegate_to: localhost
           become: false
           when: threlium_prompts_bundle_tmp.path is defined
+
+    - name: Deploy knowledge base files (bootstrap content for LightRAG)
+      tags: [deploy, refresh]
+      block:
+        - name: Temp path for knowledge tarball (controller)
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .tar.gz
+          delegate_to: localhost
+          become: false
+          register: threlium_knowledge_bundle_tmp
+
+        - name: Pack role files/knowledge into tarball (controller)
+          ansible.builtin.command:
+            argv:
+              - tar
+              - -czf
+              - "{{ threlium_knowledge_bundle_tmp.path }}"
+              - -C
+              - "{{ playbook_dir }}/../roles/threlium/files/knowledge"
+              - .
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+        - name: Unpack knowledge files on target
+          ansible.builtin.unarchive:
+            src: "{{ threlium_knowledge_bundle_tmp.path }}"
+            dest: "{{ threlium_home }}/knowledge/"
+            remote_src: false
+            owner: "{{ threlium_user }}"
+            group: "{{ threlium_user }}"
+
+        - name: Ensure threlium owns knowledge tree after unpack
+          ansible.builtin.file:
+            path: "{{ threlium_home }}/knowledge"
+            state: directory
+            owner: "{{ threlium_user }}"
+            group: "{{ threlium_user }}"
+            recurse: true
+
+        - name: Normalise knowledge tree (dirs 0755, files 0644)
+          ansible.builtin.shell: |
+            find "{{ threlium_home }}/knowledge" -type d -exec chmod 0755 {} +
+            find "{{ threlium_home }}/knowledge" -type f -exec chmod 0644 {} +
+          args:
+            executable: /bin/bash
+          changed_when: true
+      always:
+        - name: Remove knowledge tarball temp (controller)
+          ansible.builtin.file:
+            path: "{{ threlium_knowledge_bundle_tmp.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          when: threlium_knowledge_bundle_tmp.path is defined
 
     - name: Deploy threlium.yaml (unified config)
       ansible.builtin.template:

@@ -1,0 +1,37 @@
+{
+  "id": "b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6e",
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Thread-Root": {
+        "equalTo": "e2e-bootstrap"
+      },
+      "X-Threlium-Call-Site": {
+        "matches": "lightrag_index_entity|lightrag_index_gleaning|lightrag_index_summarize"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-e2e-bootstrap-knowledge",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "stop",
+          "message": {
+            "role": "assistant",
+            "content": "entity<|#|>E2e Bootstrap Entity<|#|>concept<|#|>Synthetic entity from knowledge bootstrap indexing.<|COMPLETE|>"
+          }
+        }
+      ]
+    }
+  }
+}

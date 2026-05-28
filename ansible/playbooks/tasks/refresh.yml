@@ -13,6 +13,7 @@
         threlium_litellm: "{{ _threlium_litellm_base | combine(threlium_litellm, recursive=True, list_merge='replace') }}"
         threlium_lightrag: "{{ _threlium_lightrag_base | combine(threlium_lightrag, recursive=True, list_merge='replace') }}"
         threlium_enrich: "{{ _threlium_enrich_base | combine(threlium_enrich, recursive=True, list_merge='replace') }}"
+        threlium_knowledge: "{{ _threlium_knowledge_base | combine(threlium_knowledge, recursive=True, list_merge='replace') }}"
 
     - name: Derive bridge readiness from channels and secrets
       ansible.builtin.import_tasks: bridge_readiness.yml
