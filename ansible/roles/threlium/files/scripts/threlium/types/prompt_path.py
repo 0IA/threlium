@@ -28,6 +28,9 @@ class PromptPath(StrEnum):
 
     CLI_EXEC_OBSERVATION = "cli_exec/observation.j2"
 
+    LOGIC_VALIDATE_OBSERVATION = "logic_validate/observation.j2"
+    MEMORY_QUERY_OBSERVATION = "memory_query/observation.j2"
+
     EGRESS_SELF_ARCHIVE_SUBJECT = "egress/self_archive_subject.j2"
     EGRESS_SELF_ARCHIVE_BODY = "egress/self_archive_body.j2"
 
@@ -98,6 +101,13 @@ class PromptPath(StrEnum):
     REASONING_RESPONSE_FINALIZE_EMAIL_SUBJECT = "reasoning/response_finalize/email_subject.j2"
     REASONING_RESPONSE_FINALIZE_EMAIL_BODY = "reasoning/response_finalize/email_body.j2"
 
+    REASONING_LOGIC_VALIDATE_TOOL_SPEC = "reasoning/logic_validate/tool_spec.j2"
+    REASONING_LOGIC_VALIDATE_EMAIL_SUBJECT = "reasoning/logic_validate/email_subject.j2"
+    REASONING_LOGIC_VALIDATE_EMAIL_BODY = "reasoning/logic_validate/email_body.j2"
+    REASONING_MEMORY_QUERY_TOOL_SPEC = "reasoning/memory_query/tool_spec.j2"
+    REASONING_MEMORY_QUERY_EMAIL_SUBJECT = "reasoning/memory_query/email_subject.j2"
+    REASONING_MEMORY_QUERY_EMAIL_BODY = "reasoning/memory_query/email_body.j2"
+
     INGRESS_RESPONSE_NOT_FORMED = "ingress/response_not_formed.j2"
 
     RESPONSE_OBSERVE_STATE_SUMMARY = "response_observe/state_summary.j2"
@@ -110,6 +120,9 @@ class PromptPath(StrEnum):
 
     RESPONSE_EDIT_ERROR_INVALID_BODY = "response_edit/error_invalid_body.j2"
     RESPONSE_EDIT_ERROR_INVALID_POSITION = "response_edit/error_invalid_position.j2"
+
+    SUMMARIZE_CONTEXT_SYSTEM = "summarize_context/system.j2"
+    SUMMARIZE_CONTEXT_USER = "summarize_context/user.j2"
 
     RUNNERS_LIGHTRAG_ADDON_PARAMS = "runners/lightrag/addon_params.j2"
 
@@ -167,6 +180,8 @@ _REASONING_ROUTE_STAGES: frozenset[FsmStage] = frozenset(
         FsmStage.RESPONSE_EDIT,
         FsmStage.RESPONSE_OBSERVE,
         FsmStage.RESPONSE_FINALIZE,
+        FsmStage.LOGIC_VALIDATE,
+        FsmStage.MEMORY_QUERY,
     }
 )
 
@@ -180,6 +195,8 @@ REASONING_TOOL_SPEC_BY_STAGE: dict[FsmStage, PromptPath] = {
     FsmStage.RESPONSE_EDIT: PromptPath.REASONING_RESPONSE_EDIT_TOOL_SPEC,
     FsmStage.RESPONSE_OBSERVE: PromptPath.REASONING_RESPONSE_OBSERVE_TOOL_SPEC,
     FsmStage.RESPONSE_FINALIZE: PromptPath.REASONING_RESPONSE_FINALIZE_TOOL_SPEC,
+    FsmStage.LOGIC_VALIDATE: PromptPath.REASONING_LOGIC_VALIDATE_TOOL_SPEC,
+    FsmStage.MEMORY_QUERY: PromptPath.REASONING_MEMORY_QUERY_TOOL_SPEC,
 }
 
 REASONING_EMAIL_SUBJECT_BY_STAGE: dict[FsmStage, PromptPath] = {
@@ -192,6 +209,8 @@ REASONING_EMAIL_SUBJECT_BY_STAGE: dict[FsmStage, PromptPath] = {
     FsmStage.RESPONSE_EDIT: PromptPath.REASONING_RESPONSE_EDIT_EMAIL_SUBJECT,
     FsmStage.RESPONSE_OBSERVE: PromptPath.REASONING_RESPONSE_OBSERVE_EMAIL_SUBJECT,
     FsmStage.RESPONSE_FINALIZE: PromptPath.REASONING_RESPONSE_FINALIZE_EMAIL_SUBJECT,
+    FsmStage.LOGIC_VALIDATE: PromptPath.REASONING_LOGIC_VALIDATE_EMAIL_SUBJECT,
+    FsmStage.MEMORY_QUERY: PromptPath.REASONING_MEMORY_QUERY_EMAIL_SUBJECT,
 }
 
 REASONING_EMAIL_BODY_BY_STAGE: dict[FsmStage, PromptPath] = {
@@ -204,6 +223,8 @@ REASONING_EMAIL_BODY_BY_STAGE: dict[FsmStage, PromptPath] = {
     FsmStage.RESPONSE_EDIT: PromptPath.REASONING_RESPONSE_EDIT_EMAIL_BODY,
     FsmStage.RESPONSE_OBSERVE: PromptPath.REASONING_RESPONSE_OBSERVE_EMAIL_BODY,
     FsmStage.RESPONSE_FINALIZE: PromptPath.REASONING_RESPONSE_FINALIZE_EMAIL_BODY,
+    FsmStage.LOGIC_VALIDATE: PromptPath.REASONING_LOGIC_VALIDATE_EMAIL_BODY,
+    FsmStage.MEMORY_QUERY: PromptPath.REASONING_MEMORY_QUERY_EMAIL_BODY,
 }
 
 assert set(REASONING_TOOL_SPEC_BY_STAGE.keys()) == _REASONING_ROUTE_STAGES, (

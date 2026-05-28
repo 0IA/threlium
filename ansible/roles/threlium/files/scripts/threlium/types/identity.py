@@ -82,11 +82,24 @@ TNative = TypeVar("TNative", EmailNativeId, TelegramNativeId, MatrixNativeId)
 
 
 class EmailIngressRoute(msgspec.Struct, frozen=True):
+    """Маршрут email-ingress; ``imap_uid`` / ``imap_uidvalidity`` — checkpoint INBOX.
+
+    Аналогично ``update_id`` (Telegram) / ``sync_batch`` (Matrix) checkpoint-данные живут
+    здесь, не в ``EmailNativeId``. Пара ``(imap_uidvalidity, imap_uid)`` по RFC 3501/9051:
+    UID монотонен и уникален только в связке с ``UIDVALIDITY`` папки; при смене validity
+    UID переназначаются. Заполняются только мостом на ingress (после IMAP fetch); для
+    e2e / legacy-писем — отсутствуют (``None``).
+    """
+
     channel: NonEmptyStr
     origin: NonEmptyStr
     v: int = 1
     #: RFC ``Message-ID`` этого входного письма (внешний контур), для SMTP ``In-Reply-To`` на ответ агента.
     reply_target_rfc_message_id: ExternalRfcMidWire | None = None
+    #: IMAP UID письма в INBOX моста (watermark для выборки ``UID <uid+1>:*``).
+    imap_uid: int | None = None
+    #: ``UIDVALIDITY`` папки INBOX на момент fetch (пара к ``imap_uid`` по RFC 3501).
+    imap_uidvalidity: int | None = None
 
 
 class TelegramIngressRoute(msgspec.Struct, frozen=True):

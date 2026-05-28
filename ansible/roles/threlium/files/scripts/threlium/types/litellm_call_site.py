@@ -19,6 +19,7 @@ class LitellmCallSite(StrEnum):
     """
 
     FSM = "fsm"
+    SUMMARIZE_CONTEXT = "summarize_context"
 
     LIGHTRAG_INDEX = "lightrag_index"
     LIGHTRAG_INDEX_ENTITY = "lightrag_index_entity"

@@ -36,6 +36,10 @@ class FsmStage(StrEnum):
     EGRESS_EMAIL = "egress_email"
     EGRESS_TELEGRAM = "egress_telegram"
     EGRESS_MATRIX = "egress_matrix"
+    LOGIC_VALIDATE = "logic_validate"
+    MEMORY_QUERY = "memory_query"
+    SUMMARIZE_CONTEXT = "summarize_context"
+    SUMMARIZE_MEMORY = "summarize_memory"
     ARCHIVE = "archive"
 
     @property
@@ -102,3 +106,21 @@ class FsmStage(StrEnum):
                 f"FSM-инвариант нарушен: пустая локальная часть To:={email_addr!r}"
             )
         return cls.parse(local)
+
+    @classmethod
+    def try_from_incoming_to(cls, msg: EmailMessage) -> Self | None:
+        """Как :meth:`from_incoming_to`, но ``None`` если ``To:`` не ровно одна FSM-стадия @localhost."""
+        tos = msg.get_all(_HDR.TO, [])
+        addrs = [a for _, a in getaddresses(tos) if a]
+        if len(addrs) != 1:
+            return None
+        email_addr = addrs[0]
+        if "@" not in email_addr:
+            return None
+        local, domain = email_addr.split("@", 1)
+        if domain != "localhost" or "+" in local or not local.strip():
+            return None
+        try:
+            return cls.parse(local)
+        except ValueError:
+            return None

@@ -38,6 +38,7 @@ from .fsm_strings import (
     EnrichGlobalMemoryText,
     EnrichGraphAnswerText,
     EnrichLightragQuestionSubjectLine,
+    EnrichObservationNoteText,
     EnrichThreadMemoryText,
     EnrichUnifiedMailContextText,
     FsmPlainToStageSubjectLine,
@@ -141,10 +142,12 @@ from .reasoning_tool_args import (
     CliIntentToolArgs,
     EgressRouterToolArgs,
     GlobalMemoryToolArgs,
+    MemoryQueryToolArgs,
     ReasoningToolRouteArgs,
     ReflectToolArgs,
     ResponseAppendToolArgs,
     ResponseEditToolArgs,
+    LogicValidateToolArgs,
     ResponseFinalizeToolArgs,
     ResponseObserveToolArgs,
     SubagentIntentToolArgs,
@@ -165,6 +168,12 @@ from .rfc import (
     truncate_rfc_references_wire,
 )
 from .systemd_status import SystemdStatusBody
+from .knowledge_stage import (
+    LogicInferenceMode,
+    LogicValidateReportText,
+    LogicValidateStagePayload,
+    MemoryQueryStagePayload,
+)
 
 __all__ = [
     "BridgeEmailSubjectLine",
@@ -230,9 +239,12 @@ __all__ = [
     "MatrixSyncBatchCursor",
     "MatrixSpaceV1",
     "matrix_space_from_room_id",
+    "MemoryQueryStagePayload",
+    "MemoryQueryToolArgs",
     "MessageIdHeaderNormalizationInput",
     "EnrichGlobalMemoryText",
     "EnrichGraphAnswerText",
+    "EnrichObservationNoteText",
     "EnrichThreadMemoryText",
     "EnrichUnifiedMailContextText",
     "NonEmptyStr",
@@ -273,6 +285,10 @@ __all__ = [
     "RfcSubjectWire",
     "RfcToWire",
     "SubagentIntentToolArgs",
+    "LogicInferenceMode",
+    "LogicValidateReportText",
+    "LogicValidateStagePayload",
+    "LogicValidateToolArgs",
     "SystemdStatusBody",
     "TelegramBridgeInboundCaptionOrText",
     "TelegramIngressRoute",

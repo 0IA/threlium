@@ -9,6 +9,8 @@ from typing import Union
 
 import msgspec
 
+from .knowledge_stage import LogicInferenceMode
+
 
 class EgressRouterToolArgs(msgspec.Struct, frozen=True):
     subject: str
@@ -64,6 +66,19 @@ class ResponseFinalizeToolArgs(msgspec.Struct, frozen=True):
     content: str | None = None
 
 
+class LogicValidateToolArgs(msgspec.Struct, frozen=True):
+    reasoning: str
+    shapes_ttl: str
+    facts_ttl: str
+    ontology_ttl: str | None = None
+    inference: LogicInferenceMode | None = None
+
+
+class MemoryQueryToolArgs(msgspec.Struct, frozen=True):
+    reasoning: str
+    query: str
+
+
 ReasoningToolRouteArgs = Union[
     CliIntentToolArgs,
     ThreadMemoryToolArgs,
@@ -74,6 +89,8 @@ ReasoningToolRouteArgs = Union[
     ResponseEditToolArgs,
     ResponseObserveToolArgs,
     ResponseFinalizeToolArgs,
+    LogicValidateToolArgs,
+    MemoryQueryToolArgs,
 ]
 
 
@@ -87,6 +104,8 @@ _REASONING_ROUTE_STRUCTS: dict[str, type[msgspec.Struct]] = {
     "response_edit": ResponseEditToolArgs,
     "response_observe": ResponseObserveToolArgs,
     "response_finalize": ResponseFinalizeToolArgs,
+    "logic_validate": LogicValidateToolArgs,
+    "memory_query": MemoryQueryToolArgs,
 }
 
 
@@ -102,6 +121,8 @@ __all__ = [
     "CliIntentToolArgs",
     "EgressRouterToolArgs",
     "GlobalMemoryToolArgs",
+    "LogicValidateToolArgs",
+    "MemoryQueryToolArgs",
     "ReasoningToolRouteArgs",
     "ReflectToolArgs",
     "ResponseAppendToolArgs",

@@ -14,6 +14,7 @@ class NotmuchTag(StrEnum):
     UNREAD = "unread"
     ROUTE = "route"
     LIGHTRAG_INDEXED = "lightrag_indexed"
+    CONTEXT_SUMMARIZED = "context_summarized"
     ERROR = "error"
 
     def as_tag_query_term(self) -> str:

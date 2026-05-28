@@ -64,3 +64,7 @@ class FsmTransitionPlainBody(_OptionalStripEmpty):
 
 class FsmTransitionPlainSubjectLine(_OptionalStripEmpty):
     """Исходящий Subject для ``build_fsm_plain_to_stage`` (strip на границе; длина для RFC822 режется в билдере)."""
+
+
+class EnrichObservationNoteText(_OptionalStripEmpty):
+    """Текст MIME-части <observation-note> (logic_validate / memory_query → enrich_fast)."""

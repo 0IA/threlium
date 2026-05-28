@@ -35,6 +35,14 @@ class NotmuchMessageIdInner(msgspec.Struct, frozen=True):
         return cls(inner)
 
     @classmethod
+    def parse(cls, raw: str | None) -> Self:
+        """Сырой заголовок / inner-строка → inner; пусто после нормализации → ``ValueError``."""
+        out = cls.from_optional_raw(raw)
+        if out is None:
+            raise ValueError("NotmuchMessageIdInner.parse: empty after normalize")
+        return out
+
+    @classmethod
     def from_present_mid_header_wire(cls, wire: _PresentMidHeaderWire) -> Self:
         """Present ``RfcMessageIdWire`` / ``RfcInReplyToWire`` → inner (без распаковки у вызывающего)."""
         out = cls.from_optional_raw(wire.value)
