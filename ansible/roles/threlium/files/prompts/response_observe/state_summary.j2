@@ -1,0 +1,17 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    State summary for enrich_fast <response-state> MIME part.
+    Variables: is_empty (bool), live_count (int), total_chars (int),
+              chunks (list of {position: int, content: str|None, deleted: bool}). -#}
+{% if is_empty -%}
+Response buffer is empty.
+{%- else -%}
+Response buffer ({{ live_count }} chunks, ~{{ total_chars }} chars):
+{% for chunk in chunks -%}
+{% if chunk.deleted -%}
+[{{ chunk.position }}] [DELETED]
+{%- else -%}
+[{{ chunk.position }}] {{ chunk.content | replace("\n", " ") }}
+{%- endif %}
+{% endfor -%}
+{%- endif %}

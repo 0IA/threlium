@@ -1,0 +1,1107 @@
+---
+# Threlium — один сценарий: от пакетов до приёмки (docs/ARCHITECTURE.md)
+- name: Threlium full deploy
+  hosts: threlium_hosts
+  gather_facts: true
+  roles:
+    - role: threlium
+  # Задачи ниже не в tasks роли: модуль template ищет src относительно playbooks/, не roles/*/templates/.
+  vars:
+    threlium_role_templates: "{{ playbook_dir | dirname }}/roles/threlium/templates"
+  tasks:
+    # Задачи с tags: [deploy, refresh] — узкий sync при --tags refresh: файлы/env/шаблоны агента;
+    # без apt (в т.ч. update_cache, репозитории), без pip/venv, без почтового веб-стека — всё это только deploy (§12.2).
+    - name: Assert threlium_user defined and not root
+      ansible.builtin.assert:
+        that:
+          - threlium_user is defined
+          - threlium_user | trim | length > 0
+          - threlium_user != 'root'
+        fail_msg: >-
+          threlium_user должен быть задан и не равен 'root' (получено {{ threlium_user | default('(undefined)') }}).
+      tags: [deploy, refresh]
+
+    - name: Merge user overrides with base defaults (partial override support)
+      ansible.builtin.set_fact:
+        threlium_litellm: "{{ _threlium_litellm_base | combine(threlium_litellm, recursive=True, list_merge='replace') }}"
+        threlium_lightrag: "{{ _threlium_lightrag_base | combine(threlium_lightrag, recursive=True, list_merge='replace') }}"
+        threlium_enrich: "{{ _threlium_enrich_base | combine(threlium_enrich, recursive=True, list_merge='replace') }}"
+      tags: [deploy, refresh]
+
+    - name: Derive bridge readiness from channels and secrets
+      ansible.builtin.import_tasks: tasks/bridge_readiness.yml
+      tags: [deploy, refresh]
+
+    - name: Install Threlium OS packages (Debian/Ubuntu)
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - fdm
+          - msmtp
+          - msmtp-mta
+          - mc
+          - notmuch
+          - python3-notmuch2
+          - curl
+          - git
+          - python3
+          - python3-venv
+          - python3-pip
+          - socat
+          - jq
+          - sudo
+        state: present
+      become: true
+      tags: [deploy]
+
+    - name: Assert mail stack binaries exist
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /usr/bin/fdm
+      register: threlium_mail_bin_stat
+      tags: [deploy]
+
+    - name: Assert mail stack binaries are executable
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.executable | default(false)
+        fail_msg: "Ожидается исполняемый файл {{ item.item }}"
+      loop: "{{ threlium_mail_bin_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy]
+
+    - name: Assert system Python for venv (LightRAG / LiteLLM, см. docs/INDEX.md §11)
+      ansible.builtin.stat:
+        path: /usr/bin/python3
+      register: threlium_system_py_stat
+      tags: [deploy]
+
+    - name: Assert system Python interpreter is available
+      ansible.builtin.assert:
+        that:
+          - threlium_system_py_stat.stat.exists | default(false)
+          - threlium_system_py_stat.stat.executable | default(false)
+        fail_msg: >-
+          Установите метапакеты python3 и python3-venv; ожидается исполняемый /usr/bin/python3.
+      tags: [deploy]
+
+    - name: Assert default python3 meets pyproject (>=3.11)
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)
+      changed_when: false
+      tags: [deploy]
+
+    # --- Agent user + path derivation ---
+
+    # Группа sudo: политика sudoers по умолчанию (%sudo) + Cockpit «Административный доступ».
+    - name: Create agent UNIX user
+      ansible.builtin.user:
+        name: "{{ threlium_user }}"
+        create_home: true
+        groups:
+          - mail
+          - sudo
+          # journalctl / Cockpit «Logs» без root: systemd-journal; adm — чтение части /var/log.
+          - systemd-journal
+          - adm
+        append: true
+      become: true
+      tags: [deploy]
+
+    - name: Derive agent paths from POSIX home (getent)
+      ansible.builtin.import_tasks: tasks/derive_agent_paths.yml
+      tags: [deploy, refresh]
+
+    # Пока движок/мосты/worker крутятся, copy/template/pip в agent tree небезопасны.
+    - name: Проверить user runtime (systemd --user после linger / сессии)
+      ansible.builtin.stat:
+        path: "/run/user/{{ threlium_user_uid }}"
+      register: threlium_user_runtime_dir_stat
+      tags: [deploy, refresh]
+
+    - name: Остановить Threlium user units до синхронизации репозитория/данных
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        scope: user
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+      when: threlium_user_runtime_dir_stat.stat.exists | default(false)
+      loop: >-
+        {{
+          (['threlium-bridge@email.service'] if (threlium_email_bridge_creds_ok | default(false) | bool) else [])
+          + (['threlium-bridge@telegram.service'] if (threlium_telegram_bridge_creds_ok | default(false) | bool) else [])
+          + (['threlium-bridge@matrix.service'] if (threlium_matrix_bridge_creds_ok | default(false) | bool) else [])
+          + ['threlium-work.slice', 'threlium-engine.service']
+        }}
+      failed_when: false
+      tags: [deploy, refresh]
+
+    - name: Assert derived paths are non-empty
+      ansible.builtin.assert:
+        that:
+          - threlium_repo_path | trim | length > 0
+          - threlium_home | trim | length > 0
+        fail_msg: "threlium_repo_path и threlium_home должны быть непустыми после derivation."
+      tags: [deploy, refresh]
+
+    - name: Assert threlium_repo_path is not inside THRELIUM_HOME (data tree)
+      ansible.builtin.assert:
+        that:
+          - (threlium_repo_path | trim | regex_replace('/$', '')) != (threlium_home | trim | regex_replace('/$', ''))
+          - (threlium_repo_path | trim | regex_search('^' ~ (threlium_home | trim | regex_replace('/$', '') | regex_escape) ~ '/')) is none
+        fail_msg: >-
+          threlium_repo_path не должен лежать внутри threlium_home (данные): repo={{ threlium_repo_path }}, home={{ threlium_home }}.
+      tags: [deploy, refresh]
+
+    # Нет отдельного модуля loginctl в ansible.builtin
+    - name: Enable systemd linger for agent user
+      ansible.builtin.command:
+        cmd: "loginctl enable-linger {{ threlium_user | quote }}"
+      become: true
+      changed_when: false
+      tags: [deploy]
+
+    # Cockpit (и любой PAM-login) использует системного пользователя threlium_user + пароль из shadow.
+    - name: Set agent UNIX password for PAM login (Cockpit; optional)
+      ansible.builtin.user:
+        name: "{{ threlium_user }}"
+        # Соль password_hash: только [./a-zA-Z0-9], длина ≤16 (см. crypt(5)); иначе «invalid characters in sha512_crypt salt».
+        password: "{{ threlium_agent_login_password | password_hash('sha512', 'ThreliumPAMSalt') }}"
+        update_password: always
+      become: true
+      when: (threlium_agent_login_password | default('', true) | string | trim | length) > 0
+      no_log: true
+      tags: [deploy]
+
+    - name: SSH hardening (authorized_keys, disable password auth)
+      ansible.builtin.import_tasks: tasks/ssh_hardening.yml
+      when: threlium_ssh_hardening_enabled | default(false) | bool
+      tags: [deploy]
+
+    - name: Ensure bundle root and data/agent directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0755"
+      loop:
+        - "{{ threlium_bundle_root }}"
+        - "{{ threlium_home }}"
+        - "{{ threlium_repo_path }}"
+      tags: [deploy, refresh]
+
+    # Каталоги данных под THRELIUM_HOME (logs, stages, …) — до веб-стека и выкладки репозитория.
+    # ``prompts`` обязателен до ``unarchive`` в блоке «Deploy user-editable prompt templates»:
+    # модуль требует, чтобы ``dest`` ({{ threlium_home }}/prompts/) уже существовал как каталог.
+    - name: Ensure THRELIUM_HOME layout (non-Maildir and parents)
+      ansible.builtin.file:
+        path: "{{ threlium_home }}/{{ item }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0755"
+      loop:
+        - logs
+        - locks
+        - lightrag
+        - stages
+        - prompts
+        - config
+      tags: [deploy, refresh]
+
+    - name: Ensure Maildir parent directories exist
+      ansible.builtin.file:
+        path: "{{ threlium_home }}/{{ item }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0755"
+      loop: "{{ threlium_maildir_rel_paths | map('dirname') | unique | list }}"
+      tags: [deploy, refresh]
+
+    - name: Create Maildir roots (cur/new/tmp)
+      ansible.builtin.file:
+        path: "{{ threlium_home }}/{{ item.0 }}/{{ item.1 }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0700"
+      loop: "{{ threlium_maildir_rel_paths | product(['cur', 'new', 'tmp']) | list }}"
+      loop_control:
+        label: "{{ item.0 }}/{{ item.1 }}"
+      tags: [deploy, refresh]
+
+    # Почтовый веб-архив (apt + шаблоны Caddy/Cockpit/Roundcube/Dovecot): только deploy — не входит в refresh.
+    - name: Deploy mail-archive web stack (Caddy, Cockpit, Roundcube, Dovecot)
+      ansible.builtin.import_tasks: tasks/mail_archive_web.yml
+      when: threlium_mail_archive_web_enabled | bool
+      tags: [deploy]
+
+    - name: Ensure repository root exists
+      ansible.builtin.file:
+        path: "{{ threlium_repo_path }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0755"
+      tags: [deploy, refresh]
+
+    # Нет встроенного модуля для idempotent git init локального каталога.
+    - name: Initialize target git repository if missing
+      ansible.builtin.command:
+        cmd: "git init {{ threlium_repo_path }}"
+        creates: "{{ threlium_repo_path }}/.git"
+      become: true
+      become_user: "{{ threlium_user }}"
+      tags: [deploy, refresh]
+
+    - name: Ensure repository paths for env and configs exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0755"
+      loop:
+        - "{{ threlium_repo_path }}/env"
+        - "{{ threlium_repo_path }}/config"
+        - "{{ threlium_repo_path }}/systemd/user"
+        - "{{ threlium_repo_path }}/scripts"
+        - "{{ threlium_repo_path }}/bridges"
+      tags: [deploy, refresh]
+
+    - name: Выложить env/threlium.env в клон
+      ansible.builtin.template:
+        src: "{{ threlium_role_templates }}/env/threlium.env.j2"
+        dest: "{{ threlium_repo_path }}/env/threlium.env"
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0600"
+      tags: [deploy, refresh]
+
+    # Один архив + unarchive вместо десятков copy по файлам (latency docker/SSH).
+    - name: Deploy Threlium Python package (threlium.*) + pyproject.toml
+      tags: [deploy, refresh]
+      block:
+        - name: Temp path for scripts tarball (controller)
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .tar.gz
+          delegate_to: localhost
+          become: false
+          register: threlium_scripts_bundle_tmp
+
+        - name: Pack role files/scripts into tarball (controller)
+          ansible.builtin.command:
+            argv:
+              - tar
+              - -czf
+              - "{{ threlium_scripts_bundle_tmp.path }}"
+              - -C
+              - "{{ playbook_dir }}/../roles/threlium/files/scripts"
+              - .
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+        - name: Unpack Threlium Python package + pyproject.toml on target
+          ansible.builtin.unarchive:
+            src: "{{ threlium_scripts_bundle_tmp.path }}"
+            dest: "{{ threlium_repo_path }}/scripts/"
+            remote_src: false
+            owner: "{{ threlium_user }}"
+            group: "{{ threlium_user }}"
+            # Не задавать mode — иначе каталоги получают 0644 без +x (как у copy без directory_mode).
+
+        - name: Ensure threlium owns scripts tree after unpack
+          ansible.builtin.file:
+            path: "{{ threlium_repo_path }}/scripts"
+            state: directory
+            owner: "{{ threlium_user }}"
+            group: "{{ threlium_user }}"
+            recurse: true
+
+        - name: Normalise scripts tree (dirs 0755, files 0644)
+          ansible.builtin.shell: |
+            find "{{ threlium_repo_path }}/scripts" -type d -exec chmod 0755 {} +
+            find "{{ threlium_repo_path }}/scripts" -type f -exec chmod 0644 {} +
+          args:
+            executable: /bin/bash
+          changed_when: true
+      always:
+        - name: Remove scripts tarball temp (controller)
+          ansible.builtin.file:
+            path: "{{ threlium_scripts_bundle_tmp.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          when: threlium_scripts_bundle_tmp.path is defined
+
+    # User-editable Jinja2-шаблоны — как и scripts/, одним архивом.
+    - name: Deploy user-editable prompt templates (per-stage layout)
+      tags: [deploy, refresh]
+      block:
+        - name: Temp path for prompts tarball (controller)
+          ansible.builtin.tempfile:
+            state: file
+            suffix: .tar.gz
+          delegate_to: localhost
+          become: false
+          register: threlium_prompts_bundle_tmp
+
+        - name: Pack role files/prompts into tarball (controller)
+          ansible.builtin.command:
+            argv:
+              - tar
+              - -czf
+              - "{{ threlium_prompts_bundle_tmp.path }}"
+              - -C
+              - "{{ playbook_dir }}/../roles/threlium/files/prompts"
+              - .
+          delegate_to: localhost
+          become: false
+          changed_when: false
+
+        - name: Unpack prompt templates on target
+          ansible.builtin.unarchive:
+            src: "{{ threlium_prompts_bundle_tmp.path }}"
+            dest: "{{ threlium_home }}/prompts/"
+            remote_src: false
+            owner: "{{ threlium_user }}"
+            group: "{{ threlium_user }}"
+
+        - name: Ensure threlium owns prompts tree after unpack
+          ansible.builtin.file:
+            path: "{{ threlium_home }}/prompts"
+            state: directory
+            owner: "{{ threlium_user }}"
+            group: "{{ threlium_user }}"
+            recurse: true
+
+        - name: Normalise prompts tree (dirs 0755, files 0644)
+          ansible.builtin.shell: |
+            find "{{ threlium_home }}/prompts" -type d -exec chmod 0755 {} +
+            find "{{ threlium_home }}/prompts" -type f -exec chmod 0644 {} +
+          args:
+            executable: /bin/bash
+          changed_when: true
+      always:
+        - name: Remove prompts tarball temp (controller)
+          ansible.builtin.file:
+            path: "{{ threlium_prompts_bundle_tmp.path }}"
+            state: absent
+          delegate_to: localhost
+          become: false
+          when: threlium_prompts_bundle_tmp.path is defined
+
+    - name: Deploy threlium.yaml (unified config)
+      ansible.builtin.template:
+        src: "{{ threlium_role_templates }}/config/threlium.yaml.j2"
+        dest: "{{ threlium_home }}/config/threlium.yaml"
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0600"
+      tags: [deploy, refresh]
+
+    - name: Deploy fdm config
+      ansible.builtin.template:
+        src: "{{ threlium_role_templates }}/config/fdm.conf.j2"
+        dest: "{{ threlium_repo_path }}/config/fdm.conf"
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0600"
+      tags: [deploy, refresh]
+
+    - name: Deploy msmtp config
+      ansible.builtin.template:
+        src: "{{ threlium_role_templates }}/config/msmtprc.j2"
+        dest: "{{ threlium_repo_path }}/config/msmtprc"
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0600"
+      no_log: true
+      tags: [deploy, refresh]
+
+    - name: Symlink fdm config into home
+      ansible.builtin.file:
+        src: "{{ threlium_repo_path }}/config/fdm.conf"
+        dest: "{{ threlium_posix_home }}/.fdm.conf"
+        state: link
+        force: true
+      become: true
+      become_user: "{{ threlium_user }}"
+      tags: [deploy, refresh]
+
+    - name: Symlink msmtprc into home
+      ansible.builtin.file:
+        src: "{{ threlium_repo_path }}/config/msmtprc"
+        dest: "{{ threlium_posix_home }}/.msmtprc"
+        state: link
+        force: true
+      become: true
+      become_user: "{{ threlium_user }}"
+      tags: [deploy, refresh]
+
+    - name: Deploy FSM template units (threlium-work@, threlium-sweep@, threlium-engine, threlium-work.slice, bridges)
+      ansible.builtin.template:
+        src: "{{ threlium_role_templates }}/systemd/user/{{ item.src }}"
+        dest: "{{ threlium_repo_path }}/systemd/user/{{ item.dest }}"
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0644"
+      loop:
+        - { src: threlium-work@.service.j2, dest: threlium-work@.service }
+        - { src: threlium-sweep@.service.j2, dest: threlium-sweep@.service }
+        - { src: threlium-work.slice.j2, dest: threlium-work.slice }
+        - { src: threlium-engine.service.j2, dest: threlium-engine.service }
+        - { src: threlium-bridge@.service.j2, dest: threlium-bridge@.service }
+      tags: [deploy, refresh]
+
+    - name: Deploy dispatch script
+      ansible.builtin.template:
+        src: "{{ threlium_role_templates }}/scripts/threlium-dispatch.sh.j2"
+        dest: "{{ threlium_repo_path }}/scripts/threlium-dispatch.sh"
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0755"
+      tags: [deploy, refresh]
+
+    # docs/INDEX.md §1: нет threlium-archive.{path,service}.
+    # Индексация LightRAG — внутри threlium-engine (после nm_settle), отдельных lightrag@*.path нет.
+
+    - name: Ensure systemd user config directory exists
+      ansible.builtin.file:
+        path: "{{ threlium_systemd_user_dir }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0755"
+      tags: [deploy, refresh]
+
+    - name: Find systemd unit files in repository
+      ansible.builtin.find:
+        paths: "{{ threlium_repo_path }}/systemd/user"
+        patterns:
+          - "*.path"
+          - "*.service"
+          - "*.timer"
+          - "*.slice"
+          - "*.socket"
+        file_type: file
+        recurse: false
+      register: threlium_repo_units
+      tags: [deploy, refresh]
+
+    - name: Acceptance — systemd .path units include TriggerLimit (systemd.path 250+)
+      ansible.builtin.slurp:
+        path: "{{ item.path }}"
+      loop: "{{ threlium_repo_units.files | default([]) }}"
+      when: (item.path | basename | regex_search('\\.path$')) is not none
+      loop_control:
+        label: "{{ item.path | basename }}"
+      register: threlium_path_slurp
+      tags: [deploy, refresh]
+
+    - name: Acceptance — TriggerLimit lines present in .path units
+      ansible.builtin.assert:
+        that:
+          - (item.content | b64decode | regex_search('(?m)^TriggerLimitIntervalSec=')) is not none
+          - (item.content | b64decode | regex_search('(?m)^TriggerLimitBurst=')) is not none
+        fail_msg: "В {{ item.item.path }} нет TriggerLimit*"
+      loop: "{{ threlium_path_slurp.results }}"
+      when: not (item.skipped | default(false))
+      loop_control:
+        label: "{{ item.item.path | basename }}"
+      tags: [deploy, refresh]
+
+    - name: Symlink all systemd units for user manager
+      ansible.builtin.file:
+        src: "{{ item.path }}"
+        dest: "{{ threlium_systemd_user_dir }}/{{ item.path | basename }}"
+        state: link
+        force: true
+      become: true
+      become_user: "{{ threlium_user }}"
+      loop: "{{ threlium_repo_units.files }}"
+      loop_control:
+        label: "{{ item.path | basename }}"
+      tags: [deploy, refresh]
+
+    - name: Deploy notmuch configuration
+      ansible.builtin.template:
+        src: "{{ threlium_role_templates }}/config/notmuch-config.j2"
+        dest: "{{ threlium_posix_home }}/.notmuch-config"
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        mode: "0600"
+      tags: [deploy, refresh]
+
+    - name: Ensure Threlium Python venv exists (pip bootstrap)
+      ansible.builtin.pip:
+        name: pip
+        state: present
+        virtualenv: "{{ threlium_repo_path }}/.venv"
+        virtualenv_command: "/usr/bin/python3 -m venv --system-site-packages"
+      become: true
+      become_user: "{{ threlium_user }}"
+      tags: [deploy]
+
+    - name: Upgrade pip and setuptools in Threlium venv (PEP 660 editable installs need setuptools ≥ 64)
+      ansible.builtin.command:
+        cmd: "{{ threlium_repo_path }}/.venv/bin/pip install --upgrade pip setuptools"
+      register: threlium_pip_upgrade
+      changed_when: "'Successfully installed' in threlium_pip_upgrade.stdout"
+      become: true
+      become_user: "{{ threlium_user }}"
+      tags: [deploy]
+
+    - name: Install Threlium package into venv (editable; LightRAG + LiteLLM extras)
+      ansible.builtin.command:
+        cmd: "{{ threlium_repo_path }}/.venv/bin/pip install -e ."
+        chdir: "{{ threlium_repo_path }}/scripts"
+      register: threlium_pip_editable
+      changed_when: "'Successfully installed' in threlium_pip_editable.stdout or 'already satisfied' not in threlium_pip_editable.stdout"
+      become: true
+      become_user: "{{ threlium_user }}"
+      tags: [deploy]
+
+    - name: Acceptance — threlium.yaml exists
+      ansible.builtin.stat:
+        path: "{{ threlium_home }}/config/threlium.yaml"
+      register: threlium_acceptance_yaml_stat
+      tags: [deploy, refresh]
+
+    - name: Acceptance — threlium.yaml is a regular file
+      ansible.builtin.assert:
+        that:
+          - threlium_acceptance_yaml_stat.stat.exists | default(false)
+          - threlium_acceptance_yaml_stat.stat.isreg | default(false)
+        fail_msg: "Ожидается {{ threlium_home }}/config/threlium.yaml"
+      tags: [deploy, refresh]
+
+    - name: Acceptance — validate threlium.yaml (pydantic-settings dry-run load)
+      ansible.builtin.command:
+        argv:
+          - "{{ threlium_repo_path }}/.venv/bin/python"
+          - -c
+          - |
+            from threlium.settings import load_settings
+            s = load_settings(yaml_path="{{ threlium_home }}/config/threlium.yaml")
+            assert str(s.home), "home must be set"
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        THRELIUM_HOME: "{{ threlium_home }}"
+      args:
+        chdir: "{{ threlium_repo_path }}/scripts"
+      changed_when: false
+      tags: [deploy, refresh]
+
+    - name: Recursively fix ownership on override repository path (outside bundle)
+      ansible.builtin.file:
+        path: "{{ threlium_repo_path }}"
+        state: directory
+        owner: "{{ threlium_user }}"
+        group: "{{ threlium_user }}"
+        recurse: true
+      when: >-
+        (threlium_repo_path | trim | regex_replace('/$', ''))
+        != (threlium_bundle_root | trim | regex_replace('/$', ''))
+        and (
+          (threlium_repo_path | trim | regex_search(
+            '^' ~ (threlium_bundle_root | trim | regex_replace('/$', '') | regex_escape) ~ '/'
+          )) is none
+        )
+      tags: [deploy, refresh]
+
+    # --- Acceptance ---
+    - name: Acceptance — корни Maildir
+      ansible.builtin.stat:
+        path: "{{ threlium_home }}/{{ item }}"
+      register: threlium_acceptance_maildirs
+      loop: "{{ threlium_maildir_rel_paths }}"
+      tags: [deploy]
+
+    - name: Acceptance — Maildir существуют
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+        fail_msg: "Нет Maildir {{ threlium_home }}/{{ item.item }}"
+      loop: "{{ threlium_acceptance_maildirs.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy]
+
+    - name: Acceptance — FSM template units (threlium-work@, threlium-sweep@, threlium-engine)
+      ansible.builtin.stat:
+        path: "{{ threlium_repo_path }}/systemd/user/{{ item }}"
+      register: threlium_acceptance_fsm_templates
+      loop:
+        - threlium-work@.service
+        - threlium-sweep@.service
+        - threlium-work.slice
+        - threlium-engine.service
+      tags: [deploy]
+
+    - name: Acceptance — FSM template files exist
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+        fail_msg: "Нет unit {{ item.item }}"
+      loop: "{{ threlium_acceptance_fsm_templates.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy]
+
+    - name: "Acceptance — вспомогательные unit-ы (bridge templates)"
+      ansible.builtin.stat:
+        path: "{{ threlium_repo_path }}/systemd/user/{{ item }}"
+      register: threlium_acceptance_aux
+      loop: "{{ ['threlium-bridge@.service'] }}"
+      tags: [deploy]
+
+    - name: Acceptance — aux units
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+      loop: "{{ threlium_acceptance_aux.results }}"
+      tags: [deploy]
+
+    - name: Acceptance — dispatch script
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: threlium_acceptance_hook_dispatch
+      loop:
+        - "{{ threlium_repo_path }}/scripts/threlium-dispatch.sh"
+      tags: [deploy]
+
+    - name: Acceptance — dispatch script exists and is executable
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.executable | default(false)
+        fail_msg: "Нет или не исполняемый: {{ item.item }}"
+      loop: "{{ threlium_acceptance_hook_dispatch.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy]
+
+    - name: Acceptance — archive units старой схемы отсутствуют (docs/INDEX.md §1)
+      ansible.builtin.stat:
+        path: "{{ threlium_repo_path }}/systemd/user/{{ item }}"
+      register: threlium_acceptance_no_archive
+      loop:
+        - threlium-archive.path
+        - threlium-archive.service
+      tags: [deploy]
+
+    - name: Acceptance — нет threlium-archive.{path,service}
+      ansible.builtin.assert:
+        that:
+          - not (item.stat.exists | default(false))
+        fail_msg: "Старый unit найден: {{ item.item }} — в текущем контракте не используется"
+      loop: "{{ threlium_acceptance_no_archive.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy]
+
+    - name: Acceptance — notmuch database.path = stages (docs/INDEX.md §10 решение 7)
+      ansible.builtin.command:
+        cmd: notmuch config get database.path
+      register: threlium_acceptance_notmuch_path
+      changed_when: false
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        HOME: "{{ threlium_posix_home }}"
+        NOTMUCH_CONFIG: "{{ threlium_posix_home }}/.notmuch-config"
+      tags: [deploy]
+
+    - name: Acceptance — notmuch root указывает на stages/
+      ansible.builtin.assert:
+        that:
+          - threlium_acceptance_notmuch_path.stdout | trim == (threlium_home + '/stages')
+        fail_msg: >-
+          Ожидается database.path = {{ threlium_home }}/stages,
+          получено {{ threlium_acceptance_notmuch_path.stdout | trim }}
+      tags: [deploy]
+
+    - name: Acceptance — symlink почты и systemd (выборочно)
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      register: threlium_acceptance_symlinks
+      loop: "{{ [threlium_posix_home + '/.fdm.conf', threlium_posix_home + '/.msmtprc'] }}"
+      tags: [deploy]
+
+    - name: Acceptance — symlinks
+      ansible.builtin.assert:
+        that:
+          - item.stat.islnk | default(false)
+      loop: "{{ threlium_acceptance_symlinks.results }}"
+      tags: [deploy]
+
+    - name: Acceptance — notmuch config
+      ansible.builtin.stat:
+        path: "{{ threlium_posix_home }}/.notmuch-config"
+      register: threlium_acceptance_notmuch
+      tags: [deploy]
+
+    - name: Acceptance — notmuch
+      ansible.builtin.assert:
+        that:
+          - threlium_acceptance_notmuch.stat.exists | default(false)
+      tags: [deploy]
+
+    - name: Acceptance — verify .notmuch-config has no hook_dir
+      ansible.builtin.slurp:
+        src: "{{ threlium_posix_home }}/.notmuch-config"
+      register: threlium_acceptance_notmuch_config
+      tags: [deploy]
+
+    - name: Acceptance — assert hook_dir absent (dispatch runs from fdm pipe)
+      ansible.builtin.assert:
+        that:
+          - "'hook_dir' not in (threlium_acceptance_notmuch_config.content | b64decode)"
+        fail_msg: ".notmuch-config must not set hook_dir; use fdm pipeline for threlium-dispatch.sh."
+      tags: [deploy]
+
+    - name: Acceptance — initialize notmuch database
+      ansible.builtin.command:
+        cmd: notmuch new
+      changed_when: false
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        HOME: "{{ threlium_posix_home }}"
+        NOTMUCH_CONFIG: "{{ threlium_posix_home }}/.notmuch-config"
+      tags: [deploy]
+
+    - name: Acceptance — notmuch count (индекс)
+      ansible.builtin.command:
+        cmd: notmuch count '*'
+      register: threlium_notmuch_count
+      changed_when: false
+      failed_when: threlium_notmuch_count.rc != 0
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        HOME: "{{ threlium_posix_home }}"
+        NOTMUCH_CONFIG: "{{ threlium_posix_home }}/.notmuch-config"
+      tags: [deploy]
+
+    # После notmuch new / count: иначе threlium-bridge@email открывает stages/.notmuch до создания БД.
+    # Один daemon-reload на пачку unit-ов: иначе daemon_reload=true на каждой итерации
+    # цикла ниже даёт десятки подряд reload user-systemd и ломает start (см. bake / heavy enable).
+    - name: systemd --user daemon-reload after unit symlinks to user manager
+      ansible.builtin.systemd:
+        daemon_reload: true
+        scope: user
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+      tags: [deploy, refresh]
+
+    - name: Reset failed state for user units before start (start-limit / failed)
+      ansible.builtin.command:
+        argv:
+          - systemctl
+          - --user
+          - reset-failed
+          - "{{ item }}"
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+      loop: "{{ threlium_engine_units + threlium_path_unit_names + threlium_bridge_instance_units + threlium_work_slice }}"
+      failed_when: false
+      changed_when: false
+      tags: [deploy, refresh]
+
+    - name: Enable and start systemd user units (paths/services/slice/bridges)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+        scope: user
+        daemon_reload: false
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+      loop: "{{ threlium_engine_units + threlium_path_unit_names + threlium_bridge_instance_units + threlium_work_slice }}"
+      tags: [deploy, refresh]
+
+    - name: Acceptance — reflect prompt templates exist
+      ansible.builtin.stat:
+        path: "{{ threlium_home }}/prompts/reflect/{{ item }}"
+      register: threlium_acceptance_reflect_prompts
+      loop:
+        - continue.j2
+        - final.j2
+      tags: [deploy]
+
+    - name: Acceptance — reflect prompt templates present
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists | default(false)
+          - item.stat.isreg | default(false)
+        fail_msg: "Нет шаблона {{ threlium_home }}/prompts/reflect/{{ item.item }}"
+      loop: "{{ threlium_acceptance_reflect_prompts.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy]
+
+    - name: Acceptance — пакет `threlium` установлен в venv и importable
+      ansible.builtin.command:
+        cmd: "{{ threlium_repo_path }}/.venv/bin/python -c 'import notmuch2; import threlium, threlium.fsm_emit, threlium.mime_reform'"
+      become: true
+      become_user: "{{ threlium_user }}"
+      changed_when: false
+      tags: [deploy]
+
+    - name: Acceptance — все FSM-стадии импортируются модулями threlium.states.<id>
+      ansible.builtin.command:
+        cmd: "{{ threlium_repo_path }}/.venv/bin/python -c 'import importlib; importlib.import_module(\"threlium.states.{{ item }}\")'"
+      become: true
+      become_user: "{{ threlium_user }}"
+      changed_when: false
+      loop: "{{ threlium_fsm_stage_ids }}"
+      tags: [deploy]
+
+    - name: Acceptance — бриджи каналов импортируются модулями threlium.bridges.<chan>
+      ansible.builtin.command:
+        cmd: "{{ threlium_repo_path }}/.venv/bin/python -c 'import importlib; importlib.import_module(\"threlium.bridges.{{ item }}\")'"
+      become: true
+      become_user: "{{ threlium_user }}"
+      changed_when: false
+      loop: >-
+        {{
+          (['email'] if (threlium_email_bridge_creds_ok | default(false) | bool) else [])
+          + (['telegram'] if (threlium_telegram_bridge_creds_ok | default(false) | bool) else [])
+          + (['matrix'] if (threlium_matrix_bridge_creds_ok | default(false) | bool) else [])
+        }}
+      tags: [deploy]
+
+    - name: Acceptance — compile Python scripts (byte-compile)
+      ansible.builtin.command:
+        cmd: "{{ threlium_repo_path }}/.venv/bin/python -m compileall -q {{ threlium_repo_path }}/scripts"
+      become: true
+      become_user: "{{ threlium_user }}"
+      changed_when: false
+      tags: [deploy]
+
+    - name: "Acceptance — build service unit list (fdm dispatch)"
+      ansible.builtin.set_fact:
+        threlium_acceptance_service_units: >-
+          {{
+            [
+              'threlium-work@.service',
+              'threlium-sweep@.service',
+              'threlium-work.slice',
+              'threlium-engine.service',
+              'threlium-bridge@.service',
+            ]
+          }}
+      tags: [deploy]
+
+    - name: Acceptance — gather service facts
+      ansible.builtin.service_facts:
+      tags: [deploy]
+
+    - name: Acceptance — service facts structure
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.services is mapping
+        fail_msg: "service_facts не вернул ansible_facts.services"
+      tags: [deploy]
+
+    - name: Acceptance — user units status via systemd module
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        scope: user
+      become: true
+      become_user: "{{ threlium_user }}"
+      register: threlium_acceptance_user_units
+      changed_when: false
+      failed_when: false
+      loop: "{{ threlium_engine_units + threlium_path_unit_names + threlium_bridge_instance_units + threlium_acceptance_service_units }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+      tags: [deploy]
+
+    - name: Acceptance — user units are loaded
+      ansible.builtin.assert:
+        that:
+          - (item.status is defined) and (item.status.LoadState | default('') == 'loaded')
+        fail_msg: "Unit не загружен: {{ item.item }}"
+      loop: "{{ threlium_acceptance_user_units.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: "'@.' not in item.item"
+      tags: [deploy]
+
+    - name: Acceptance — unit-файлы сервисов содержат EnvironmentFile
+      ansible.builtin.slurp:
+        src: "{{ threlium_repo_path }}/systemd/user/{{ item }}"
+      register: threlium_acceptance_envfile_units
+      loop: "{{ threlium_acceptance_service_units }}"
+      tags: [deploy]
+
+    - name: Acceptance — verify EnvironmentFile lines in service units
+      ansible.builtin.assert:
+        that:
+          - (item.item == 'threlium-work.slice') or (('EnvironmentFile=-' ~ threlium_repo_path ~ '/env/threlium.env') in unit_text)
+        fail_msg: "Неверный EnvironmentFile в {{ item.item }}"
+      vars:
+        unit_text: "{{ item.content | b64decode }}"
+      loop: "{{ threlium_acceptance_envfile_units.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy]
+
+    - name: Acceptance — FSM work unit uses threlium.runners.engine_submit
+      ansible.builtin.assert:
+        that:
+          - "'threlium.runners.engine_submit' in unit_text"
+        fail_msg: "В {{ item.item }} ExecStart не указывает на threlium.runners.engine_submit"
+      vars:
+        unit_text: "{{ item.content | b64decode }}"
+      loop: "{{ threlium_acceptance_envfile_units.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.item == 'threlium-work@.service'
+      tags: [deploy]
+
+    - name: Acceptance — threlium-engine unit uses python -m threlium.runners.engine
+      ansible.builtin.assert:
+        that:
+          - "'-m threlium.runners.engine' in unit_text"
+        fail_msg: "В {{ item.item }} ExecStart не указывает на threlium.runners.engine"
+      vars:
+        unit_text: "{{ item.content | b64decode }}"
+      loop: "{{ threlium_acceptance_envfile_units.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.item == 'threlium-engine.service'
+      tags: [deploy]
+
+    - name: Acceptance — bridge template unit uses python -m threlium.runners.bridge %i
+      ansible.builtin.assert:
+        that:
+          - "'-m threlium.runners.bridge %i' in unit_text"
+        fail_msg: "В {{ item.item }} ExecStart не указывает на threlium.runners.bridge %i"
+      vars:
+        unit_text: "{{ item.content | b64decode }}"
+      loop: "{{ threlium_acceptance_envfile_units.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.item == 'threlium-bridge@.service'
+      tags: [deploy]
+
+    - name: Acceptance — verify env file exists
+      ansible.builtin.stat:
+        path: "{{ threlium_repo_path }}/env/threlium.env"
+      register: threlium_acceptance_env_file
+      tags: [deploy]
+
+    - name: Acceptance — env file present
+      ansible.builtin.assert:
+        that:
+          - threlium_acceptance_env_file.stat.exists | default(false)
+          - threlium_acceptance_env_file.stat.isreg | default(false)
+        fail_msg: "Ожидается {{ threlium_repo_path }}/env/threlium.env"
+      tags: [deploy]
+
+    - name: Acceptance — worker homes are configured in env
+      ansible.builtin.slurp:
+        src: "{{ threlium_repo_path }}/env/threlium.env"
+      register: threlium_acceptance_env_content
+      tags: [deploy]
+
+    - name: Acceptance — mandatory env keys are set
+      ansible.builtin.assert:
+        that:
+          - "'THRELIUM_HOME=' in env_text"
+        fail_msg: "В env/threlium.env отсутствует THRELIUM_HOME"
+      vars:
+        env_text: "{{ threlium_acceptance_env_content.content | b64decode }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+      tags: [deploy]
+
+    - name: "Acceptance — mail-archive web stack (Caddy, Cockpit, Roundcube, Dovecot)"
+      ansible.builtin.import_tasks: tasks/mail_archive_web_acceptance.yml
+      when: threlium_mail_archive_web_enabled | bool
+      tags: [deploy]
+
+    - name: Build post-deploy bundle on target
+      community.general.archive:
+        path:
+          - "{{ threlium_repo_path }}"
+          - "{{ threlium_home }}"
+          - "{{ threlium_posix_home }}/.notmuch-config"
+          - "{{ threlium_systemd_user_dir }}"
+        dest: "{{ threlium_home }}/logs/threlium-bundle-{{ inventory_hostname }}-{{ ansible_facts['date_time'].iso8601_basic_short }}.tar.gz"
+        format: gz
+        remove: false
+      register: threlium_bundle_archive
+      when: threlium_bundle_enabled | bool
+      tags: [deploy]
+
+    - name: Ensure local artifacts directory exists on control node
+      ansible.builtin.file:
+        path: "{{ playbook_dir | dirname }}/artifacts/{{ inventory_hostname }}"
+        state: directory
+        mode: "0755"
+      delegate_to: localhost
+      become: false
+      when: threlium_bundle_enabled | bool
+      tags: [deploy]
+
+    - name: Fetch post-deploy bundle to control node
+      ansible.builtin.fetch:
+        src: "{{ threlium_bundle_archive.dest }}"
+        dest: "{{ playbook_dir | dirname }}/artifacts/{{ inventory_hostname }}/"
+        flat: true
+      when: threlium_bundle_enabled | bool
+      tags: [deploy]
+
+    - name: Cleanup post-deploy bundle on target
+      ansible.builtin.file:
+        path: "{{ threlium_bundle_archive.dest }}"
+        state: absent
+      when: threlium_bundle_enabled | bool
+      tags: [deploy]
+
+    - name: Import refresh harness (Maildir/notmuch reset, user systemd resync)
+      ansible.builtin.import_tasks: tasks/refresh.yml
+
+  handlers:
+    - name: restart dovecot
+      ansible.builtin.systemd:
+        name: dovecot
+        state: restarted
+      become: true
+
+    - name: reload caddy
+      ansible.builtin.systemd:
+        name: caddy
+        state: reloaded
+      become: true
+
+    - name: restart openssh server
+      ansible.builtin.service:
+        name: ssh
+        state: restarted
+      become: true

@@ -1,0 +1,35 @@
+{
+  "id": "ba116692-16fb-50ad-94ae-177db4b98740",
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/matrix/register_room"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "room_id": "{{jsonPath request.body '$.room_id'}}",
+      "event_id": "{{jsonPath request.body '$.event_id'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "matrix_rooms",
+        "list": {
+          "addLast": {
+            "room_id": "{{jsonPath request.body '$.room_id'}}",
+            "event_id": "{{jsonPath request.body '$.event_id'}}",
+            "event_body": "{{jsonPath request.body '$.event_body'}}",
+            "room_name": "{{jsonPath request.body '$.room_name'}}",
+            "sender": "{{jsonPath request.body '$.sender'}}"
+          }
+        }
+      }
+    }
+  ]
+}

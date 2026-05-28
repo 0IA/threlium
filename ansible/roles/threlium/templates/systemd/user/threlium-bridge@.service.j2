@@ -1,0 +1,21 @@
+# Managed by Ansible — docs/ORCHESTRATION.md (%i = channel: email | telegram | matrix)
+[Unit]
+Description=Threlium bridge — %i → fdm (threlium.runners.bridge %i)
+Documentation=file:{{ threlium_repo_path }}/docs/FSM.md
+Documentation=file:{{ threlium_repo_path }}/docs/ORCHESTRATION.md
+After=network-online.target
+After=threlium-engine.service
+Wants=threlium-engine.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env
+Environment=PATH={{ threlium_repo_path }}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart={{ threlium_repo_path }}/.venv/bin/python -m threlium.runners.bridge %i
+Restart=on-failure
+RestartSec=1s
+SyslogIdentifier=threlium-bridge-%i
+
+[Install]
+WantedBy=default.target

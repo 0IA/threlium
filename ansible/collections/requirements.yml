@@ -1,0 +1,10 @@
+---
+# Инвентарь e2e: ansible_connection: docker → community.docker.docker (не в ansible-core).
+# Плейбук: community.general.archive; ansible.posix (authorized_key при threlium_ssh_hardening_enabled).
+collections:
+  - name: ansible.posix
+    version: ">=1.5.0,<3.0.0"
+  - name: community.docker
+    version: ">=3.4.0,<6.0.0"
+  - name: community.general
+    version: ">=9.0.0,<13.0.0"

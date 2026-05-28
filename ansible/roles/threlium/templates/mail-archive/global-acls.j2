@@ -1,0 +1,4 @@
+# В private namespace владелец иначе имеет все ACL-права; строка user=* их не снимает.
+# Только lr: просмотр без смены флагов / expunge / вставки — безопасно для Maildir, который пишет Threlium+notmuch.
+* owner lr
+* user=* lr

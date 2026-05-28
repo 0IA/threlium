@@ -1,0 +1,3 @@
+---
+# Минимальный group_vars: defaults роли достаточны для деплоя.
+# Задайте threlium_litellm, threlium_bridges, threlium_msmtp в host_vars.

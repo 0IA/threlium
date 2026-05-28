@@ -1,0 +1,7 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    Self-archive egress body for audit/debug. -#}
+Below is the message actually sent to channel «{{ channel_label }}» (stage {{ egress_stage }}). Text for audit and debugging.
+
+---
+{{ sent_raw }}

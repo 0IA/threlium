@@ -1,0 +1,7 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/INDEX.md §8 Case 1: orphan-notice body prefix when In-Reply-To parent is
+    missing from union notmuch index. ingress.py prefix_plain_body_in_message
+    prepends this render as the first body line before routing to enrich@localhost.
+    Visible to LLM at reasoning. -#}
+[Threlium notice: this message replies to a thread we don't have in our union index (parent Message-ID not found). Treating it as a new external thread.]

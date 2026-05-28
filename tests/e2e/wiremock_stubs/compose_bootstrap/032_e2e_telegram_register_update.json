@@ -1,0 +1,40 @@
+{
+  "id": "ba116692-16fb-50ad-94ae-177db4b98752",
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/telegram/register_update"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "update_id": "{{jsonPath request.body '$.update_id'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "telegram_updates",
+        "list": {
+          "addLast": {
+            "update_id": "{{jsonPath request.body '$.update_id'}}",
+            "chat_id": "{{jsonPath request.body '$.chat_id'}}",
+            "message_id": "{{jsonPath request.body '$.message_id'}}",
+            "text": "{{jsonPath request.body '$.text'}}",
+            "from_id": "{{jsonPath request.body '$.from_id'}}",
+            "from_first_name": "{{jsonPath request.body '$.from_first_name'}}",
+            "from_username": "{{jsonPath request.body '$.from_username'}}",
+            "msg_date": "{{jsonPath request.body '$.msg_date'}}",
+            "chat_title": "{{jsonPath request.body '$.chat_title'}}",
+            "message_thread_id": "{{jsonPath request.body '$.message_thread_id'}}",
+            "thread_kind": "{{jsonPath request.body '$.thread_kind'}}"
+          }
+        }
+      }
+    }
+  ]
+}

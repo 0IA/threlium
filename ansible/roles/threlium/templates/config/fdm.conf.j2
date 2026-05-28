@@ -1,0 +1,42 @@
+# Managed by Ansible — docs/INDEX.md §4 (terminating insert via fdm + notmuch).
+# RFC822 на stdin готовит Python (mime_reform.RFC822_FOR_INSERT); здесь только маршрутизация и
+# `notmuch insert … && threlium-dispatch.sh` (THRELIUM_STAGE в env того же shell).
+# Bridge → ingress: +route только если From — адрес моста (не подстрока в других заголовках: иначе
+# ложный ins_ingress_route_* и tag:route без X-Threlium-Route).
+{% set _dispatch = threlium_repo_path ~ '/scripts/threlium-dispatch.sh' %}
+account "stdin" disabled stdin
+
+action "ins_ingress_route_tg" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +route && exec {{ _dispatch }}\""
+action "ins_ingress_route_mx" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +route && exec {{ _dispatch }}\""
+action "ins_ingress_route_em" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +route && exec {{ _dispatch }}\""
+action "ins_ingress_plain" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir && exec {{ _dispatch }}\""
+
+action "ins_stage_archive" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=archive && notmuch insert --folder=archive/Maildir +route +lightrag_indexed && exec {{ _dispatch }}\""
+{% for s in threlium_fsm_mailbox_stages %}
+{% if s.id != 'ingress' and s.id != 'archive' %}
+action "ins_stage_{{ s.id }}" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE={{ s.id }} && notmuch insert --folder={{ s.id }}/Maildir && exec {{ _dispatch }}\""
+{% endif %}
+{% endfor %}
+
+action "insert_ingress_bug" {
+	remove-header "to"
+	add-header "To" value "ingress@localhost"
+	pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +error && exec {{ _dispatch }}\""
+}
+
+# Синтаксис fdm: regex в «"…"», не в //; логическое AND — вложенные match, не «and …» (fdm.conf(5)).
+match account "stdin" {
+	match "^To:.*ingress@localhost" in headers {
+		match "^From:[^\n]*(<telegram@localhost>|[[:space:]]telegram@localhost([[:space:];,\r\n]|$))" in headers action "ins_ingress_route_tg"
+		match "^From:[^\n]*(<matrix@localhost>|[[:space:]]matrix@localhost([[:space:];,\r\n]|$))" in headers action "ins_ingress_route_mx"
+		match "^From:[^\n]*(<email@localhost>|[[:space:]]email@localhost([[:space:];,\r\n]|$))" in headers action "ins_ingress_route_em"
+		match all action "ins_ingress_plain"
+	}
+	match "^To:.*archive@localhost" in headers action "ins_stage_archive"
+{% for s in threlium_fsm_mailbox_stages %}
+{% if s.id != 'ingress' and s.id != 'archive' %}
+	match "^To:.*{{ s.id }}@localhost" in headers action "ins_stage_{{ s.id }}"
+{% endif %}
+{% endfor %}
+	match unmatched action "insert_ingress_bug"
+}

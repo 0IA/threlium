@@ -1,0 +1,27 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/ARCHITECTURE.md §6.1: tool-spec for route `egress_router`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "egress_router",
+    "description": "Send final reply on the original channel (email / Matrix / Telegram). Use when the answer is complete and no further CLI or reasoning cycle is needed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reply subject (short, no line breaks)."
+        },
+        "body": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Reply body for the user (UTF-8). For full JSON or large context, pass content verbatim without placeholders."
+        }
+      },
+      "required": ["subject", "body"],
+      "additionalProperties": false
+    }
+  }
+}

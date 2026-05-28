@@ -1,0 +1,32 @@
+# Пакет Threlium (FSM-стадии, утилиты, мосты). Устанавливается в venv на целевом хосте
+# из `{{ threlium_repo_path }}/scripts` Ansible-ом (`pip install -e .`).
+# Контракт стадии и диспетчеризация: docs/FSM.md §4, docs/ORCHESTRATION.md §6.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "threlium"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Threlium FSM: стадии-функции EmailMessage, мосты и воркер"
+dependencies = [
+    "imap-tools>=1.13.0,<2.0.0",
+    "jinja2>=3.1.6",
+    "jsonschema>=4.23.0",
+    "lightrag-hku[api]>=1.4.16,<2.0.0",
+     "litellm>=1.83.0,<1.83.8",
+    "matrix-nio>=0.25.2,<0.26",
+    "msgspec>=0.21.1",
+    "numpy>=2.4.4,<3.0.0",
+    "pydantic>=2.13.4,<3",
+    "pydantic-settings[yaml]>=2.14.1,<3",
+    "pybase62>=1.0.0",
+    "scipy>=1.17.1,<2.0.0",
+    "python-telegram-bot>=22.7,<23",
+    "structlog>=25.5.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["threlium*"]

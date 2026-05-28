@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""cli_exec → ingress@localhost: исполнение команды в transient ``systemd-run --scope`` (ARCHITECTURE §6).
+
+Capability-профиль = хвост ``X-Threlium-Capabilities`` на входящем письме.
+Ресурсные лимиты (``MemoryMax``, ``CPUQuota``, ``TasksMax``) из ``Config``
+(env: ``THRELIUM_CLI_EXEC_*``). ``cli_exec`` только читает capabilities.
+"""
+import subprocess
+from email.message import EmailMessage
+
+from threlium.cli_fsm import parse_cli_intent_payload
+from threlium.fsm_emit import build_fsm_plain_to_stage
+from threlium.logutil import logger
+from threlium.mime_reform import extract_plain_body
+from threlium.prompts import render_prompt
+from threlium.settings import ThreliumSettings
+from threlium.types import (
+    FsmStage,
+    FsmTransitionPlainBody,
+    MailHeaderName,
+    PromptPath,
+    ThreliumCapabilitiesBudgetLine,
+)
+
+log = logger.bind(stage="cli_exec")
+
+_STDOUT_LIMIT = 8000
+_STDERR_LIMIT = 4000
+
+
+def _peek_cap_top(
+    line: ThreliumCapabilitiesBudgetLine | None,
+) -> str | None:
+    """Вершина стека Capabilities без POP (peek, не мутация).
+
+    POP делает ``egress_router`` при возврате из субагента;
+    ``cli_exec`` только читает для выбора ресурсного профиля.
+    """
+    if line is None or not line.value.strip():
+        return None
+    parts = line.value.strip().split()
+    return parts[-1] if parts else None
+
+
+def main(
+    msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
+) -> EmailMessage | None:
+    prior = extract_plain_body(msg).strip()
+    cli = parse_cli_intent_payload(prior)
+
+    if not cli:
+        log.warning("no_parseable_payload")
+        body = render_prompt(PromptPath.CLI_EXEC_OBSERVATION, cmd_line="", prior=prior)
+        return build_fsm_plain_to_stage(
+            msg, to_addr=FsmStage.INGRESS, from_stage=stage,
+            body=FsmTransitionPlainBody.parse(body),
+            settings=config,
+        )
+
+    # Peek capability profile from X-Threlium-Capabilities stack top
+    cap_line = ThreliumCapabilitiesBudgetLine.parse(
+        msg.get(MailHeaderName.CAPABILITIES.value)
+    )
+    cap_name = _peek_cap_top(cap_line) or "default"
+
+    cmd_line = " ".join(cli.argv)
+    log.info("executing", cap=cap_name, cmd_line=cmd_line)
+
+    # Build systemd-run --scope command with resource limits from Config
+    scope_cmd = [
+        "systemd-run", "--user", "--scope", "--quiet",
+        f"--property=MemoryMax={config.cli.exec_memory_max}",
+        f"--property=CPUQuota={config.cli.exec_cpu_quota}",
+        f"--property=TasksMax={config.cli.exec_tasks_max}",
+        "--",
+        *cli.argv,
+    ]
+
+    try:
+        result = subprocess.run(
+            scope_cmd,
+            capture_output=True,
+            timeout=config.cli.exec_timeout,
+            text=True,
+            cwd=cli.cwd or None,
+        )
+        observation = (
+            f"exit_code={result.returncode}\n"
+            f"stdout:\n{result.stdout[:_STDOUT_LIMIT]}\n"
+            f"stderr:\n{result.stderr[:_STDERR_LIMIT]}"
+        )
+    except subprocess.TimeoutExpired:
+        observation = f"TIMEOUT after {config.cli.exec_timeout}s"
+        log.error("timeout", timeout_seconds=config.cli.exec_timeout)
+    except Exception as e:
+        observation = f"exec error: {e}"
+        log.error("exec_error", error=str(e))
+
+    body = render_prompt(
+        PromptPath.CLI_EXEC_OBSERVATION,
+        cmd_line=cmd_line,
+        prior=observation,
+    )
+    return build_fsm_plain_to_stage(
+        msg, to_addr=FsmStage.INGRESS, from_stage=stage,
+        body=FsmTransitionPlainBody.parse(body),
+        settings=config,
+    )

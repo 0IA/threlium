@@ -1,0 +1,36 @@
+#!/bin/sh
+# Managed by Ansible — dispatch workers for unread messages in a stage.
+# Primary: fdm pipe runs `notmuch insert && threlium-dispatch.sh` (THRELIUM_STAGE from that shell).
+# After successful worker exit: `threlium-sweep@<stage>:<thread_id>.service` (OnSuccess on worker)
+# runs the same script with %i → `threlium-dispatch.sh <stage>:<thread_id>`.
+# Fail-fast: любой ненулевой код notmuch search или systemctl — скрипт завершается с ошибкой
+# (stderr не подавляется). Ошибка dispatch не откатывает уже выполненный notmuch insert.
+# Usage: THRELIUM_STAGE=<stage> threlium-dispatch.sh
+#   or:  threlium-dispatch.sh <stage>:<thread_id>  (same %i as sweep unit / manual run)
+# Trade-off: один вызов systemctl со списком unit-ов — см. systemctl(1); следующий insert или sweep снова вызовут dispatch.
+# Нить ищем через folder: (prefix-term относительно database.path) — быстрее, чем to:<stage>@localhost.
+set -eu
+# fdm / MDA может наследовать stripped env: без XDG_RUNTIME_DIR/DBUS systemctl --user падает.
+_uid="$(id -ru)"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${_uid}}"
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -S "${XDG_RUNTIME_DIR}/bus" ]; then
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+fi
+if [ -n "${1:-}" ]; then
+    STAGE="${1%%:*}"
+else
+    STAGE="${THRELIUM_STAGE:-}"
+fi
+[ -z "$STAGE" ] && exit 0
+export NOTMUCH_CONFIG="{{ threlium_posix_home }}/.notmuch-config"
+UNITS=""
+for tid in $(notmuch search --exclude=false --output=threads "tag:unread AND folder:${STAGE}/Maildir"); do
+    UNITS="$UNITS threlium-work@${STAGE}:${tid#thread:}.service"
+done
+if [ -n "$UNITS" ]; then
+    # Снять failed/start-limit у инстансов (иначе start отклонит); || true — инстанс может быть ещё не загружен.
+    # shellcheck disable=SC2086
+    systemctl --user reset-failed $UNITS || true
+    # shellcheck disable=SC2086
+    systemctl --user start --no-block $UNITS
+fi

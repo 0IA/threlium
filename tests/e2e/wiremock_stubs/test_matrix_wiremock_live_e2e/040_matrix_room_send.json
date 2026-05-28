@@ -1,0 +1,24 @@
+{
+  "request": {
+    "method": "PUT",
+    "urlPathPattern": "^/_matrix/client/(r0|v3)/rooms/[^/]+/send/m\\.room\\.message/[^/]+$",
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-matrix-wiremock-live-e2e-01::{{request.headers.[x-threlium-thread-root]}}"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "transformers": [
+      "response-template"
+    ],
+    "jsonBody": {
+      "event_id": "$matrix_send_{{randomValue length=22 type='ALPHANUMERIC'}}"
+    }
+  }
+}

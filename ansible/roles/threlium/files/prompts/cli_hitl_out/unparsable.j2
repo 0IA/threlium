@@ -1,0 +1,7 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+-#}
+
+{#- docs/ARCHITECTURE.md §6.2: HITL-fallback, when intent JSON is unparsable. -#}
+A CLI command requires your confirmation, but the intent payload could not be parsed.
+Reply with **no** to cancel, or **yes** only if you trust this thread.

@@ -1,0 +1,29 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    tool-spec for route `response_append`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "response_append",
+    "description": "Append next reply fragment. Plan the overall response structure before the first append. Each append should be one self-contained section with substantial content (paragraph, section, code block — at least ~3 lines). Never append just a formatting marker, single word, or whitespace. One logical block per call; then response_finalize. Match user language; factual; Markdown; self-contained chunks.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Brief explanation of why you are appending this content and how it fits your response plan."
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S",
+          "description": "Reply fragment (UTF-8). One logical block: paragraph, section, or code. Must contain at least one non-whitespace character and be a self-contained unit (not just a code fence or single word). Minimum ~3 lines of meaningful content; combine formatting markers with their body."
+        }
+      },
+      "required": ["reasoning", "content"],
+      "additionalProperties": false
+    }
+  }
+}

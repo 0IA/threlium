@@ -1,0 +1,33 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    tool-spec for route `response_edit`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "response_edit",
+    "description": "Replace or delete a reply fragment at position [N] from response_observe. To delete, pass position with new_content null. To replace, pass new text in new_content.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Brief explanation of why this edit is needed and what problem it fixes."
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0-based chunk position in the buffer ([N] from response_observe)."
+        },
+        "new_content": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "New chunk text (replace) or null (delete)."
+        }
+      },
+      "required": ["reasoning", "position"],
+      "additionalProperties": false
+    }
+  }
+}

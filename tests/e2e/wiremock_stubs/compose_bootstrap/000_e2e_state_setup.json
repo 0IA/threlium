@@ -1,0 +1,28 @@
+{
+  "id": "ba116692-16fb-50ad-94ae-177db4b98730",
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/state/setup"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "context": "{{jsonPath request.body '$.correlation_key'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{jsonPath request.body '$.correlation_key'}}",
+        "state": {
+          "active": "1"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+# Managed by Ansible — ORCHESTRATION.md §5 (лимит параллелизма воркеров)
+[Unit]
+Description=Threlium worker slice
+Documentation=file:{{ threlium_repo_path }}/docs/ORCHESTRATION.md
+Before=slices.target
+
+[Slice]
+# Лимит именно *задач* (PIDs) в cgroups-слайсе, а не «число воркер-инстансов» (ORCHESTRATION §5).
+# Слишком низкое значение ломает fork (fdm/sh) внутри одного threlium-work@.
+TasksMax=256
+
+[Install]
+WantedBy=default.target

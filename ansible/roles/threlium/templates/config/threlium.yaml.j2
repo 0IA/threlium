@@ -1,0 +1,71 @@
+# Managed by Ansible — основной конфиг Threlium (config/threlium.yaml).
+#
+# Приоритет источников: переменные окружения THRELIUM_* > этот файл > defaults в threlium/settings.py
+# Формат env-override: THRELIUM_<СЕКЦИЯ>__<ПОДСЕКЦИЯ>__<ПОЛЕ>  (двойное подчёркивание).
+#
+# Секции ниже генерируются из структурных Ansible-переменных (threlium_litellm,
+# threlium_lightrag, threlium_bridges и т.д.); partial override через combine() в site.yml.
+#
+# Допустимые значения и валидация: threlium/settings.py (Field + validators).
+# Документация: docs/INDEX.md, docs/PLAYBOOK.md, docs/TYPES.md
+
+# =============================================================================
+# Bootstrap
+# =============================================================================
+home: {{ threlium_home }}
+repo: {{ threlium_repo_path }}
+venv: {{ threlium_repo_path }}/.venv
+log_level: "{{ threlium_log_level }}"
+
+# =============================================================================
+# litellm — маршрутизация LiteLLM (completion + embedding каталоги)
+# =============================================================================
+litellm:
+{{ threlium_litellm | to_nice_yaml(indent=2) | indent(2, first=true) }}
+# =============================================================================
+# lightrag — граф RAG, чанкинг, enrich/aquery
+# =============================================================================
+lightrag:
+{{ threlium_lightrag | to_nice_yaml(indent=2) | indent(2, first=true) }}
+# =============================================================================
+# bridges — только каналы из threlium_channels
+# =============================================================================
+bridges:
+{% for channel in threlium_channels %}
+{% if channel in threlium_bridges %}
+  {{ channel }}:
+{{ threlium_bridges[channel] | to_nice_yaml(indent=2) | indent(4, first=true) }}
+{% endif %}
+{% endfor %}
+# =============================================================================
+# enrich — контекст для стадии enrich → reasoning
+# =============================================================================
+enrich:
+{{ threlium_enrich | to_nice_yaml(indent=2) | indent(2, first=true) }}
+# =============================================================================
+# cli — песочница systemd-run для cli_exec
+# =============================================================================
+cli:
+{{ threlium_cli | to_nice_yaml(indent=2) | indent(2, first=true) }}
+# =============================================================================
+# hop / cap — бюджеты FSM и capability-строки в заголовках
+# =============================================================================
+hop:
+{{ threlium_hop | to_nice_yaml(indent=2) | indent(2, first=true) }}
+cap:
+{{ threlium_cap | to_nice_yaml(indent=2) | indent(2, first=true) }}
+# =============================================================================
+# egress — исходящая почта агента
+# =============================================================================
+egress:
+{{ threlium_egress | to_nice_yaml(indent=2) | indent(2, first=true) }}
+# =============================================================================
+# msmtp — SMTP relay
+# =============================================================================
+msmtp:
+{{ threlium_msmtp | to_nice_yaml(indent=2) | indent(2, first=true) }}
+# =============================================================================
+# e2e — только тестовый контур (WireMock / корреляция)
+# =============================================================================
+e2e:
+{{ (threlium_e2e | default({})) | to_nice_yaml(indent=2) | indent(2, first=true) }}

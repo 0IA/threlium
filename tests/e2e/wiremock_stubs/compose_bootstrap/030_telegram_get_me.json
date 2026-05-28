@@ -1,0 +1,22 @@
+{
+  "id": "ba116692-16fb-50ad-94ae-177db4b98750",
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^/bot[^/]+/getMe$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "result": {
+        "id": 1234567890,
+        "is_bot": true,
+        "first_name": "ThreliumE2EBot",
+        "username": "threlium_e2e_bot"
+      }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^/?bot[^/]+/sendMessage$",
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-telegram-wiremock-live-e2e-private::{{request.headers.[x-threlium-thread-root]}}"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "transformers": ["response-template"],
+    "jsonBody": {
+      "ok": true,
+      "result": {
+        "message_id": "{{randomValue length=6 type='NUMERIC'}}",
+        "from": {
+          "id": 1234567890,
+          "is_bot": true,
+          "first_name": "ThreliumE2EBot",
+          "username": "threlium_e2e_bot"
+        },
+        "chat": {
+          "id": "{{{formData request.body 'fd' urlDecode=true}}}{{fd.chat_id}}",
+          "type": "private",
+          "first_name": "E2EUser",
+          "username": "e2e_user"
+        },
+        "date": 1700000001,
+        "text": "{{{formData request.body 'fd' urlDecode=true}}}{{fd.text}}"
+      }
+    }
+  }
+}

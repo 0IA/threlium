@@ -1,0 +1,5 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/SUBAGENT_TABLE.md steps 3–4: subagent_intent rejects when PUSH hop-budget
+    is zero — cannot delegate further. -#}
+Threlium subagent_intent: X-Threlium-Hop-Budget exhausted; cannot delegate to a subagent.

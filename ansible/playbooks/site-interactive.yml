@@ -1,0 +1,259 @@
+---
+# Threlium — интерактивный bootstrap-обвязка над site.yml.
+#
+# Назначение: первый деплой нового хоста без предварительной подготовки
+# group_vars/<host>.yml и Ansible Vault. Все ключевые переменные
+# (пути, IMAP/SMTP, токены мостов, LLM API key) запрашиваются у оператора
+# в начале прогона; пароли маскируются (private: true). Для неиспользуемых
+# каналов оператор оставляет ответ пустым, и role defaults / group_vars
+# из основного site.yml продолжают применяться.
+#
+# Основной site.yml (ansible-playbook playbooks/site.yml) НЕ трогается:
+# прямой запуск через group_vars/vault/-e продолжает работать как раньше.
+#
+# Архитектура:
+#   Play 1 (этот) — vars_prompt + set_fact для каждой непустой переменной.
+#                   Пустые ответы НЕ перекрывают role defaults (set_fact
+#                   guard: when: prompted_x | length > 0).
+#   Play 2 — import_playbook: site.yml. Подхватывает host facts из Play 1
+#            (приоритет set_fact выше group_vars и role defaults, но ниже
+#            extra vars `-e`, что позволяет точечный CI-оверрайд).
+#
+# Ограничение vars_prompt: все промпты показываются всегда (условного
+# пропуска нет). Telegram/Matrix-блок спрашивается даже когда канал не
+# включён — пустые значения игнорируются. Это осознанный trade-off:
+# простота wrapper-плейбука vs лишние Enter'ы.
+
+- name: Threlium interactive bootstrap — collect credentials and key vars
+  hosts: threlium_hosts
+  gather_facts: true
+  vars_prompt:
+    # --- Группа 1: каналы ввода/вывода ---
+    - name: prompted_channels
+      prompt: "Каналы (comma-separated; все три участвуют в артефактах; пустые секреты — без моста)"
+      default: "email,telegram,matrix"
+      private: false
+
+    # --- Группа 2: пути и пользователь ---
+    - name: prompted_user
+      prompt: "Системный пользователь Threlium (не root; пусто = threlium)"
+      default: ""
+      private: false
+    - name: prompted_repo_path
+      prompt: "Корень артефактов threlium_repo_path (пусто = <home>/threlium/agent)"
+      default: ""
+      private: false
+    - name: prompted_home
+      prompt: "Корень данных $THRELIUM_HOME (пусто = <home>/threlium/data)"
+      default: ""
+      private: false
+
+    # --- Группа 3: входящая почта (IMAP bridge) ---
+    - name: prompted_imap_host
+      prompt: "[email] IMAP-сервер (пусто — пропустить)"
+      default: ""
+      private: false
+    - name: prompted_imap_user
+      prompt: "[email] IMAP-логин"
+      default: ""
+      private: false
+    - name: prompted_imap_pass
+      prompt: "[email] IMAP-пароль (маскируется; пусто — пропустить)"
+      default: ""
+      private: true
+      confirm: false
+    - name: prompted_imap_port
+      prompt: "[email] IMAP-порт (пусто = авто по TLS)"
+      default: ""
+      private: false
+    - name: prompted_imap_tls
+      prompt: "[email] TLS/STARTTLS для IMAP (true/false)"
+      default: "true"
+      private: false
+
+    # --- Группа 4: исходящая почта (SMTP / msmtp) ---
+    - name: prompted_smtp_host
+      prompt: "[email] SMTP relay host"
+      default: ""
+      private: false
+    - name: prompted_smtp_port
+      prompt: "[email] SMTP relay port"
+      default: "587"
+      private: false
+    - name: prompted_smtp_user
+      prompt: "[email] SMTP login"
+      default: ""
+      private: false
+    - name: prompted_smtp_pass
+      prompt: "[email] SMTP password (маскируется)"
+      default: ""
+      private: true
+      confirm: false
+    - name: prompted_smtp_from
+      prompt: "[email] SMTP From: envelope sender"
+      default: "threlium@localhost"
+      private: false
+    - name: prompted_smtp_tls
+      prompt: "[email] TLS для SMTP (true/false)"
+      default: "true"
+      private: false
+
+    # --- Группа 5: Telegram-мост ---
+    - name: prompted_telegram_token
+      prompt: "[telegram] Bot token (маскируется; пусто — мост не включается)"
+      default: ""
+      private: true
+      confirm: false
+
+    # --- Группа 6: Matrix-мост ---
+    - name: prompted_matrix_homeserver
+      prompt: "[matrix] Homeserver URL (пусто — мост не включается)"
+      default: ""
+      private: false
+    - name: prompted_matrix_user
+      prompt: "[matrix] User (mxid)"
+      default: ""
+      private: false
+    - name: prompted_matrix_token
+      prompt: "[matrix] Access token (маскируется)"
+      default: ""
+      private: true
+      confirm: false
+
+    # --- Группа 7: LLM / Reasoning ---
+    - name: prompted_openai_api_key
+      prompt: "LLM API key для reasoning/LightRAG (OpenAI / LiteLLM; маскируется)"
+      default: ""
+      private: true
+      confirm: false
+    - name: prompted_openai_api_base
+      prompt: "LLM API base URL (пусто = OpenAI по умолчанию)"
+      default: ""
+      private: false
+    - name: prompted_reasoning_model
+      prompt: "LiteLLM model name для reasoning"
+      default: "gpt-4o-mini"
+      private: false
+
+  tasks:
+    # --- Каналы: список из comma-separated строки ---
+    - name: Set threlium_channels from prompt (если ответ непуст)
+      ansible.builtin.set_fact:
+        threlium_channels: >-
+          {{ prompted_channels
+             | default('', true) | trim
+             | split(',') | map('trim')
+             | reject('equalto', '') | list }}
+      when: (prompted_channels | default('', true) | trim) | length > 0
+
+    - name: Derive bridge enable flags from channels
+      ansible.builtin.set_fact:
+        threlium_bridge_telegram_enabled: "{{ 'telegram' in (threlium_channels | default([])) }}"
+        threlium_bridge_matrix_enabled: "{{ 'matrix' in (threlium_channels | default([])) }}"
+
+    # --- Пути и пользователь ---
+    - name: Set threlium_user
+      ansible.builtin.set_fact:
+        threlium_user: "{{ prompted_user | trim }}"
+      when: (prompted_user | default('', true) | trim) | length > 0
+
+    - name: Set threlium_repo_path
+      ansible.builtin.set_fact:
+        threlium_repo_path: "{{ prompted_repo_path | trim }}"
+      when: (prompted_repo_path | default('', true) | trim) | length > 0
+
+    - name: Set threlium_home
+      ansible.builtin.set_fact:
+        threlium_home: "{{ prompted_home | trim }}"
+      when: (prompted_home | default('', true) | trim) | length > 0
+
+    # --- threlium_bridges dict (собираем из промптов, объединяя с role defaults) ---
+    - name: Build threlium_bridges from prompts
+      ansible.builtin.set_fact:
+        threlium_bridges:
+          email:
+            imap_host: "{{ prompted_imap_host | default('', true) | trim }}"
+            imap_user: "{{ prompted_imap_user | default('', true) | trim }}"
+            imap_pass: "{{ prompted_imap_pass | default('', true) }}"
+            imap_port: "{{ (prompted_imap_port | default('', true) | trim | int) if (prompted_imap_port | default('', true) | trim | length > 0) else 0 }}"
+            imap_use_ssl: "{{ prompted_imap_tls | default('true', true) | bool }}"
+            imap_ssl_verify: true
+            imap_idle_max_sec: 1740
+          matrix:
+            homeserver: "{{ prompted_matrix_homeserver | default('', true) | trim }}"
+            user: "{{ prompted_matrix_user | default('', true) | trim }}"
+            token: "{{ prompted_matrix_token | default('', true) }}"
+          telegram:
+            bot_token: "{{ prompted_telegram_token | default('', true) }}"
+            bot_api_base: ""
+      when: (prompted_imap_host | default('', true) | trim) | length > 0
+            or (prompted_matrix_homeserver | default('', true) | trim) | length > 0
+            or (prompted_telegram_token | default('', true)) | length > 0
+
+    # --- threlium_msmtp dict ---
+    - name: Build threlium_msmtp from prompts
+      ansible.builtin.set_fact:
+        threlium_msmtp:
+          host: "{{ prompted_smtp_host | default('', true) | trim }}"
+          port: "{{ prompted_smtp_port | default('587', true) | int }}"
+          user: "{{ prompted_smtp_user | default('', true) | trim }}"
+          password: "{{ prompted_smtp_pass | default('', true) }}"
+          from_addr: "{{ prompted_smtp_from | default('threlium@localhost', true) | trim }}"
+          tls: "{{ prompted_smtp_tls | default('true', true) | bool }}"
+          auth: "{{ (prompted_smtp_user | default('', true) | trim | length) > 0 }}"
+      when: (prompted_smtp_host | default('', true) | trim) | length > 0
+
+    # --- LLM / reasoning → threlium_litellm ---
+    - name: Build threlium_litellm from prompts
+      vars:
+        _api_base: "{{ prompted_openai_api_base | default('', true) | trim }}"
+        _api_key: "{{ prompted_openai_api_key | default('', true) | trim | default(omit, true) }}"
+        _model: "{{ prompted_reasoning_model | default('gpt-4o-mini', true) | trim }}"
+      ansible.builtin.set_fact:
+        threlium_litellm:
+          max_retries: 3
+          llm_endpoints:
+            - score: 0.0
+              enabled: true
+              model: "{{ _model }}"
+              api_base: "{{ _api_base }}"
+              api_key: "{{ _api_key if (_api_key | length > 0) else none }}"
+              timeout: 120
+          embedding_endpoints:
+            - embedding_score: 0.0
+              enabled: true
+              model: "text-embedding-3-small"
+              api_base: "{{ _api_base }}"
+              api_key: "{{ _api_key if (_api_key | length > 0) else none }}"
+              timeout: 120
+          targets:
+            reasoning:
+              target_score: 0.0
+            enrich_plan:
+              target_score: 0.0
+            lightrag_llm:
+              target_score: 0.0
+            lightrag_embedding:
+              target_embedding_score: 0.0
+      when: (prompted_reasoning_model | default('', true) | trim) | length > 0
+            or (prompted_openai_api_base | default('', true) | trim) | length > 0
+
+    - name: Interactive bootstrap — итоговая сводка (без секретов)
+      ansible.builtin.debug:
+        msg:
+          - "channels: {{ threlium_channels | default(['<role default>']) }}"
+          - "user: {{ threlium_user | default('<role default>') }}"
+          - "repo_path: {{ threlium_repo_path | default('<role default>') }}"
+          - "home: {{ threlium_home | default('<role default>') }}"
+          - "bridges.email.imap_host: {{ threlium_bridges.email.imap_host | default('<role default>') }}"
+          - "msmtp.host: {{ threlium_msmtp.host | default('<role default>') }}"
+          - "telegram bridge: {{ threlium_bridge_telegram_enabled | default(false) }}"
+          - "matrix bridge: {{ threlium_bridge_matrix_enabled | default(false) }}"
+          - "litellm.llm_endpoints[0].model: {{ (threlium_litellm.llm_endpoints[0].model) | default('<role default>') }}"
+          - "litellm.llm_endpoints[0].api_base: {{ (threlium_litellm.llm_endpoints[0].api_base) | default('<role default>') }}"
+          - "Секреты заданы — далее запускается site.yml."
+
+# --- Play 2: основной деплой ---
+# Все host facts из Play 1 (set_fact, scope=host) автоматически видны в site.yml.
+# Приоритет переменных: extra vars (-e) > set_fact > role vars > group_vars > role defaults.
+- ansible.builtin.import_playbook: site.yml

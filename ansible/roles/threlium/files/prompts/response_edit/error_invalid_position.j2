@@ -1,0 +1,5 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+-#}
+
+{"position": {{ position }}, "new_content": {{ new_content | tojson }}, "error": "position {{ position }} does not exist in the response buffer. Valid positions: {{ valid_positions }}", "buffer_state": {{ buffer_summary | tojson }}}

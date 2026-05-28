@@ -1,0 +1,62 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/ARCHITECTURE.md §6.1: reasoning user message.
+    Each context source is in a separate XML section for clear LLM prioritization.
+    Variables are extracted from enriched multipart MIME parts by Content-ID
+    (EnrichPartId) in reasoning.py _build_prompt(). -#}
+<envelope>
+Message-ID: {{ message_id or "(none)" }}
+In-Reply-To: {{ in_reply_to or "(none)" }}
+References: {{ references or "(none)" }}
+Subject: {{ subject or "(none)" }}
+From: {{ from_hdr or "(none)" }}
+X-Threlium-Hop-Budget: {{ hop_budget or "(none)" }}
+</envelope>
+{% if user_text %}
+
+<user_message>
+{{ user_text }}
+</user_message>
+{% endif %}
+{% if knowledge_graph %}
+
+<knowledge_graph source="lightrag">
+{{ knowledge_graph }}
+</knowledge_graph>
+{% endif %}
+{% if mail_context %}
+
+<conversation_history>
+{{ mail_context }}
+</conversation_history>
+{% endif %}
+{% if thread_memory %}
+
+<thread_memory>
+{{ thread_memory }}
+</thread_memory>
+{% endif %}
+{% if global_memory %}
+
+<global_memory>
+{{ global_memory }}
+</global_memory>
+{% endif %}
+{% if response_state %}
+
+<response_buffer_state>
+{{ response_state }}
+</response_buffer_state>
+{% endif %}
+{% if plan_state %}
+
+<plan_state>
+{{ plan_state }}
+</plan_state>
+{% endif %}
+{% if memory_note %}
+
+<memory_note>
+{{ memory_note }}
+</memory_note>
+{% endif %}

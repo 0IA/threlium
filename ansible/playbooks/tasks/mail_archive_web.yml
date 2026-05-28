@@ -1,0 +1,383 @@
+---
+# Веб-архив почты: Caddy + Cockpit + Roundcube + Dovecot (PAM).
+# Подключается из site.yml с tags: [deploy] только — не при --tags refresh (см. §12.2 PLAYBOOK.md).
+# when: threlium_mail_archive_web_enabled | bool.
+
+# --- Caddy repository ---
+
+- name: Download Caddy GPG key
+  ansible.builtin.get_url:
+    url: "https://dl.cloudsmith.io/public/caddy/stable/gpg.key"
+    dest: /tmp/caddy-gpg.key
+    mode: "0644"
+  become: true
+
+- name: Add Caddy GPG key
+  ansible.builtin.command:
+    cmd: gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg /tmp/caddy-gpg.key
+    creates: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  become: true
+
+- name: Remove Caddy GPG key from /tmp
+  ansible.builtin.file:
+    path: /tmp/caddy-gpg.key
+    state: absent
+  become: true
+
+- name: Add Caddy repository
+  ansible.builtin.get_url:
+    url: "https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt"
+    dest: /etc/apt/sources.list.d/caddy-stable.list
+    mode: "0644"
+  become: true
+
+- name: Force apt-get update after Caddy repository
+  ansible.builtin.command:
+    cmd: apt-get update
+  become: true
+  changed_when: false
+
+# --- Системные пакеты (apt): Cockpit, затем Caddy / Roundcube / Dovecot / PHP ---
+
+- name: Disable dbconfig-install for roundcube-core (non-interactive)
+  ansible.builtin.debconf:
+    name: roundcube-core
+    question: roundcube/dbconfig-install
+    value: "false"
+    vtype: boolean
+  become: true
+
+# Cockpit: если в ``apt-cache policy cockpit`` фигурирует ``<release>-backports``, ставим набор
+# с ``cockpit-files`` через ``default_release``; иначе — только main/universe без ``cockpit-files``.
+- name: Update apt cache (Cockpit)
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 0
+  become: true
+
+- name: Read apt-cache policy cockpit
+  ansible.builtin.command:
+    argv:
+      - apt-cache
+      - policy
+      - cockpit
+  register: threlium_cockpit_policy_out
+  changed_when: false
+  become: true
+
+- name: Derive Debian backports suite from distribution facts
+  ansible.builtin.set_fact:
+    threlium_debian_backports_suite: "{{ ansible_facts['distribution_release'] | lower }}-backports"
+
+- name: Cockpit from backports when suite appears in policy output
+  ansible.builtin.set_fact:
+    threlium_cockpit_use_backports: >-
+      {{ threlium_debian_backports_suite in (threlium_cockpit_policy_out.stdout | default('')) }}
+
+- name: Install Cockpit from {{ threlium_debian_backports_suite }} (with cockpit-files)
+  ansible.builtin.apt:
+    update_cache: true
+    default_release: "{{ threlium_debian_backports_suite }}"
+    name:
+      - cockpit
+      - cockpit-files
+      # - cockpit-machines
+      # - cockpit-networkmanager
+      - cockpit-packagekit
+      # - cockpit-podman
+      # - cockpit-sosreport
+      - cockpit-storaged
+      - dbus-user-session
+    state: present
+    install_recommends: true
+  become: true
+  when: threlium_cockpit_use_backports | bool
+
+- name: Install Cockpit from default suites (without cockpit-files)
+  ansible.builtin.apt:
+    update_cache: true
+    name:
+      - cockpit
+      - cockpit-packagekit
+      - cockpit-storaged
+      - dbus-user-session
+    state: present
+    install_recommends: true
+  become: true
+  when: not (threlium_cockpit_use_backports | bool)
+
+- name: Restart user manager after Cockpit stack apt (user session D-Bus for Cockpit Services UI)
+  ansible.builtin.systemd:
+    name: "user@{{ threlium_user_uid }}.service"
+    state: restarted
+  become: true
+  when: threlium_user_uid is defined
+
+- name: Install webmail stack packages (Caddy, Dovecot, Roundcube, PHP)
+  ansible.builtin.apt:
+    update_cache: true
+    name:
+      - caddy
+      - python3
+      - dovecot-imapd
+      - roundcube-core
+      - roundcube-plugins
+      - roundcube-sqlite3
+      - php-enchant
+      - php-fpm
+      - php-gd
+      - php-sqlite3
+      - php-zip
+      - xdg-utils
+    state: present
+    # install_recommends: false — не тянуть apache2/nginx из Recommends roundcube-core.
+    # Модули Cockpit ставятся отдельной задачей с install_recommends: true.
+    install_recommends: false
+  become: true
+
+# postinst не стартует юниты при policy-rc.d 101 (типичный Docker/e2e bake); на железе enabled+started идемпотентно.
+- name: Discover PHP-FPM systemd units
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - list-unit-files
+      - --no-legend
+      - "php*-fpm.service"
+  register: threlium_php_fpm_unit_list
+  changed_when: false
+  failed_when: false
+  become: true
+
+- name: Enable and start PHP-FPM
+  ansible.builtin.systemd:
+    name: "{{ item.split() | first }}"
+    state: started
+    enabled: true
+  loop: "{{ threlium_php_fpm_unit_list.stdout_lines | default([]) }}"
+  when:
+    - threlium_php_fpm_unit_list.rc == 0
+    - (threlium_php_fpm_unit_list.stdout | default('') | trim | length) > 0
+  become: true
+
+# --- Каталоги ---
+
+- name: Ensure threlium config directory exists (for global des_key)
+  ansible.builtin.file:
+    path: /etc/threlium
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+
+- name: Check if Roundcube DES key exists on target
+  ansible.builtin.stat:
+    path: /etc/threlium/roundcube-des.key
+  register: roundcube_des_key_stat
+  become: true
+
+- name: Generate and store Roundcube DES key on target
+  ansible.builtin.copy:
+    content: "{{ lookup('password', '/dev/null length=24 chars=ascii_letters,digits') }}"
+    dest: /etc/threlium/roundcube-des.key
+    mode: "0600"
+    owner: root
+    group: root
+  become: true
+  no_log: true
+  when: not roundcube_des_key_stat.stat.exists
+
+- name: Read Roundcube DES key from target
+  ansible.builtin.slurp:
+    src: /etc/threlium/roundcube-des.key
+  register: roundcube_des_key_slurp
+  become: true
+  no_log: true
+
+- name: Ensure virtual_mail directory exists
+  ansible.builtin.file:
+    path: "{{ threlium_home }}/virtual_mail/All"
+    state: directory
+    owner: "{{ threlium_user }}"
+    group: "{{ threlium_user }}"
+    mode: "0755"
+
+- name: Ensure dovecot-virtual file exists
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../roles/threlium/files/mail-archive/dovecot-virtual"
+    dest: "{{ threlium_home }}/virtual_mail/All/dovecot-virtual"
+    owner: "{{ threlium_user }}"
+    group: "{{ threlium_user }}"
+    mode: "0644"
+
+- name: Ensure mail-archive web_root exists
+  ansible.builtin.file:
+    path: "{{ threlium_mail_archive_web_root }}"
+    state: directory
+    owner: "{{ threlium_user }}"
+    group: "{{ threlium_user }}"
+    mode: "0755"
+
+# --- Cockpit-пакет (manifest + index + symlink) ---
+
+- name: Deploy Cockpit package manifest.json into web_root
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/manifest.json.j2"
+    dest: "{{ threlium_mail_archive_web_root }}/manifest.json"
+    owner: "{{ threlium_user }}"
+    group: "{{ threlium_user }}"
+    mode: "0644"
+
+- name: Deploy Cockpit package index.html into web_root
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/index.html.j2"
+    dest: "{{ threlium_mail_archive_web_root }}/index.html"
+    owner: "{{ threlium_user }}"
+    group: "{{ threlium_user }}"
+    mode: "0644"
+
+- name: Ensure ~/.local/share/cockpit directory exists for agent user
+  ansible.builtin.file:
+    path: "{{ threlium_posix_home }}/.local/share/cockpit"
+    state: directory
+    owner: "{{ threlium_user }}"
+    group: "{{ threlium_user }}"
+    mode: "0755"
+  become: true
+  become_user: "{{ threlium_user }}"
+
+- name: Symlink Cockpit package to agent user local share
+  ansible.builtin.file:
+    src: "{{ threlium_mail_archive_web_root }}"
+    dest: "{{ threlium_posix_home }}/.local/share/cockpit/threlium-mail-archive"
+    state: link
+    force: true
+  become: true
+  become_user: "{{ threlium_user }}"
+
+# --- Конфиги (system) ---
+
+- name: Deploy Cockpit configuration
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/cockpit.conf.j2"
+    dest: /etc/cockpit/cockpit.conf
+    mode: "0644"
+  become: true
+  register: threlium_cockpit_conf_deployed
+
+- name: Deploy Threlium Cockpit TLS clean oneshot unit
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/threlium-cockpit-tls-clean.service.j2"
+    dest: /etc/systemd/system/threlium-cockpit-tls-clean.service
+    mode: "0644"
+  become: true
+
+- name: Enable Threlium Cockpit TLS clean unit (WantedBy cockpit.service)
+  ansible.builtin.systemd:
+    name: threlium-cockpit-tls-clean.service
+    enabled: true
+    daemon_reload: true
+  become: true
+
+# policy-rc.d (Docker/e2e bake): postinst cockpit не вызывает start; без явного systemd Caddy даёт 502 на :9090.
+- name: Enable and start Cockpit socket and service
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  become: true
+  loop:
+    - cockpit.socket
+    - cockpit.service
+
+- name: Deploy Dovecot webmail drop-in
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/99-threlium-webmail.conf.j2"
+    dest: /etc/dovecot/conf.d/99-threlium-webmail.conf
+    mode: "0644"
+  become: true
+  notify: restart dovecot
+
+- name: Deploy Dovecot global ACLs
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/global-acls.j2"
+    dest: /etc/dovecot/global-acls
+    mode: "0644"
+  become: true
+  notify: restart dovecot
+
+- name: Deploy Roundcube configuration
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/config.inc.php.j2"
+    dest: /etc/roundcube/config.inc.php
+    mode: "0640"
+    owner: root
+    group: www-data
+  become: true
+  no_log: true
+
+- name: Initialize Roundcube SQLite database
+  ansible.builtin.shell:
+    cmd: zcat -f /usr/share/roundcube/SQL/sqlite.initial.sql* | sqlite3 /var/lib/roundcube/sqlite.db
+    creates: /var/lib/roundcube/sqlite.db
+  become: true
+
+- name: Set permissions for Roundcube SQLite database
+  ansible.builtin.file:
+    path: /var/lib/roundcube/sqlite.db
+    owner: www-data
+    group: www-data
+    mode: "0660"
+  become: true
+
+- name: Set permissions for Roundcube lib directory
+  ansible.builtin.file:
+    path: /var/lib/roundcube
+    owner: www-data
+    group: www-data
+    mode: "0770"
+  become: true
+
+- name: Find PHP-FPM socket
+  ansible.builtin.find:
+    paths:
+      - /var/run/php
+      - /run/php
+    # По умолчанию file_type=file не включает Unix domain socket (S_IFSOCK) — matched остаётся 0 при живом FPM.
+    file_type: any
+    patterns: "php[0-9.]*-fpm.sock"
+  register: php_fpm_sock_search
+  become: true
+
+- name: Fail if PHP-FPM socket is not found
+  ansible.builtin.fail:
+    msg: "Не удалось найти сокет PHP-FPM в /var/run/php или /run/php."
+  when: php_fpm_sock_search.matched == 0
+
+- name: Set PHP-FPM socket path fact
+  ansible.builtin.set_fact:
+    php_fpm_sock: "{{ php_fpm_sock_search.files[0].path }}"
+
+- name: Deploy Caddyfile
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/mail-archive/Caddyfile.j2"
+    dest: /etc/caddy/Caddyfile
+    mode: "0644"
+  become: true
+  register: threlium_mail_archive_caddyfile_deployed
+
+# postinst apt уже мог поднять caddy с дефолтным конфигом; state: started тогда не перечитывает файл.
+# Acceptance в том же play ходит на :bind_port — без restart/reload слушатель остаётся старым (часто не 8080).
+# policy-rc.d / Docker bake не запускают пакеты из postinst; reload не поднимает inactive unit.
+- name: Enable and start Caddy
+  ansible.builtin.systemd:
+    name: caddy
+    state: started
+    enabled: true
+  become: true
+
+- name: Restart Caddy so runtime matches Caddyfile (apt autostart keeps default config until restart; idempotent runs may skip template task)
+  ansible.builtin.systemd:
+    name: caddy
+    state: restarted
+  become: true

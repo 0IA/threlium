@@ -1,0 +1,39 @@
+---
+# Флаги каналов и готовность мостов по секретам (site.yml, refresh prelude).
+
+- name: Derive bridge enabled flags from threlium_channels
+  ansible.builtin.set_fact:
+    threlium_bridge_telegram_enabled: "{{ 'telegram' in threlium_channels }}"
+    threlium_bridge_matrix_enabled: "{{ 'matrix' in threlium_channels }}"
+
+- name: Derive bridge readiness from optional secrets
+  ansible.builtin.set_fact:
+    threlium_email_bridge_creds_ok: >-
+      {{
+        ('email' in threlium_channels)
+        and ((threlium_bridges.email.imap_host | default('') | trim | length) > 0)
+        and ((threlium_bridges.email.imap_user | default('') | trim | length) > 0)
+        and ((threlium_bridges.email.imap_pass | default('') | trim | length) > 0)
+        and ((threlium_msmtp.host | default('') | trim | length) > 0)
+      }}
+    threlium_telegram_bridge_creds_ok: >-
+      {{
+        (threlium_bridge_telegram_enabled | bool)
+        and ((threlium_bridges.telegram.bot_token | default('') | trim | length) > 0)
+      }}
+    threlium_matrix_bridge_creds_ok: >-
+      {{
+        (threlium_bridge_matrix_enabled | bool)
+        and ((threlium_bridges.matrix.homeserver | default('') | trim | length) > 0)
+        and ((threlium_bridges.matrix.user | default('') | trim | length) > 0)
+        and ((threlium_bridges.matrix.token | default('') | trim | length) > 0)
+      }}
+
+- name: Derive bridge instance units from readiness
+  ansible.builtin.set_fact:
+    threlium_bridge_instance_units: >-
+      {{
+        (['threlium-bridge@email.service'] if (threlium_email_bridge_creds_ok | default(false) | bool) else [])
+        + (['threlium-bridge@telegram.service'] if (threlium_telegram_bridge_creds_ok | default(false) | bool) else [])
+        + (['threlium-bridge@matrix.service'] if (threlium_matrix_bridge_creds_ok | default(false) | bool) else [])
+      }}

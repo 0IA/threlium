@@ -1,0 +1,5 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/ARCHITECTURE.md §6.2: cli_intent rejects on unparsable JSON.
+    Route: ingress@localhost; Subject: cli_intent/invalid_subject.j2. -#}
+Threlium cli_intent: invalid or missing JSON intent. Expected a single JSON object with {"cli":{"argv":["cmd",...],"cwd":"..."}}.

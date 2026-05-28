@@ -1,0 +1,39 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    ADR 0001: first enrich LLM step — formulate LightRAG query.
+    Optimized: only recent messages (full) + subject skeleton (older) to reduce noise. -#}
+You help formulate a retrieval question for a knowledge graph (LightRAG) over indexed email.
+
+Notmuch scope for this dialog: {{ scope }}
+
+The operator will use your output verbatim as the graph query text.
+Formulate a question that fills information gaps in the recent conversation.
+Be concise; no markdown fences; no role-play.
+
+{% if subject_skeleton %}
+--- thread timeline ({{ subject_skeleton | length }} older messages, subjects only) ---
+{% for entry in subject_skeleton %}
+{{ entry.date }} | {{ entry.from }} | {{ entry.subject }}
+{% endfor %}
+
+{% endif %}
+{% if recent_messages %}
+--- recent messages (last {{ recent_messages | length }}, full body) ---
+{% for msg in recent_messages %}
+--- message ---
+From: {{ msg.get('From', '') }}
+To: {{ msg.get('To', '') }}
+Date: {{ msg.get('Date', '') }}
+Subject: {{ msg.get('Subject', '') }}
+{% set part = msg.get_body(preferencelist=('plain', 'html')) %}
+{% if part %}
+{{ part.get_content() }}
+{% endif %}
+
+{% endfor %}
+{% endif %}
+
+Incoming message (canonical):
+{{ incoming_user_message }}
+
+Reply with ONLY the question text to send to the graph.

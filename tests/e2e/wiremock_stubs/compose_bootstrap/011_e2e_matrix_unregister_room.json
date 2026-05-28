@@ -1,0 +1,31 @@
+{
+  "id": "ba116692-16fb-50ad-94ae-177db4b98741",
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/matrix/unregister_room"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "room_id": "{{jsonPath request.body '$.room_id'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "deleteState",
+      "parameters": {
+        "context": "matrix_rooms",
+        "list": {
+          "deleteWhere": {
+            "property": "room_id",
+            "value": "{{jsonPath request.body '$.room_id'}}"
+          }
+        }
+      }
+    }
+  ]
+}

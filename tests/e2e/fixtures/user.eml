@@ -1,0 +1,7 @@
+From: sender@example.com
+To: user@localhost
+Subject: e2e inbound
+Message-ID: <e2e-user-fixture@localhost>
+Content-Type: text/plain; charset=utf-8
+
+Hello from user.eml fixture.

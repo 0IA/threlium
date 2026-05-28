@@ -1,0 +1,31 @@
+{
+  "id": "ba116692-16fb-50ad-94ae-177db4b98753",
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/telegram/unregister_update"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "update_id": "{{jsonPath request.body '$.update_id'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "deleteState",
+      "parameters": {
+        "context": "telegram_updates",
+        "list": {
+          "deleteWhere": {
+            "property": "update_id",
+            "value": "{{jsonPath request.body '$.update_id'}}"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,90 @@
+"""response_finalize@localhost → egress_router@localhost | ingress@localhost.
+
+Четыре режима:
+
+* **Mode 1**: buffer пуст + content есть → быстрый ответ (только content) → egress_router
+* **Mode 2**: buffer есть + content пуст → ответ из буфера → egress_router
+* **Mode 3**: buffer есть + content есть → buffer + content → egress_router
+* **Mode 4**: buffer пуст + content пуст → response_not_formed.j2 → ingress
+"""
+from __future__ import annotations
+
+from email.message import EmailMessage
+
+from threlium.fsm_emit import build_fsm_plain_to_stage
+from threlium.logutil import logger
+from threlium.mime_reform import extract_plain_body
+from threlium.prompts import render_prompt
+from threlium.response.collect import collect_ops
+from threlium.response.reduce import reduce_ops
+from threlium.settings import ThreliumSettings
+from threlium.types import (
+    FsmStage,
+    FsmTransitionPlainBody,
+    FsmTransitionPlainSubjectLine,
+    MailHeaderName,
+    NotmuchMessageIdInner,
+    PromptPath,
+    RfcMessageIdWire,
+)
+
+log = logger.bind(stage="response_finalize")
+
+
+def main(
+    msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
+) -> EmailMessage | None:
+    mid_w = RfcMessageIdWire.parse_present_from_email(msg, MailHeaderName.MESSAGE_ID.value)
+    inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
+    if inner is None:
+        raise RuntimeError("response_finalize: no Message-ID on incoming message")
+
+    inline_content = extract_plain_body(msg).strip() or None
+
+    ops = collect_ops(inner)
+    buffer_text = reduce_ops(ops).strip() or None
+
+    has_buffer = buffer_text is not None
+    has_content = inline_content is not None
+
+    subject_raw = (
+        msg.get(MailHeaderName.SUBJECT)
+        or render_prompt(PromptPath.RESPONSE_FINALIZE_FALLBACK_SUBJECT).strip()
+    )
+
+    if has_buffer or has_content:
+        mode = 3 if (has_buffer and has_content) else (2 if has_buffer else 1)
+        final_body = render_prompt(
+            PromptPath.RESPONSE_FINALIZE_COMPOSE,
+            buffer_text=buffer_text,
+            inline_content=inline_content,
+        ).strip()
+    else:
+        mode = 4
+        log.warning("empty_buffer_and_content", mode=4, message_id=mid_w.value if mid_w else None)
+        notice = render_prompt(PromptPath.INGRESS_RESPONSE_NOT_FORMED).strip()
+        return build_fsm_plain_to_stage(
+            msg,
+            to_addr=FsmStage.INGRESS,
+            from_stage=stage,
+            body=FsmTransitionPlainBody.parse(notice),
+            settings=config,
+        )
+
+    log.info(
+        "finalized",
+        mode=mode,
+        has_buffer=has_buffer,
+        has_content=has_content,
+        body_chars=len(final_body),
+        message_id=mid_w.value if mid_w else None,
+    )
+
+    return build_fsm_plain_to_stage(
+        msg,
+        to_addr=FsmStage.EGRESS_ROUTER,
+        from_stage=stage,
+        body=FsmTransitionPlainBody.parse(final_body),
+        subject_line=FsmTransitionPlainSubjectLine.parse(subject_raw),
+        settings=config,
+    )

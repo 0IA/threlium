@@ -1,0 +1,189 @@
+---
+# Канонический состав FSM-стадий = модули threlium/states/*.py.
+# Источник истины — docs/FSM.md §2.1; зеркало для Ansible-loop'ов.
+threlium_fsm_mailbox_stages:
+  - { id: ingress }
+  - { id: enrich }
+  - { id: reasoning }
+  - { id: reflect }
+  - { id: thread_memory }
+  - { id: global_memory }
+  - { id: subagent_intent }
+  - { id: subagent_end }
+  - { id: cli_intent }
+  - { id: cli_hitl_out }
+  - { id: cli_resume }
+  - { id: cli_exec }
+  - { id: response_append }
+  - { id: response_edit }
+  - { id: response_observe }
+  - { id: enrich_fast }
+  - { id: response_finalize }
+  - { id: egress_router }
+  - { id: egress_email }
+  - { id: egress_telegram }
+  - { id: egress_matrix }
+  - { id: archive }
+
+threlium_fsm_stage_ids: "{{ threlium_fsm_mailbox_stages | map(attribute='id') | list }}"
+
+# Стадия archive — обычный stages/archive/Maildir (см. threlium_fsm_mailbox_stages), не legacy archive/Maildir вне stages/.
+# Для bootstrap Maildir (site.yml) и acceptance — durable Maildir'ы по threlium_maildir_rel_paths.
+threlium_maildir_rel_paths: "{{ threlium_fsm_mailbox_stages | map(attribute='id') | map('regex_replace', '^(.*)$', 'stages/\\1/Maildir') | list }}"
+
+# Base values for combine() merge in site.yml: user overrides threlium_* partially.
+_threlium_litellm_base:
+  max_retries: 3
+  length_recovery_max_attempts: 2
+  llm_endpoints:
+    - score: 0.0
+      enabled: true
+      model: "gpt-4o-mini"
+      api_base: ""
+      api_key: null
+      timeout: 120
+  embedding_endpoints:
+    - embedding_score: 0.0
+      enabled: true
+      model: "text-embedding-3-small"
+      api_base: ""
+      api_key: null
+      timeout: 120
+  targets:
+    reasoning:
+      target_score: 0.0
+    enrich_plan:
+      target_score: 0.0
+    lightrag_llm:
+      target_score: 0.0
+    lightrag_embedding:
+      target_embedding_score: 0.0
+    lightrag_rerank:
+      target_rerank_score: 0.0
+
+_threlium_lightrag_base:
+  language: "Russian"
+  entity_types: "person,organization,location,concept,event,technology,document"
+  chunk_body_tokens: 1200
+  chunk_body_overlap_pct: 10
+  insert_batch: 8
+  max_parallel_insert: 2
+  llm_model_max_async: 4
+  embedding_func_max_async: 4
+  prompts_overlay: true
+  aquery_hints: ""
+  query_api: "aquery_llm"
+  query_mode: "hybrid"
+  query_top_k: 20
+  query_chunk_top_k: 10
+  query_max_total_tokens: 15000
+  query_max_entity_tokens: 4000
+  query_max_relation_tokens: 5000
+  query_response_type: "Concise Bullet Points"
+  enable_rerank: true
+  rag_loop_shutdown_timeout_sec: 30
+  llm_max_tokens: 0
+
+_threlium_enrich_base:
+  context_thread_n: 200
+  context_thread_memory_n: 100
+  context_global_n: 100
+  context_max_chars: 180000
+  tier1_full: 5
+  tier2_summary: 15
+  tier_preview_chars: 200
+  plan_recent_n: 5
+  priority_user: 10.0
+  priority_graph: 6.0
+  priority_unified: 8.0
+  priority_thread_mem: 4.0
+  priority_global_mem: 3.0
+  priority_extra: 5.0
+  type_weight_user_input: 1.0
+  type_weight_agent_response: 0.7
+  type_weight_tool_observation: 0.5
+  type_weight_system: 0.3
+  type_weight_service: 0.1
+
+# Внутренний контракт: обязательные Jinja2-промпты (не user-facing настройка).
+threlium_required_prompts:
+  - lightrag/ingest_body.j2
+  - lightrag/enrich_query_plan.j2
+  - lightrag/enrich_incoming_user_text.j2
+  - lightrag/enrich_aquery_user.j2
+  - lightrag/mail_context.j2
+  - ingress/orphan_notice.j2
+  - runners/lightrag/addon_params.j2
+  - lightrag/entity_extraction_system_prompt.j2
+  - lightrag/entity_extraction_user_prompt.j2
+  - lightrag/entity_continue_extraction_user_prompt.j2
+  - lightrag/entity_extraction_examples.j2
+  - lightrag/summarize_entity_descriptions.j2
+  - lightrag/fail_response.j2
+  - lightrag/rag_response.j2
+  - lightrag/naive_rag_response.j2
+  - lightrag/kg_query_context.j2
+  - lightrag/naive_query_context.j2
+  - lightrag/keywords_extraction.j2
+  - lightrag/keywords_extraction_examples.j2
+  - reflect/continue.j2
+  - reflect/final.j2
+  - cli_intent/invalid.j2
+  - cli_intent/invalid_subject.j2
+  - cli_intent/denied.j2
+  - cli_intent/denied_subject.j2
+  - cli_resume/intent_not_found.j2
+  - cli_resume/intent_not_found_subject.j2
+  - cli_resume/bad_intent.j2
+  - cli_resume/bad_intent_subject.j2
+  - cli_resume/not_confirmed.j2
+  - cli_resume/not_confirmed_subject.j2
+  - cli_hitl_out/confirm.j2
+  - cli_hitl_out/unparsable.j2
+  - cli_hitl_out/subject.j2
+  - cli_exec/observation.j2
+  - egress/self_archive_subject.j2
+  - egress/self_archive_body.j2
+  - subagent_intent/budget_exhausted.j2
+  - subagent_intent/budget_exhausted_subject.j2
+  - reasoning/system.j2
+  - reasoning/user.j2
+  - reasoning/egress_router/tool_spec.j2
+  - reasoning/egress_router/email_body.j2
+  - reasoning/egress_router/email_subject.j2
+  - reasoning/cli_intent/tool_spec.j2
+  - reasoning/cli_intent/email_body.j2
+  - reasoning/cli_intent/email_subject.j2
+  - reasoning/thread_memory/tool_spec.j2
+  - reasoning/thread_memory/email_body.j2
+  - reasoning/thread_memory/email_subject.j2
+  - reasoning/global_memory/tool_spec.j2
+  - reasoning/global_memory/email_body.j2
+  - reasoning/global_memory/email_subject.j2
+  - reasoning/subagent_intent/tool_spec.j2
+  - reasoning/subagent_intent/email_body.j2
+  - reasoning/subagent_intent/email_subject.j2
+  - reasoning/reflect/tool_spec.j2
+  - reasoning/reflect/email_body.j2
+  - reasoning/reflect/email_subject.j2
+  - reasoning/response_append/tool_spec.j2
+  - reasoning/response_append/email_body.j2
+  - reasoning/response_append/email_subject.j2
+  - reasoning/response_edit/tool_spec.j2
+  - reasoning/response_edit/email_body.j2
+  - reasoning/response_edit/email_subject.j2
+  - reasoning/response_observe/tool_spec.j2
+  - reasoning/response_observe/email_body.j2
+  - reasoning/response_observe/email_subject.j2
+  - reasoning/response_finalize/tool_spec.j2
+  - reasoning/response_finalize/email_body.j2
+  - reasoning/response_finalize/email_subject.j2
+  - ingress/response_not_formed.j2
+  - response_observe/state_summary.j2
+  - response_observe/observe_system.j2
+  - response_observe/observe_user.j2
+  - response_finalize/compose.j2
+  - response_finalize/fallback_subject.j2
+  - response_finalize/chunk_assembly.j2
+  - response_edit/error_invalid_body.j2
+  - response_edit/error_invalid_position.j2

@@ -1,0 +1,19 @@
+<?php
+$config = array();
+$config['db_dsnw'] = 'sqlite:////var/lib/roundcube/sqlite.db';
+$config['default_host'] = 'localhost';
+$config['default_port'] = 143;
+$config['smtp_server'] = ''; // read-only interface, no SMTP
+$config['des_key'] = '{{ roundcube_des_key_slurp.content | b64decode }}';
+$config['plugins'] = array('archive', 'zipdownload');
+$config['language'] = 'en_US';
+$config['ignore_subscriptions'] = true;
+$config['session_lifetime'] = 1440;
+// Не слать STORE «прочитано» при открытии (см. mail_read_time в defaults.inc.php); в паре с Dovecot ACL lr.
+$config['mail_read_time'] = -1;
+
+// Threlium: threads + date sort; сводная виртуальная папка как «архив» и в default_folders.
+$config['message_sort_col'] = 'date';
+$config['default_list_mode'] = 'threads';
+$config['archive_mbox'] = 'Virtual/All';
+$config['default_folders'] = array('INBOX', 'Virtual/All');

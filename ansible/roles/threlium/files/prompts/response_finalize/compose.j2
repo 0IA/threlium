@@ -1,0 +1,11 @@
+{#- Final response body assembly for modes 1–3.
+    Variables: buffer_text (str|None), inline_content (str|None).
+    At least one is non-empty (mode 4 is handled separately). -#}
+{% if buffer_text and inline_content -%}
+{{ buffer_text }}
+{{ inline_content }}
+{%- elif buffer_text -%}
+{{ buffer_text }}
+{%- elif inline_content -%}
+{{ inline_content }}
+{%- endif %}

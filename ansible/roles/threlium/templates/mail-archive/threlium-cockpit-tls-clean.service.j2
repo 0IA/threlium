@@ -1,0 +1,15 @@
+# Managed by Ansible — threlium mail-archive web stack.
+# cockpit-certificate-ensure падает на «mkdir: .../tls/server: File exists», если в /run остались каталоги после остановки cockpit.service.
+[Unit]
+Description=Threlium: clear Cockpit runtime TLS directory before cockpit.service
+Documentation=https://github.com/cockpit-project/cockpit/issues/17374
+After=local-fs.target
+Before=cockpit.service
+
+[Service]
+Type=oneshot
+ExecStart=-/bin/rm -rf /run/cockpit/tls
+RemainAfterExit=no
+
+[Install]
+WantedBy=cockpit.service

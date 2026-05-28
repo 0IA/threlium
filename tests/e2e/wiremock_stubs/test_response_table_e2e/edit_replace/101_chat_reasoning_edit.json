@@ -1,0 +1,79 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Call-Site": {
+        "equalTo": "fsm"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "<envelope>"
+      },
+      {
+        "contains": "\"tools\""
+      },
+      {
+        "contains": "Response buffer"
+      },
+      {
+        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
+      }
+    ],
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-resp-edit-replace-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasProperty": "phase_append",
+        "hasNotProperty": "phase_edit"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-e2e-edit-replace-reasoning-2",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_e2e_edit_replace_edit",
+                "type": "function",
+                "function": {
+                  "name": "response_edit",
+                  "arguments": "{\"reasoning\": \"e2e: editing buffer chunk to fix content\", \"position\": 0, \"new_content\": \"E2E-EDIT-REPLACED-TEXT: This replacement text proves the edit operation works.\"}"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "stub-resp-edit-replace-01::{{request.headers.[x-threlium-thread-root]}}",
+        "state": {
+          "phase_edit": "1"
+        }
+      }
+    }
+  ]
+}

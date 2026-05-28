@@ -1,0 +1,35 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    reflect final cycle user-visible body. -#}
+[Threlium reflect — final cycle]
+
+Subject: {{ subject or "(no subject)" }}
+
+Hop budget: only {{ remaining_hops }} hop(s) remain on the current frame.
+One reflect cycle (reflect -> ingress -> enrich -> reasoning) costs {{ cycle_cost }} hops,
+so this is your LAST reasoning pass through enrich. After this you will not
+get another refreshed LightRAG context — further reflect calls will exhaust
+the hop budget and the FSM may terminate with a "processing limit" fallback.
+
+Below is your previous reasoning output verbatim. After this body is routed
+through ingress and enrich one final time, your next reasoning step MUST
+deliver the user reply via response_finalize (or response_append then
+response_finalize). Do NOT call reflect, cli_intent, or subagent_intent.
+
+Guidelines for the next reasoning step:
+- Treat the text below as your own previous draft.
+- Integrate whatever the final LightRAG enrich brings in, then commit.
+- Do NOT call reflect again — there is not enough budget left for a useful
+  cycle. Summarize and finalize.
+- Do NOT requote the previous draft verbatim in your next body.
+
+Finalization strategy:
+- This is your last chance to produce a quality response. Make it count.
+- Merge accumulated knowledge into a coherent answer. Prioritize graph facts over assumptions.
+- If some parts remain unanswered, state what could not be determined and why.
+- Route to response_finalize (with content) or response_append then response_finalize.
+- Do NOT route to reflect, cli_intent, or subagent_intent — insufficient budget.
+
+--- previous reasoning output ---
+{{ previous_reasoning }}
+--- end previous reasoning output ---

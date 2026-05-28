@@ -1,0 +1,106 @@
+---
+threlium_user: "threlium"
+# threlium_repo_path, threlium_home, threlium_systemd_user_dir, threlium_posix_home —
+# derived в site.yml через getent после создания пользователя.
+# threlium_repo_path можно переопределить в inventory (единственный путь с override).
+threlium_bundle_enabled: true
+
+# Уровень логирования: DEBUG, INFO, WARNING, ERROR
+threlium_log_level: "DEBUG"
+
+# Каналы: какие systemd bridge unit'ы создаются. bridge_*_enabled выводится автоматически.
+threlium_channels:
+  - email
+
+# =============================================================================
+# litellm — partial override: задайте только нужные поля, остальное из _base.
+# Полные defaults: vars/main.yml → _threlium_litellm_base.
+# Справочник vLLM: см. docs/PLAYBOOK.md.
+# =============================================================================
+threlium_litellm: {}
+
+# =============================================================================
+# lightrag — partial override: задайте только нужные поля.
+# Полные defaults: vars/main.yml → _threlium_lightrag_base.
+# =============================================================================
+threlium_lightrag: {}
+
+# =============================================================================
+# enrich — partial override.
+# =============================================================================
+threlium_enrich: {}
+
+# =============================================================================
+# bridges — определяйте только каналы из threlium_channels.
+# Структура 1:1 с секцией bridges в config/threlium.yaml.
+# =============================================================================
+threlium_bridges:
+  email:
+    imap_host: ""
+    imap_user: ""
+    imap_pass: "{{ vault_fetchmail_password | default('') }}"
+    imap_port: 0
+    imap_use_ssl: true
+    imap_ssl_verify: true
+    imap_idle_max_sec: 1740
+
+# =============================================================================
+# cli — песочница systemd-run для cli_exec.
+# Структура 1:1 с секцией cli в config/threlium.yaml.
+# =============================================================================
+threlium_cli:
+  exec_timeout: 30
+  exec_memory_max: "256M"
+  exec_cpu_quota: "100%"
+  exec_tasks_max: 16
+  allowlist: "ls,cat,pwd,echo,true"
+
+# =============================================================================
+# hop / cap — бюджеты FSM и capability-строки.
+# Структура 1:1 с секциями hop, cap в config/threlium.yaml.
+# =============================================================================
+threlium_hop:
+  budget_root: 48
+  budget_sub: 48
+threlium_cap:
+  root: ""
+  sub: ""
+
+# =============================================================================
+# egress — исходящая почта агента.
+# Структура 1:1 с секцией egress в config/threlium.yaml.
+# =============================================================================
+threlium_egress:
+  email_from: "agent@localhost"
+
+# =============================================================================
+# msmtp — SMTP relay. tls/auth всегда on (для e2e без TLS задайте tls: false).
+# =============================================================================
+threlium_msmtp:
+  host: "{{ vault_smtp_host | default('') }}"
+  port: 587
+  user: "{{ vault_smtp_user | default('') }}"
+  password: "{{ vault_smtp_password | default(vault_msmtp_password | default('')) }}"
+  from_addr: "{{ vault_smtp_from | default('threlium@localhost') }}"
+
+# Веб-архив почты: Caddy + Cockpit + Roundcube + Dovecot.
+threlium_mail_archive_web_enabled: true
+threlium_mail_archive_caddy_bind_port: 8080
+threlium_mail_archive_web_root: "{{ threlium_home }}/www/cockpit-mail-plugin"
+threlium_mail_archive_cockpit_origins_extra: []
+
+# systemd user units (списки для loop в site.yml / refresh.yml).
+threlium_engine_units: ['threlium-engine.service']
+threlium_work_slice: ['threlium-work.slice']
+threlium_path_unit_names: []
+
+# Пароль для интерактивного входа под threlium_user (PAM): Cockpit, SSH с паролем и т.п.
+# Пусто — учётная запись без пароля (только ключи/сессии без пароля). Задаётся в inventory (напр. e2e).
+threlium_agent_login_password: ""
+
+# SSH hardening: authorized_keys + drop-in sshd_config.d + lineinfile.
+# Ключ определяется автоматически (find на ~/.ssh/*.pub с приоритетом ed25519 > ecdsa > rsa).
+# Для ручного override задайте threlium_ssh_pubkey_file или env SSH_PUBKEY_FILE.
+threlium_ssh_hardening_enabled: true
+threlium_ssh_pubkey_file: ""
+

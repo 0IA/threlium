@@ -1,0 +1,35 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/MEMORY_TABLE.md §3 / docs/INDEX.md §7: tool-spec for route `reflect`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "reflect",
+    "description": "Request another reasoning cycle with refreshed LightRAG context. Costs ~3 hops; use only when re-enrich will add information. Do not copy prior turns — provide a short summary and explicit clarification request for LightRAG retrieval.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Brief explanation of why current context is insufficient and what you expect the reflect cycle to provide."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "Brief summary of current reasoning (known facts, conclusions in progress)."
+        },
+        "clarification_request": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "What to clarify or expand next — question or hypothesis for LightRAG retrieval."
+        }
+      },
+      "required": ["reasoning", "summary", "clarification_request"],
+      "additionalProperties": false
+    }
+  }
+}

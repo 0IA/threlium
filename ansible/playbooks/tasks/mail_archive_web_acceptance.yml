@@ -1,0 +1,137 @@
+---
+# Acceptance: mail-archive web stack (Caddy, Cockpit, Roundcube).
+# HTTP(S)-пробы только на target (127.0.0.1): Cockpit :9090 и край Caddy :bind_port.
+# Внешние reverse-proxy / mTLS / публикация (напр. example.com) — не зона этого плейбука.
+# Подключается из site.yml с tags: [deploy] только (не refresh); when: threlium_mail_archive_web_enabled | bool.
+
+# --- 1. Cockpit напрямую на loopback :9090 (cockpit.conf.j2) ---
+
+- name: "Acceptance — mail-archive web: Cockpit HTTPS on loopback :9090 reachable"
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:9090/"
+    return_content: false
+    follow_redirects: none
+    status_code: [200, 301, 302]
+    validate_certs: false
+  register: threlium_acceptance_cockpit_direct
+  until: threlium_acceptance_cockpit_direct is succeeded
+  retries: 15
+  delay: 2
+
+# --- 2. Край Caddy на loopback (reverse_proxy → Cockpit; /webmail → Roundcube) ---
+
+- name: "Acceptance — mail-archive web: Caddy root on loopback reachable"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ threlium_mail_archive_caddy_bind_port }}/"
+    return_content: false
+    follow_redirects: none
+    status_code: [200, 301, 302]
+    validate_certs: false
+  register: threlium_acceptance_caddy_root
+  until: threlium_acceptance_caddy_root is succeeded
+  retries: 15
+  delay: 2
+
+- name: "Acceptance — mail-archive web: Caddy webmail path on loopback reachable"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ threlium_mail_archive_caddy_bind_port }}/webmail/"
+    return_content: false
+    follow_redirects: none
+    status_code: [200, 301, 302]
+    validate_certs: false
+  register: threlium_acceptance_caddy_webmail
+  until: threlium_acceptance_caddy_webmail is succeeded
+  retries: 15
+  delay: 2
+
+- name: "Acceptance — mail-archive web: Roundcube elastic CSS (not PHP login HTML)"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ threlium_mail_archive_caddy_bind_port }}/webmail/skins/elastic/styles/styles.min.css"
+    return_content: true
+    validate_certs: false
+    follow_redirects: none
+  register: threlium_acceptance_webmail_css
+
+- name: "Acceptance — mail-archive web: CSS is real stylesheet"
+  ansible.builtin.assert:
+    that:
+      - threlium_acceptance_webmail_css.status == 200
+      - "'<!DOCTYPE' not in (threlium_acceptance_webmail_css.content | default(''))"
+      - not ((threlium_acceptance_webmail_css.content | default('') | length) <= 1000)
+      - "'text/css' in (threlium_acceptance_webmail_css.content_type | default('') | lower)"
+    fail_msg: "Статика Roundcube под /webmail/ отдаётся как HTML (ожидался CSS); проверьте Caddy handle_path и root."
+
+# --- 3. Cockpit package symlink ---
+
+- name: "Acceptance — mail-archive web: Cockpit package symlink exists"
+  ansible.builtin.stat:
+    path: "{{ threlium_posix_home }}/.local/share/cockpit/threlium-mail-archive"
+  register: threlium_acceptance_cockpit_symlink
+
+- name: "Acceptance — mail-archive web: symlink is valid"
+  ansible.builtin.assert:
+    that:
+      - threlium_acceptance_cockpit_symlink.stat.islnk | default(false)
+    fail_msg: "Symlink Cockpit-пакета не найден: {{ threlium_posix_home }}/.local/share/cockpit/threlium-mail-archive"
+
+# --- 3a. User session D-Bus (Cockpit user Services) ---
+
+- name: "Acceptance — mail-archive web: user session D-Bus socket exists"
+  ansible.builtin.stat:
+    path: "/run/user/{{ threlium_user_uid }}/bus"
+  register: threlium_acceptance_user_dbus_bus
+
+- name: "Acceptance — mail-archive web: user session D-Bus socket is socket"
+  ansible.builtin.assert:
+    that:
+      - threlium_acceptance_user_dbus_bus.stat.exists | default(false)
+      - threlium_acceptance_user_dbus_bus.stat.issock | default(false)
+    fail_msg: >-
+      Нет сокета user session D-Bus: ожидается /run/user/{{ threlium_user_uid }}/bus
+      (пакет dbus-user-session, перезапуск user@ после apt в mail_archive_web.yml).
+
+# --- 4. manifest.json в web_root ---
+
+- name: "Acceptance — mail-archive web: manifest.json exists in web_root"
+  ansible.builtin.stat:
+    path: "{{ threlium_mail_archive_web_root }}/manifest.json"
+  register: threlium_acceptance_manifest
+
+- name: "Acceptance — mail-archive web: manifest.json present"
+  ansible.builtin.assert:
+    that:
+      - threlium_acceptance_manifest.stat.exists | default(false)
+      - threlium_acceptance_manifest.stat.isreg | default(false)
+    fail_msg: "Нет manifest.json в {{ threlium_mail_archive_web_root }}/"
+
+# --- 5. index.html существует (локально на target) ---
+
+- name: "Acceptance — mail-archive web: index file exists"
+  ansible.builtin.stat:
+    path: "{{ threlium_mail_archive_web_root }}/index.html"
+  register: threlium_acceptance_index
+
+- name: "Acceptance — mail-archive web: index.html present"
+  ansible.builtin.assert:
+    that:
+      - threlium_acceptance_index.stat.exists | default(false)
+    fail_msg: "Индекс index.html не найден в {{ threlium_mail_archive_web_root }}/"
+
+# --- 6. Webhook socket/service НЕ деплоены (заменены на Caddy) ---
+
+- name: "Acceptance — mail-archive web: webhook units absent (replaced by Caddy)"
+  ansible.builtin.stat:
+    path: "{{ threlium_repo_path }}/systemd/user/{{ item }}"
+  register: threlium_acceptance_no_webhook
+  loop:
+    - threlium-mail-webhook.socket
+    - "threlium-mail-webhook@.service"
+
+- name: "Acceptance — mail-archive web: no webhook units"
+  ansible.builtin.assert:
+    that:
+      - not (item.stat.exists | default(false))
+    fail_msg: "Устаревший webhook unit найден: {{ item.item }} — должен быть удалён"
+  loop: "{{ threlium_acceptance_no_webhook.results }}"
+  loop_control:
+    label: "{{ item.item }}"

@@ -1,0 +1,29 @@
+# Managed by Ansible — предзагруженный FSM-движок (docs/ORCHESTRATION.md)
+[Unit]
+Description=Threlium FSM engine (pre-loaded)
+Documentation=file:{{ threlium_repo_path }}/docs/ARCHITECTURE.md
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+{# Дочерние процессы (воркеры, стадии) могут вызывать sd_notify — иначе journald:
+   «Got notification message from PID … reception only permitted for main PID». #}
+NotifyAccess=all
+EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env
+Environment=PATH={{ threlium_repo_path }}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory={{ threlium_repo_path }}
+ExecStart={{ threlium_repo_path }}/.venv/bin/python -m threlium.runners.engine
+Restart=always
+RestartSec=1s
+TimeoutStartSec=150
+{# ThreadingUnixStreamServer: после SIGTERM ``server_close()`` делает join активных
+   handler'ов; in-flight ``process_thread_message`` (enrich + LightRAG + цепочка LLM)
+   может идти минутами. RAG-loop: cancel задач на loop + finalize (типично секунды,
+   ``lightrag.rag_loop_shutdown_timeout_sec``). TimeoutStopSec=360 — запас под FSM/LLM,
+   не под штатный RAG-shutdown. #}
+TimeoutStopSec=360
+SyslogIdentifier=threlium-engine
+
+[Install]
+WantedBy=default.target

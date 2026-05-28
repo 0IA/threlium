@@ -1,0 +1,11 @@
+# Managed by Ansible — threlium mail-archive web stack.
+# Cockpit Origins: wildcard (*) запрещён (CSWSH). Caddy front and direct :9090.
+# Origins: localhost + cockpit_origins_extra.
+{% set _origins = ['https://127.0.0.1:9090', 'https://localhost:9090', 'https://127.0.0.1', 'https://localhost', 'http://127.0.0.1', 'http://localhost'] %}
+{% for o in threlium_mail_archive_cockpit_origins_extra | default([]) %}
+{%   set _ = _origins.append(o) %}
+{% endfor %}
+[WebService]
+Origins = {{ _origins | unique | join(' ') }}
+ListenStream = 127.0.0.1:9090
+ProtocolHeader = X-Forwarded-Proto

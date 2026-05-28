@@ -1,0 +1,5 @@
+{#- Assemble response chunks into final text.
+    Variable: parts (list[str]) — ordered live chunk texts.
+    Operator can change separator, add wrappers, numbering, etc. -#}
+{% for part in parts %}{{ part }}{% if not loop.last %}
+{% endif %}{% endfor %}

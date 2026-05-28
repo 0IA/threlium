@@ -1,0 +1,156 @@
+"""Msgspec-схемы native-id и ingress-маршрута (MESSAGES §2 / §8).
+
+Канонизация wire Message-ID: :class:`threlium.types.rfc.RfcMessageIdWire`, маршрут b62:
+:class:`threlium.types.ingress.IngressRouteB62Wire` / :func:`threlium.types.ingress.ingress_route_from_json_str`.
+"""
+from __future__ import annotations
+
+from typing import NewType, Self, TypeVar
+
+import msgspec
+
+from ._core import NonEmptyStr
+
+
+class ExternalRfcMidWire(msgspec.Struct, frozen=True):
+    """Внешний RFC ``Message-ID`` (SMTP, поле ``reply_target_rfc_message_id`` в JSON маршрута email)."""
+
+    value: str
+
+    @classmethod
+    def parse_optional(cls, raw: str | None) -> Self | None:
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s:
+            return None
+        v = s if s.startswith("<") and s.endswith(">") else f"<{s.strip('<>')}>"
+        return cls(value=v)
+
+# Opaque Matrix wire (JSON плоские строки; ``NewType`` — дискриминация на границе Python).
+MatrixSyncBatchCursor = NewType("MatrixSyncBatchCursor", str)
+MatrixRoomEventId = NewType("MatrixRoomEventId", str)
+# Идентификатор комнаты Matrix (CS API ``room_id``, opaque ``!…`` / alias).
+MatrixRoomId = NewType("MatrixRoomId", str)
+# Клиентский ``txnId`` для ``PUT …/send/…`` (идемпотентность отправки).
+MatrixRoomSendTxnId = NewType("MatrixRoomSendTxnId", str)
+
+
+class EmailNativeId(msgspec.Struct, frozen=True):
+    v: int
+    message_id: NonEmptyStr
+
+
+class TelegramNativeId(msgspec.Struct, frozen=True):
+    """Идентичность Telegram-сообщения для канонического ``<b62@localhost>``.
+
+    Минимальные поля, уникально идентифицирующие сообщение в Telegram.
+    Checkpoint-данные (``update_id``) — в ``TelegramIngressRoute``, не здесь.
+    """
+
+    v: int
+    chat_id: int
+    message_id: int
+    message_thread_id: int | None
+
+    @classmethod
+    def from_route(cls, r: TelegramIngressRoute) -> Self:
+        """Identity из маршрута (без checkpoint ``update_id``)."""
+        return cls(v=1, chat_id=r.chat_id, message_id=r.message_id,
+                   message_thread_id=r.message_thread_id)
+
+
+class MatrixNativeId(msgspec.Struct, frozen=True):
+    """Идентичность Matrix-события для канонического ``<b62@localhost>``.
+
+    Checkpoint-данные (``sync_batch``, ``reply_to_event_id``) — в ``MatrixIngressRoute``.
+    """
+
+    v: int
+    room_id: MatrixRoomId
+    event_id: MatrixRoomEventId
+
+    @classmethod
+    def from_route(cls, r: MatrixIngressRoute) -> Self:
+        """Identity из маршрута (без checkpoint ``sync_batch``)."""
+        return cls(v=1, room_id=r.room_id, event_id=r.event_id)
+
+
+NativeId = EmailNativeId | TelegramNativeId | MatrixNativeId
+
+TNative = TypeVar("TNative", EmailNativeId, TelegramNativeId, MatrixNativeId)
+
+
+class EmailIngressRoute(msgspec.Struct, frozen=True):
+    channel: NonEmptyStr
+    origin: NonEmptyStr
+    v: int = 1
+    #: RFC ``Message-ID`` этого входного письма (внешний контур), для SMTP ``In-Reply-To`` на ответ агента.
+    reply_target_rfc_message_id: ExternalRfcMidWire | None = None
+
+
+class TelegramIngressRoute(msgspec.Struct, frozen=True):
+    channel: NonEmptyStr
+    v: int
+    chat_id: int
+    message_id: int
+    message_thread_id: int | None
+    update_id: int
+
+
+class MatrixIngressRoute(msgspec.Struct, frozen=True):
+    channel: NonEmptyStr
+    v: int
+    room_id: MatrixRoomId
+    event_id: MatrixRoomEventId
+    sync_batch: MatrixSyncBatchCursor | None
+    reply_to_event_id: MatrixRoomEventId | None = None
+
+
+IngressRoute = EmailIngressRoute | TelegramIngressRoute | MatrixIngressRoute
+
+_OPTIONAL_STR_KEYS_EMPTY_TO_NONE = frozenset({"sync_batch", "reply_to_event_id"})
+
+
+def normalize_ingress_route_dict(d: dict[str, object]) -> dict[str, object]:
+    """Единственная фабрика границы **JSON / dict →** :class:`IngressRoute` (перед ``msgspec.convert``).
+
+    Strip для строковых полей; пустая строка после strip → ошибка (кроме опциональных
+    ключей в ``_OPTIONAL_STR_KEYS_EMPTY_TO_NONE``). Не дублировать эту нормализацию
+    в других местах.
+    """
+    out: dict[str, object] = {}
+    for k, v in d.items():
+        if k == "reply_target_rfc_message_id":
+            if v is None:
+                out[k] = None
+            elif isinstance(v, dict):
+                inner = v.get("value")
+                if inner is None:
+                    raise msgspec.ValidationError(
+                        "reply_target_rfc_message_id: missing value when object is present"
+                    )
+                if not isinstance(inner, str):
+                    raise msgspec.ValidationError(
+                        "reply_target_rfc_message_id.value must be a string"
+                    )
+                t = inner.strip()
+                out[k] = None if not t else {"value": t}
+            else:
+                raise msgspec.ValidationError(
+                    "reply_target_rfc_message_id must be null or an object {\"value\": \"...\"}"
+                )
+            continue
+        if isinstance(v, str):
+            t = v.strip()
+            if k in _OPTIONAL_STR_KEYS_EMPTY_TO_NONE and not t:
+                out[k] = None
+            elif not t:
+                raise msgspec.ValidationError(
+                    f"ingress route field {k!r} is empty or whitespace-only"
+                )
+            else:
+                out[k] = t
+        else:
+            out[k] = v
+    return out

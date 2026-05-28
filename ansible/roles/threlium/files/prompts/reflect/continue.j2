@@ -1,0 +1,34 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    reflect continue cycle user-visible body. -#}
+[Threlium reflect — continue]
+
+Subject: {{ subject or "(no subject)" }}
+
+Hop budget: {{ remaining_hops }} hop(s) remain on the current frame.
+One reflect cycle (reflect -> ingress -> enrich -> reasoning) costs {{ cycle_cost }} hops,
+so you can afford at least one more full cycle with refreshed LightRAG context.
+
+You requested another reasoning pass. Below is your previous reasoning output
+verbatim. The next message you will see in the reasoning stage is the result of
+this body being routed through ingress and enrich, so LightRAG context will be
+re-queried and merged in fresh.
+
+Guidelines for the next reasoning step:
+- Treat the text below as your own previous draft, not as a user message.
+- Use the freshly merged LightRAG context to refine, extend, or correct it.
+- Do NOT copy the previous draft verbatim into your next decision body — keep
+  only what is still relevant and add what LightRAG newly contributes.
+- If you are now confident, produce the response via response_finalize (or
+  response_append → response_finalize for long answers); otherwise call reflect
+  again, but expect the budget to drop by {{ cycle_cost }} per cycle.
+
+Strategy for this pass:
+- Focus on what was missing in the previous draft. Ask: what gap did clarification_request target?
+- If fresh context adds new facts — integrate them.
+- If fresh context adds nothing — do NOT reflect again. Finalize and note any remaining gaps.
+- Reformulate, do not regurgitate.
+
+--- previous reasoning output ---
+{{ previous_reasoning }}
+--- end previous reasoning output ---

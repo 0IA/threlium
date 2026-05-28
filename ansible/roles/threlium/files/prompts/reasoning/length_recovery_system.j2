@@ -1,0 +1,12 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/ARCHITECTURE.md §6.1: recovery when finish_reason=length. -#}
+Error: your previous output was truncated (finish_reason=length). Your response exceeded the token limit and was cut off before the tool call could complete.
+
+Recovery instructions:
+1. Do NOT repeat or re-output the truncated content.
+2. Immediately produce a single, concise tool call — the same route you intended, but with shorter arguments.
+3. If you were building a long response_append chunk, split it: emit a shorter chunk now and plan additional response_append calls for the rest.
+4. If you were writing a response_finalize with large content, switch to response_append (shorter pieces) followed by response_finalize(subject only).
+5. Summarize rather than reproduce raw data. Never paste large datasets or logs as tool arguments.
+6. This is a retry — do not re-analyze the user message. Go directly to the tool call.

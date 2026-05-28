@@ -1,0 +1,108 @@
+---
+# E2E group_vars — docker-SUT (ansible/inventory/e2e/hosts.yml).
+ansible_user: root
+
+threlium_bundle_enabled: false
+threlium_ssh_hardening_enabled: false
+threlium_agent_login_password: "threlium"
+
+# Веб-архив
+threlium_mail_archive_web_enabled: true
+threlium_mail_archive_cockpit_origins_extra:
+  - "https://127.0.0.1:9090"
+  - "https://localhost:9090"
+  - "http://127.0.0.1:8080"
+  - "http://localhost:8080"
+
+# Каналы: все три моста для e2e
+threlium_channels:
+  - email
+  - matrix
+  - telegram
+
+# Bridges: GreenMail + WireMock стабы
+threlium_bridges:
+  email:
+    imap_host: greenmail
+    imap_user: "test"
+    imap_pass: "secret"
+    imap_port: 3993
+    imap_use_ssl: true
+    imap_ssl_verify: false
+    imap_idle_max_sec: 1740
+  matrix:
+    homeserver: "http://wiremock:8080"
+    user: "@e2e-bot:localhost"
+    token: "e2e-matrix-test-token"
+  telegram:
+    bot_token: "e2e-test-telegram-token"
+    bot_api_base: "http://wiremock:8080/bot"
+
+# msmtp: GreenMail без TLS
+threlium_msmtp:
+  host: greenmail
+  port: 3025
+  user: ""
+  password: ""
+  from_addr: "threlium@localhost"
+  tls: false
+  auth: false
+
+# litellm: WireMock HTTP-стабы
+threlium_litellm:
+  max_retries: 0
+  llm_endpoints:
+    - score: 0.0
+      enabled: true
+      model: "openai/threlium_e2e_l0"
+      api_base: "http://wiremock:8080"
+      api_key: "e2e-test-key"
+      timeout: 90
+      chat_template_kwargs:
+        enable_thinking: false
+    - score: 1.0
+      enabled: true
+      model: "openai/threlium_e2e_l0"
+      api_base: "http://wiremock:8080"
+      api_key: "e2e-test-key"
+      timeout: 90
+  embedding_endpoints:
+    - embedding_score: 0.0
+      enabled: true
+      model: "openai/threlium_e2e_embed"
+      api_base: "http://wiremock:8080"
+      api_key: "e2e-test-key"
+      timeout: 90
+  rerank_endpoints:
+    - rerank_score: 0.0
+      enabled: true
+      model: "hosted_vllm/bge-rerank-e2e"
+      api_base: "http://wiremock:8080/v1"
+      api_key: "sk-e2e"
+      timeout: 30
+      top_n: 5
+  targets:
+    reasoning:
+      target_score: 1.0
+    enrich_plan:
+      target_score: 0.0
+    lightrag_llm:
+      target_score: 0.0
+    lightrag_embedding:
+      target_embedding_score: 0.0
+    lightrag_rerank:
+      target_rerank_score: 0.0
+
+# e2e-only: корреляция маршрутов LiteLLM
+threlium_e2e:
+  litellm_route_correlation: true
+
+# enrich: только override context_max_chars для e2e trim-сценария
+threlium_enrich:
+  context_max_chars: 8000
+
+# lightrag: только overrides для e2e (insert_batch=1, query_api без llm)
+threlium_lightrag:
+  insert_batch: 1
+  query_api: "aquery"
+  query_mode: "mix"

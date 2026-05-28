@@ -1,0 +1,61 @@
+---
+# Скопируйте в group_vars/all.yml или host_vars/<host>.yml и заполните.
+# Полные defaults — в roles/threlium/vars/main.yml (_threlium_*_base).
+# Partial override: задайте только то, что хотите изменить — combine() домержит остальное.
+
+threlium_channels:
+  - email
+
+# LLM/embedding — задайте свои endpoints (массивы заменяются целиком).
+threlium_litellm:
+  llm_endpoints:
+    - model: "openai/my-model"
+      api_base: "http://my-vllm:8000/v1"
+      api_key: "sk-xxx"
+      timeout: 120
+  embedding_endpoints:
+    - model: "openai/bge-m3"
+      api_base: "http://my-vllm:8001/v1"
+      api_key: "sk-xxx"
+      timeout: 120
+  targets:
+    reasoning: { target_score: 0.0 }
+    lightrag_embedding: { target_embedding_score: 0.0 }
+
+# Bridges — только используемые каналы (из threlium_channels).
+threlium_bridges:
+  email:
+    imap_host: "imap.gmail.com"
+    imap_user: "agent@gmail.com"
+    imap_pass: "{{ vault_imap_pass }}"
+    imap_port: 993
+
+# SMTP relay (tls/auth = on по умолчанию, не указывайте).
+threlium_msmtp:
+  host: "smtp.gmail.com"
+  port: 587
+  user: "agent@gmail.com"
+  password: "{{ vault_smtp_pass }}"
+  from_addr: "agent@gmail.com"
+
+threlium_egress:
+  email_from: "agent@gmail.com"
+
+# SSH hardening (по умолчанию выкл.)
+# threlium_ssh_hardening_enabled: true
+# threlium_ssh_pubkey_file: "~/.ssh/id_ed25519.pub"
+
+# Пароль PAM (Cockpit login)
+# threlium_agent_login_password: "xxx"
+
+# Post-deploy bundle (по умолчанию вкл.)
+# threlium_bundle_enabled: true
+
+# LightRAG — partial override (остальное из _threlium_lightrag_base):
+# threlium_lightrag:
+#   insert_batch: 16
+#   llm_max_tokens: 8192
+
+# Enrich — partial override:
+# threlium_enrich:
+#   context_max_chars: 180000

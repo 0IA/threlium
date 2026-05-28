@@ -1,0 +1,27 @@
+---
+# POSIX home и layout путей агента после getent (см. site.yml, refresh.yml).
+
+- name: Resolve POSIX home for agent user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ threlium_user }}"
+
+- name: Derive agent POSIX home and uid from getent
+  ansible.builtin.set_fact:
+    threlium_posix_home: "{{ ansible_facts.getent_passwd[threlium_user][4] }}"
+    threlium_user_uid: "{{ ansible_facts.getent_passwd[threlium_user][1] }}"
+
+- name: Derive bundle layout paths from POSIX home
+  ansible.builtin.set_fact:
+    threlium_bundle_root: "{{ threlium_posix_home }}/threlium"
+    threlium_systemd_user_dir: "{{ threlium_posix_home }}/.config/systemd/user"
+
+- name: Apply default threlium_home from bundle (unless set by inventory / interactive / -e)
+  ansible.builtin.set_fact:
+    threlium_home: "{{ ansible_facts.getent_passwd[threlium_user][4] }}/threlium/data"
+  when: threlium_home is not defined
+
+- name: Default threlium_repo_path to bundle agent directory
+  ansible.builtin.set_fact:
+    threlium_repo_path: "{{ threlium_bundle_root }}/agent"
+  when: threlium_repo_path is not defined

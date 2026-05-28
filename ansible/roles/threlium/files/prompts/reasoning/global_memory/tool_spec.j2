@@ -1,0 +1,29 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/MEMORY_TABLE.md §2: tool-spec for route `global_memory`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "global_memory",
+    "description": "Record a global fact about the agent, tasks, policies, or stable environment. Use ONLY for facts relevant to future threads, not a single dialog turn.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Brief explanation of why this fact is globally relevant across all threads."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000,
+          "description": "Global note text (UTF-8). Third person, self-contained; read during global-scope LightRAG search."
+        }
+      },
+      "required": ["reasoning", "note"],
+      "additionalProperties": false
+    }
+  }
+}

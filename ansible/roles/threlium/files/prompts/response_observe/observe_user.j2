@@ -1,0 +1,20 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    User prompt for response_observe LLM summarization.
+    Variables: is_empty (bool), live_count (int), total_chars (int),
+              chunks (list of {position: int, content: str|None, deleted: bool}),
+              deleted_positions (list of int). -#}
+{% if is_empty -%}
+The response buffer is empty. No chunks have been appended yet.
+{%- else -%}
+Response buffer: {{ live_count }} live chunks, ~{{ total_chars }} chars total.
+{% if deleted_positions %}Deleted positions: {{ deleted_positions | join(", ") }}.{% endif %}
+
+{% for chunk in chunks -%}
+{% if not chunk.deleted -%}
+--- [{{ chunk.position }}] ({{ chunk.content | length }} chars) ---
+{{ chunk.content }}
+
+{% endif -%}
+{% endfor -%}
+{%- endif %}

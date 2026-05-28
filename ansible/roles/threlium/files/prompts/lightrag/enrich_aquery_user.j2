@@ -1,0 +1,9 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    ADR 0001: question text for rag.aquery after planning LLM step. -#}
+{{ formulated_query }}
+{%- if extra_instructions %}
+
+--- additional retrieval hints ---
+{{ extra_instructions }}
+{%- endif %}

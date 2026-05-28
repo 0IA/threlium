@@ -1,0 +1,71 @@
+# E2E: только публичные образы (без Dockerfile). См. ansible/group_vars/e2e.yml
+# Bake-bootstrap: Ubuntu 24.04 (geerlingguy/docker-ubuntu2404-ansible); готовый SUT — threlium/e2e-sut:baked.
+# Noble/e2e: MDA — fdm (`site.yml`); см. также ARCHITECTURE §8.4.
+#
+# Образ SUT: по умолчанию предсобранный baked (совпадает с E2E_BAKED_SUT_IMAGE в tests/e2e/helpers.py).
+# Эталон «с нуля» (upstream): THRELIUM_E2E_SUT_IMAGE=geerlingguy/docker-ubuntu2404-ansible:latest
+# (см. tests/e2e/scripts/bake_e2e_sut_image.sh и README).
+
+services:
+  sut:
+    image: ${THRELIUM_E2E_SUT_IMAGE:-threlium/e2e-sut:baked}
+    privileged: true
+    cgroup: host
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    tty: true
+    ports:
+      # Cockpit HTTPS :9090; Caddy только HTTP :8080 (без :80/:443 на SUT в e2e).
+      - "9090:9090"
+      - "8080:8080"
+
+  greenmail:
+    # latest уже больше чем 2.1.2
+    image: greenmail/standalone:latest
+    ports:
+      # Для pytest нужны SMTP+IMAP с хоста; IMAPS (3993) для моста внутри SUT (docker DNS).
+      - "3025"
+      - "3143"
+      - "3993"
+    volumes:
+      # Без :ro — иначе на части JDK GreenMail падает с AccessDenied при загрузке keystore (IMAPS/SMTPS).
+      - ./greenmail.p12:/home/greenmail/greenmail.p12
+    environment:
+      # setup.test.* — порты +3000 (3025 SMTP, 3993 IMAPS); hostname=0.0.0.0 — слушать не только loopback
+      # (иначе другие контейнеры не достучатся до GreenMail по docker DNS).
+      # TLS keystore: self-signed cert с SAN (DNS:localhost,DNS:greenmail,IP:127.0.0.1).
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.all
+        -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.users=test:secret@localhost,pytest:secret@localhost
+        -Dgreenmail.tls.keystore.file=/home/greenmail/greenmail.p12
+        -Dgreenmail.tls.keystore.password=changeit
+
+  # WireMock: Matrix CS API + OpenAI-совместимые стабы; единственный HTTP-mock OpenAI для SUT в e2e.
+  # Хост :9080 → контейнер :8080 (Caddy на SUT уже занимает 8080:8080).
+  # Память: JVM + state-extension + журнал + раздувание near-match в Admin API; при OOM поднимайте limits и -Xmx пропорционально.
+  # Журнал: без лимита WM держит все ServeEvent в памяти → 500 на ``GET /__admin/requests`` при больших телах LLM.
+  # Оценка e2e: общий инстанс, ``pytest -n 8``, cold reset журнала в начале сессии; на пике несколько сценариев
+  # (mailflow / matrix / subagent) дают порядка 10² записей с крупными JSON; 2500 — запас к headroom без лишнего OOM.
+  # См. ``wiremock.Run`` / ``--max-request-journal-entries`` в исходниках WM (vendor tree под compose/wiremock).
+  wiremock:
+    image: wiremock/wiremock:latest
+    environment:
+      # Официальный entrypoint: java $JAVA_OPTS … (tests/e2e/compose/wiremock/wiremock-docker/docker-entrypoint.sh).
+      JAVA_OPTS: "-Xms512m -Xmx3072m"
+    deploy:
+      resources:
+        limits:
+          memory: 4g
+        reservations:
+          memory: 768m
+    command:
+      - --disable-banner
+      - --global-response-templating
+      - --max-request-journal-entries
+      - "2500"
+    volumes:
+      # wiremock-state-extension (ServiceLoader); см. tests/e2e/compose/wiremock/README.md
+      - ./wiremock/wiremock-state-extension-standalone-0.10.1.jar:/var/wiremock/extensions/wiremock-state-extension-standalone-0.10.1.jar:ro
+    ports:
+      - "9080:8080"

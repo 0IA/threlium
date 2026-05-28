@@ -1,0 +1,35 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/ARCHITECTURE.md §6.2: tool-spec for route `cli_intent`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "cli_intent",
+    "description": "Request shell execution via CLI pipeline (allow/deny/HITL). Use only for external effects not available from memory/context. Safety: non-interactive flags; limit output; no destructive commands without explicit user request; no secrets in argv.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "argv": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1, "maxLength": 4000},
+          "minItems": 1,
+          "maxItems": 64,
+          "description": "Command and arguments as argv array (no shell escape; argv[0] is binary name)."
+        },
+        "cwd": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "Working directory for execution (optional)."
+        },
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Why this command is needed — short text for logs and HITL confirmation."
+        }
+      },
+      "required": ["argv", "reasoning"],
+      "additionalProperties": false
+    }
+  }
+}

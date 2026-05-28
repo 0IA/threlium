@@ -1,0 +1,26 @@
+# Managed by Ansible — docs/ORCHESTRATION.md (%i = stage:thread_id)
+# После успешного завершения submit (exit 0) systemd активирует `threlium-sweep@%i` через `OnSuccess=`
+# (перепроверка backlog / хвост unread). При exit≠0 `OnSuccess` не срабатывает — только `Restart=on-failure`.
+# `Type=oneshot` + `Restart=` у воркера даёт в systemd ненадёжный `RestartSec`; `Type=exec` у submit —
+# пауза `RestartSec` между ретраями соблюдается.
+[Unit]
+Description=Threlium FSM worker — %i
+Documentation=file:{{ threlium_repo_path }}/docs/FSM.md
+Documentation=file:{{ threlium_repo_path }}/docs/ORCHESTRATION.md
+PartOf=threlium-work.slice
+After=network-online.target
+After=threlium-engine.service
+BindsTo=threlium-engine.service
+StartLimitIntervalSec=0
+OnSuccess=threlium-sweep@%i.service
+
+[Service]
+Type=exec
+Restart=on-failure
+RestartSec=1s
+EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env
+Environment=PATH={{ threlium_repo_path }}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory={{ threlium_repo_path }}
+ExecStart={{ threlium_repo_path }}/.venv/bin/python -m threlium.runners.engine_submit %i
+SyslogIdentifier=threlium-work-%i
+Slice=threlium-work.slice

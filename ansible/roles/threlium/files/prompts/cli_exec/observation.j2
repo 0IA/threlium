@@ -1,0 +1,11 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/ARCHITECTURE.md §6.2: cli_exec emits observation to ingress@localhost.
+    Installation may not execute the command (policy is installation-specific) but
+    records acceptance. Input: cmd_line — rendered argv (optional cwd= prefix), built
+    in Python (see parse_cli_intent_payload); prior — original cli_exec body or empty. -#}
+Threlium cli_exec: staged observation (execution policy is installation-specific).
+{% if cmd_line %}Intent: {{ cmd_line }}
+
+{% endif %}---
+{{ prior if prior else "(empty body)" }}

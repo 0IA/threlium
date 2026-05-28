@@ -1,0 +1,42 @@
+# Секреты и локальное окружение (см. INSTALL_CONTRACT)
+vendor/
+audit_bundle.txt
+audit.sh
+.cursor/
+.gemini_scratch/
+.python-version
+./scripts/
+ansible/inventory/th-agent.yml
+ansible/host_vars/th-agent.yml
+ansible/artifacts/
+tests/e2e/__pycache__/
+tests/e2e/litellm-mock-server/
+**/__pycache__/
+env/threlium.env
+*.vault.yml
+.vault_pass
+ansible/group_vars/vault.yml
+ansible/host_vars/*.secrets.yml
+
+# Локальные overrides (опционально)
+ansible/group_vars/local.yml
+
+# Кэш mypy
+.mypy_cache/
+
+# Локальный venv (типчек: pip install -e ".[dev]")
+.venv/
+
+# Артефакты setuptools (pip install -e)
+*.egg-info/
+
+# VSCode Counter extension
+.VSCodeCounter/
+
+# Ansible Galaxy (e2e: community.docker), подтягивается ansible-galaxy install -p ansible/collections
+ansible/collections/ansible_collections/
+.venv-e2e-run/
+
+# vLLM stack local secrets
+deploy/vllm/qwen/.env
+deploy/vllm/qwen/download-models.log

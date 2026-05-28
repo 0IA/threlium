@@ -1,0 +1,23 @@
+# Managed by Ansible — см. msmtp(1).
+# host должен резолвиться до SMTP (в docker-compose — имя сервиса, например greenmail).
+defaults
+{% if threlium_msmtp.tls | default(true) | bool %}
+tls on
+tls_trust_file /etc/ssl/certs/ca-certificates.crt
+{% else %}
+tls off
+{% endif %}
+logfile ~/.msmtp.log
+
+account default
+host {{ threlium_msmtp.host }}
+port {{ threlium_msmtp.port | default(587) }}
+from {{ threlium_msmtp.from_addr | default('threlium@localhost') }}
+{% if threlium_msmtp.auth | default(true) | bool %}
+auth on
+user {{ threlium_msmtp.user }}
+password {{ threlium_msmtp.password }}
+{% else %}
+auth off
+{% endif %}
+

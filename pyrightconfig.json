@@ -1,0 +1,9 @@
+{
+  "include": ["ansible/roles/threlium/files/scripts"],
+  "pythonVersion": "3.11",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard",
+  "reportMissingImports": true,
+  "reportMissingModuleSource": true
+}

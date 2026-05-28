@@ -1,0 +1,23 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    tool-spec for route `response_observe`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "response_observe",
+    "description": "Analyze the current reply buffer with LLM-powered summarization. Returns structured assessment: per-chunk summaries, overall coherence, progress status, and edit/finalize recommendations. Use before response_edit or response_finalize to verify and plan next steps.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Brief explanation of why you need to observe the buffer now."
+        }
+      },
+      "required": ["reasoning"],
+      "additionalProperties": false
+    }
+  }
+}

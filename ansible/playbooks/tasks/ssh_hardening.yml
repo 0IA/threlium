@@ -1,0 +1,162 @@
+---
+# SSH: authorized_keys + hardening drop-in + lineinfile.
+# Включается при threlium_ssh_hardening_enabled (import_tasks в site.yml).
+
+# --- Auto-discover SSH pubkey on controller ---
+
+- name: Resolve explicit pubkey path (env or variable)
+  ansible.builtin.set_fact:
+    _threlium_ssh_pubkey_explicit: "{{ lookup('env', 'SSH_PUBKEY_FILE') | default(threlium_ssh_pubkey_file | default(''), true) | trim }}"
+  delegate_to: localhost
+  connection: local
+  become: false
+  tags: [deploy]
+
+- name: Find SSH public keys on controller (~/.ssh/*.pub)
+  ansible.builtin.find:
+    paths: "{{ lookup('env', 'HOME') }}/.ssh"
+    patterns: "*.pub"
+    file_type: file
+  delegate_to: localhost
+  connection: local
+  become: false
+  register: _threlium_ssh_pubkeys_found
+  when: _threlium_ssh_pubkey_explicit | length == 0
+  tags: [deploy]
+
+- name: Select best SSH pubkey by preference (ed25519 > ecdsa > rsa > first found)
+  ansible.builtin.set_fact:
+    _threlium_ssh_pubkey_resolved: >-
+      {%- set found = _threlium_ssh_pubkeys_found.files | default([]) | map(attribute='path') | list -%}
+      {%- set home = lookup('env', 'HOME') -%}
+      {%- if (home ~ '/.ssh/id_ed25519.pub') in found -%}
+        {{ home }}/.ssh/id_ed25519.pub
+      {%- elif (home ~ '/.ssh/id_ecdsa.pub') in found -%}
+        {{ home }}/.ssh/id_ecdsa.pub
+      {%- elif (home ~ '/.ssh/id_rsa.pub') in found -%}
+        {{ home }}/.ssh/id_rsa.pub
+      {%- elif found | length > 0 -%}
+        {{ found | first }}
+      {%- else -%}
+      {%- endif -%}
+  when: _threlium_ssh_pubkey_explicit | length == 0
+  tags: [deploy]
+
+- name: Use explicit pubkey path when provided
+  ansible.builtin.set_fact:
+    _threlium_ssh_pubkey_resolved: "{{ _threlium_ssh_pubkey_explicit }}"
+  when: _threlium_ssh_pubkey_explicit | length > 0
+  tags: [deploy]
+
+- name: Assert SSH public key was resolved
+  ansible.builtin.assert:
+    that:
+      - _threlium_ssh_pubkey_resolved | default('') | trim | length > 0
+    fail_msg: >-
+      Не найден SSH public key на control node.
+      Убедитесь, что в ~/.ssh/ есть *.pub, или задайте threlium_ssh_pubkey_file / SSH_PUBKEY_FILE.
+  tags: [deploy]
+
+- name: Stat resolved SSH public key file
+  ansible.builtin.stat:
+    path: "{{ _threlium_ssh_pubkey_resolved }}"
+  delegate_to: localhost
+  connection: local
+  become: false
+  register: _threlium_ssh_pubkey_stat
+  tags: [deploy]
+
+- name: Assert resolved SSH public key file exists
+  ansible.builtin.assert:
+    that:
+      - _threlium_ssh_pubkey_stat.stat.exists | default(false)
+      - _threlium_ssh_pubkey_stat.stat.isreg | default(false)
+    fail_msg: >-
+      Файл SSH public key не найден: {{ _threlium_ssh_pubkey_resolved }}
+  tags: [deploy]
+
+# --- Deploy keys ---
+
+- name: Install controller SSH public key for root
+  ansible.posix.authorized_key:
+    user: root
+    state: present
+    key: "{{ lookup('file', _threlium_ssh_pubkey_resolved) }}"
+    manage_dir: true
+  become: true
+  tags: [deploy]
+
+- name: Install controller SSH public key for agent user
+  ansible.posix.authorized_key:
+    user: "{{ threlium_user }}"
+    state: present
+    key: "{{ lookup('file', _threlium_ssh_pubkey_resolved) }}"
+    manage_dir: true
+  become: true
+  tags: [deploy]
+
+# --- Hardening ---
+
+- name: Install threlium SSH hardening drop-in (раньше типичных 50-* в sshd_config.d)
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/49-threlium-ssh-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (threlium). Имя 49-* — до многих vendor drop-in (50-*).
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+      PermitRootLogin prohibit-password
+  become: true
+  notify: restart openssh server
+  tags: [deploy]
+
+- name: Disable SSH password authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^(#\s*)?PasswordAuthentication\s+'
+    line: "PasswordAuthentication no"
+    state: present
+    backup: true
+    validate: "/usr/sbin/sshd -t -f %s"
+  become: true
+  notify: restart openssh server
+  tags: [deploy]
+
+- name: Disable SSH keyboard-interactive authentication
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^(#\s*)?KbdInteractiveAuthentication\s+'
+    line: "KbdInteractiveAuthentication no"
+    state: present
+    backup: true
+    validate: "/usr/sbin/sshd -t -f %s"
+  become: true
+  notify: restart openssh server
+  tags: [deploy]
+
+- name: Ensure SSH pubkey authentication is enabled
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^(#\s*)?PubkeyAuthentication\s+'
+    line: "PubkeyAuthentication yes"
+    state: present
+    backup: true
+    validate: "/usr/sbin/sshd -t -f %s"
+  become: true
+  notify: restart openssh server
+  tags: [deploy]
+
+- name: Permit root login only with keys (no root password SSH)
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^(#\s*)?PermitRootLogin\s+'
+    line: "PermitRootLogin prohibit-password"
+    state: present
+    backup: true
+    validate: "/usr/sbin/sshd -t -f %s"
+  become: true
+  notify: restart openssh server
+  tags: [deploy]

@@ -1,0 +1,282 @@
+"""Двухуровневая оптимизация контекстного бюджета (MCKP + per-message scoring).
+
+Level 1: MCKP (Multiple-Choice Knapsack) между бакетами — scipy.optimize.milp.
+Level 2: Per-message value scoring внутри unified_mail_context для динамического tier-assignment.
+
+docs/TYPES.md: доменные enum, frozen dataclasses, typed containers.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from email.message import EmailMessage
+from enum import StrEnum
+
+import numpy as np
+from scipy.optimize import LinearConstraint, Bounds, milp
+
+from threlium.mime_reform import EnrichPartId
+
+
+class ContextMessageType(StrEnum):
+    """Тип сообщения в контексте — определяет value-weight при scoring."""
+
+    USER_INPUT = "user_input"
+    AGENT_RESPONSE = "agent_response"
+    TOOL_OBSERVATION = "tool_observation"
+    SYSTEM = "system"
+    SERVICE = "service"
+
+
+class BucketConfigTier(StrEnum):
+    """Дискретные конфигурации рендеринга бакета для MCKP."""
+
+    FULL = "full"
+    MEDIUM = "medium"
+    COMPACT = "compact"
+    EMPTY = "empty"
+
+
+@dataclass(frozen=True)
+class BucketConfig:
+    """Одна возможная конфигурация бакета для Level 1 MCKP."""
+
+    bucket: EnrichPartId
+    tier: BucketConfigTier
+    weight: int
+    value: float
+    tier1_count: int
+    tier2_count: int
+
+
+@dataclass(frozen=True)
+class ContextMessageTierAssignment:
+    """Tier-assignment одного сообщения (Level 2 результат)."""
+
+    chronological_index: int
+    value: float
+    assigned_tier: int
+    body_chars: int
+    msg_type: ContextMessageType
+
+
+@dataclass(frozen=True)
+class ContextMessageTypeWeights:
+    """Веса типов сообщений — typed container вместо dict[str, float]."""
+
+    user_input: float
+    agent_response: float
+    tool_observation: float
+    system: float
+    service: float
+
+    def weight_for(self, msg_type: ContextMessageType) -> float:
+        return getattr(self, msg_type.value)
+
+
+def normalize_weights(raw: dict[EnrichPartId, float]) -> dict[EnrichPartId, float]:
+    """Любые >= 0 значения → [0, 1], сумма = 1. Все нули → равномерное."""
+    total = sum(max(0.0, v) for v in raw.values())
+    if total == 0:
+        n = len(raw)
+        return {k: 1.0 / n for k in raw}
+    return {k: max(0.0, v) / total for k, v in raw.items()}
+
+
+def _normalize_type_weights(weights: ContextMessageTypeWeights) -> ContextMessageTypeWeights:
+    """Нормализовать type weights к [0, 1]."""
+    raw = [
+        max(0.0, weights.user_input),
+        max(0.0, weights.agent_response),
+        max(0.0, weights.tool_observation),
+        max(0.0, weights.system),
+        max(0.0, weights.service),
+    ]
+    total = sum(raw)
+    if total == 0:
+        n = len(raw)
+        raw = [1.0 / n] * n
+    else:
+        raw = [v / total for v in raw]
+    return ContextMessageTypeWeights(
+        user_input=raw[0],
+        agent_response=raw[1],
+        tool_observation=raw[2],
+        system=raw[3],
+        service=raw[4],
+    )
+
+
+def classify_message_type(msg: EmailMessage) -> ContextMessageType:
+    """Classify by To: header — единственное место определения типа для scoring."""
+    to_addr = (msg.get("To") or "").lower()
+    if "ingress" in to_addr:
+        return ContextMessageType.USER_INPUT
+    if "reasoning" in to_addr or "response_finalize" in to_addr:
+        return ContextMessageType.AGENT_RESPONSE
+    if "cli_exec" in to_addr:
+        return ContextMessageType.TOOL_OBSERVATION
+    if any(s in to_addr for s in ("enrich", "reflect", "response_observe", "enrich_fast")):
+        return ContextMessageType.SERVICE
+    return ContextMessageType.SYSTEM
+
+
+def message_value(
+    pos_from_end: int,
+    total: int,
+    msg_type: ContextMessageType,
+    body_chars: int,
+    type_weights: ContextMessageTypeWeights,
+) -> float:
+    """Вычислить ценность сообщения для tier-assignment. O(1)."""
+    if total == 0:
+        return 0.0
+    recency = pos_from_end / total
+    type_w = type_weights.weight_for(msg_type)
+    size_penalty = 1.0 if body_chars < 5000 else 5000 / max(1, body_chars)
+    return recency * type_w * size_penalty
+
+
+def score_messages(
+    messages: list[EmailMessage],
+    type_weights: ContextMessageTypeWeights,
+) -> tuple[ContextMessageTierAssignment, ...]:
+    """Level 2: score все сообщения, вернуть sorted by value desc."""
+    normalized_tw = _normalize_type_weights(type_weights)
+    total = len(messages)
+    scored: list[ContextMessageTierAssignment] = []
+    for idx, msg in enumerate(messages):
+        pos_from_end = total - idx
+        msg_type = classify_message_type(msg)
+        part = msg.get_body(preferencelist=("plain", "html"))
+        body_chars = len(part.get_content()) if part else 0
+        val = message_value(pos_from_end, total, msg_type, body_chars, normalized_tw)
+        scored.append(ContextMessageTierAssignment(
+            chronological_index=idx,
+            value=val,
+            assigned_tier=3,
+            body_chars=body_chars,
+            msg_type=msg_type,
+        ))
+    return tuple(scored)
+
+
+def assign_tiers(
+    scored: tuple[ContextMessageTierAssignment, ...],
+    tier1_count: int,
+    tier2_count: int,
+) -> tuple[ContextMessageTierAssignment, ...]:
+    """Assign tier 1/2/3 based on value ranking. Preserves chronological_index."""
+    by_value = sorted(scored, key=lambda x: x.value, reverse=True)
+    result: list[ContextMessageTierAssignment] = []
+    for rank, assignment in enumerate(by_value):
+        if rank < tier1_count:
+            tier = 1
+        elif rank < tier1_count + tier2_count:
+            tier = 2
+        else:
+            tier = 3
+        result.append(ContextMessageTierAssignment(
+            chronological_index=assignment.chronological_index,
+            value=assignment.value,
+            assigned_tier=tier,
+            body_chars=assignment.body_chars,
+            msg_type=assignment.msg_type,
+        ))
+    return tuple(sorted(result, key=lambda x: x.chronological_index))
+
+
+def estimate_unified_weight(
+    scored: tuple[ContextMessageTierAssignment, ...],
+    tier1_count: int,
+    tier2_count: int,
+    preview_chars: int,
+    header_chars: int = 100,
+    service_marker_chars: int = 50,
+) -> int:
+    """Оценка веса unified_mail_context без Jinja-рендеринга.
+
+    Использует body_chars и msg_type из scored для арифметической аппроксимации
+    вместо полного Jinja-рендеринга mail_context.j2.
+    """
+    tiered = assign_tiers(scored, tier1_count, tier2_count)
+    total = 0
+    for t in tiered:
+        if t.msg_type == ContextMessageType.SERVICE:
+            total += service_marker_chars
+        elif t.assigned_tier == 1:
+            total += t.body_chars + header_chars
+        elif t.assigned_tier == 2:
+            total += preview_chars + header_chars
+        else:
+            total += header_chars
+    return total
+
+
+def solve_mckp(
+    bucket_configs: dict[EnrichPartId, list[BucketConfig]],
+    capacity: int,
+    priorities: dict[EnrichPartId, float],
+) -> dict[EnrichPartId, BucketConfig]:
+    """Level 1: MCKP via scipy.optimize.milp.
+
+    Fast path: если суммарный full < capacity, возвращает full для всех.
+    """
+    norm_priorities = normalize_weights(priorities)
+
+    full_total = 0
+    full_configs: dict[EnrichPartId, BucketConfig] = {}
+    for bucket_id, configs in bucket_configs.items():
+        full_cfg = next((c for c in configs if c.tier == BucketConfigTier.FULL), configs[0])
+        full_configs[bucket_id] = full_cfg
+        full_total += full_cfg.weight
+
+    if full_total <= capacity:
+        return full_configs
+
+    buckets = list(bucket_configs.keys())
+    n_buckets = len(buckets)
+
+    flat_configs: list[BucketConfig] = []
+    group_indices: list[list[int]] = []
+    idx = 0
+    for bucket_id in buckets:
+        configs = bucket_configs[bucket_id]
+        group = []
+        for cfg in configs:
+            flat_configs.append(cfg)
+            group.append(idx)
+            idx += 1
+        group_indices.append(group)
+
+    n_vars = len(flat_configs)
+
+    c = np.array([-cfg.value * norm_priorities.get(cfg.bucket, 0.0) for cfg in flat_configs])
+
+    weights = np.array([[cfg.weight for cfg in flat_configs]], dtype=float)
+    capacity_constraint = LinearConstraint(A=weights, ub=[capacity])
+
+    A_groups = np.zeros((n_buckets, n_vars), dtype=float)
+    for i, group in enumerate(group_indices):
+        for j in group:
+            A_groups[i, j] = 1.0
+    group_constraint = LinearConstraint(A=A_groups, lb=np.ones(n_buckets), ub=np.ones(n_buckets))
+
+    bounds = Bounds(lb=0, ub=1)
+    integrality = np.ones(n_vars)
+
+    constraints = [capacity_constraint, group_constraint]
+
+    res = milp(c=c, constraints=constraints, bounds=bounds, integrality=integrality)
+
+    if res.success:
+        chosen: dict[EnrichPartId, BucketConfig] = {}
+        for i, bucket_id in enumerate(buckets):
+            for j in group_indices[i]:
+                if round(res.x[j]) == 1:
+                    chosen[bucket_id] = flat_configs[j]
+                    break
+            else:
+                chosen[bucket_id] = full_configs[bucket_id]
+        return chosen
+
+    return full_configs

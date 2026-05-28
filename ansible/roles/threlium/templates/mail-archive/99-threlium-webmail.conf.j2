@@ -1,0 +1,32 @@
+listen = 127.0.0.1
+protocols = imap
+ssl = no
+disable_plaintext_auth = no
+auth_mechanisms = plain login
+
+# Auth via PAM
+passdb {
+  driver = pam
+}
+userdb {
+  driver = passwd
+}
+
+mail_plugins = $mail_plugins virtual acl
+
+namespace inbox {
+  inbox = yes
+  # Using DIRNAME=Maildir to map stages subdirectories as IMAP folders
+  location = maildir:{{ threlium_home }}/stages:LAYOUT=fs:DIRNAME=Maildir
+}
+
+namespace virtual {
+  prefix = Virtual/
+  separator = /
+  location = virtual:{{ threlium_home }}/virtual_mail:INDEX=MEMORY
+}
+
+plugin {
+  acl_globals_only = yes
+  acl = vfile:/etc/dovecot/global-acls
+}

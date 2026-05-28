@@ -1,0 +1,13 @@
+# Managed by Ansible — race backstop: перепроверка backlog после успешного exit воркера.
+# Стартуется через `OnSuccess=` на `threlium-work@.service` (не при ошибке submit — тогда только Restart).
+[Unit]
+Description=Threlium sweep for stage %i (dispatch after successful worker exit)
+After=network-online.target
+After=threlium-engine.service
+Requires=threlium-engine.service
+
+[Service]
+Type=exec
+EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env
+ExecStart={{ threlium_repo_path }}/scripts/threlium-dispatch.sh %i
+SyslogIdentifier=threlium-sweep-%i

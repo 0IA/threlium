@@ -1,0 +1,16 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/rerank|/rerank)$"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "transformers": [
+      "response-template"
+    ],
+    "body": "{{parseJson request.body 'r'}}{\"id\":\"rerank-e2e-bootstrap\",\"results\":[{{#each r.documents as |doc|}}{{#unless @first}},{{/unless}}{\"index\":{{@index}},\"relevance_score\":0.99,\"document\":{\"text\":\"stub\"}}{{/each}}]}"
+  }
+}

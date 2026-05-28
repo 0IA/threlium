@@ -1,0 +1,13 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/ARCHITECTURE.md §6.2 / §7: HITL prompt asking user to confirm CLI command.
+    Input: command_line — shlex-quoted argv (optional "(cwd=...) " prefix), built in
+    Python (needs shlex.quote and payload access).
+    Message-ID / In-Reply-To / thread headers not here: cli_hitl_out builds MIME via
+    build_fsm_plain_to_stage (threlium/fsm_emit.py). Matrix/Telegram bridges use
+    build_bridge_ingress_email (In-Reply-To only when needed; References not on path). -#}
+Please confirm executing this command on the agent host:
+
+  {{ command_line }}
+
+Reply with **yes** or **no** (one word).

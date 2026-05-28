@@ -1,0 +1,29 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/MEMORY_TABLE.md §1: tool-spec for route `thread_memory`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "thread_memory",
+    "description": "Record a note for the CURRENT dialog thread. Use for facts or decisions needed on later turns in this thread; not for global agent or world facts.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Brief explanation of why this fact is worth persisting in thread memory."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000,
+          "description": "Thread note text (UTF-8). Third person, no I/we pronouns — self-contained for LightRAG."
+        }
+      },
+      "required": ["reasoning", "note"],
+      "additionalProperties": false
+    }
+  }
+}

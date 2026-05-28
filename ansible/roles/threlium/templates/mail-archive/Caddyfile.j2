@@ -1,0 +1,20 @@
+:{{ threlium_mail_archive_caddy_bind_port }} {
+    handle_path /webmail/* {
+        root * /usr/share/roundcube
+        try_files {path} {path}/index.php /index.php?{query}
+        php_fastcgi unix/{{ php_fpm_sock }}
+        file_server
+    }
+    handle /webmail {
+        redir /webmail/ permanent
+    }
+    route * {
+        reverse_proxy 127.0.0.1:9090 {
+            transport http {
+                # keepalive off — отключение переиспользования TCP к Cockpit; может усугублять обрывы/таймауты WS.
+                # keepalive off
+                tls_insecure_skip_verify
+            }
+        }
+    }
+}

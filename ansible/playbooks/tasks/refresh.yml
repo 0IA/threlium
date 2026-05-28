@@ -1,0 +1,140 @@
+---
+# Теги: см. docs/PLAYBOOK.md §12A — deploy+refresh (пролог), never+refresh (чистка и рестарты).
+# Пролог при полном site.yml обычно пропускается (when: threlium_posix_home is not defined).
+
+# Fallback: если в этом прогоне не отработали set_fact из site.yml — минимум путей и юнитов.
+# Обычно ``--tags refresh`` уже выполняет в site.yml цепочку deploy+refresh (код, env, шаблоны).
+- name: Refresh harness — prelude facts when deploy не входил в этот ansible-playbook
+  when: threlium_posix_home is not defined
+  tags: [deploy, refresh]
+  block:
+    - name: Merge user overrides with base defaults (partial override support)
+      ansible.builtin.set_fact:
+        threlium_litellm: "{{ _threlium_litellm_base | combine(threlium_litellm, recursive=True, list_merge='replace') }}"
+        threlium_lightrag: "{{ _threlium_lightrag_base | combine(threlium_lightrag, recursive=True, list_merge='replace') }}"
+        threlium_enrich: "{{ _threlium_enrich_base | combine(threlium_enrich, recursive=True, list_merge='replace') }}"
+
+    - name: Derive bridge readiness from channels and secrets
+      ansible.builtin.import_tasks: bridge_readiness.yml
+
+    - name: Derive agent paths from POSIX home (getent)
+      ansible.builtin.import_tasks: derive_agent_paths.yml
+
+- name: Refresh harness — сброс почты на диске и индекса notmuch (повторяемые e2e / baked SUT)
+  tags: [never, refresh]
+  block:
+    # Пока engine/worker пишут в Maildir, find -delete и rm .notmuch дают гонку с FSM.
+    - name: Refresh harness — остановить worker slice и engine до wipe Maildir/notmuch
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+        scope: user
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+      loop:
+        - threlium-work.slice
+        - threlium-engine.service
+      failed_when: false
+
+    # Цикл ansible.builtin.find + file/absent на каждый файл даёт O(N) задач и на тысячах писем
+    # неприемлемо медленно; rm cur/* бьётся в «Argument list too long»; один find -delete на корень.
+    # Сброс от threlium_user: симметрия с владением Maildir/индексом агентом (не от root).
+    - name: Refresh harness — очистить Maildir cur/new/tmp под threlium_home
+      ansible.builtin.shell: >
+        find "{{ threlium_home }}/{{ item }}/cur" "{{ threlium_home }}/{{ item }}/new" "{{ threlium_home }}/{{ item }}/tmp"
+        -mindepth 1 -type f -delete 2>/dev/null || true
+      args:
+        executable: /bin/bash
+      become: true
+      become_user: "{{ threlium_user }}"
+      loop: "{{ threlium_maildir_rel_paths }}"
+      changed_when: true
+
+    # Union DB: path в notmuch-config.j2 = {{ threlium_home }}/stages → каталог индекса stages/.notmuch.
+    # Только от агента; при «битом» владельце — пересобрать bake/образ, не чистить от root.
+    - name: Refresh harness — удалить каталог базы notmuch (Xapian)
+      ansible.builtin.file:
+        path: "{{ threlium_home }}/stages/.notmuch"
+        state: absent
+      become: true
+      become_user: "{{ threlium_user }}"
+
+    # LightRAG: JsonKVStorage кеширует ответы LLM (keywords и др.). Без очистки
+    # повторные e2e на baked SUT пропускают фазы → журнал WireMock без сигнатур.
+    - name: Refresh harness — удалить LightRAG working_dir (кеш LLM, KV, граф)
+      ansible.builtin.file:
+        path: "{{ threlium_home }}/lightrag"
+        state: absent
+      become: true
+      become_user: "{{ threlium_user }}"
+
+    - name: Refresh harness — пересоздать индекс notmuch
+      ansible.builtin.command: notmuch new
+      become: true
+      become_user: "{{ threlium_user }}"
+      environment:
+        HOME: "{{ threlium_posix_home }}"
+        NOTMUCH_CONFIG: "{{ threlium_posix_home }}/.notmuch-config"
+      changed_when: true
+
+# WireMock — отдельный compose-сервис `wiremock` (tests/e2e/compose/docker-compose.yml).
+# Стабы pytest регистрирует через Admin API; внутри sut плейбук ничего не поднимает —
+# SUT ходит на http://wiremock:8080 по docker DNS (threlium_litellm.llm_endpoints[].api_base в group_vars/e2e.yml).
+
+- name: Refresh harness — systemd user daemon-reload
+  tags: [never, refresh]
+  ansible.builtin.systemd:
+    daemon_reload: true
+    scope: user
+  become: true
+  become_user: "{{ threlium_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+
+- name: Refresh harness — reset-failed user units before restart
+  when: >-
+    ((threlium_engine_units | default([]))
+    + (threlium_path_unit_names | default([]))
+    + (threlium_timer_names | default([]))
+    + (threlium_bridge_instance_units | default([]))) | length > 0
+  tags: [never, refresh]
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - reset-failed
+      - "{{ item }}"
+  become: true
+  become_user: "{{ threlium_user }}"
+  loop: >-
+    {{ (threlium_engine_units | default([]))
+     + (threlium_path_unit_names | default([]))
+     + (threlium_timer_names | default([]))
+     + (threlium_bridge_instance_units | default([])) }}
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+  failed_when: false
+  changed_when: false
+
+- name: Refresh harness — restart user units (engine, path, timer, bridges incl. email)
+  when: >-
+    ((threlium_engine_units | default([]))
+    + (threlium_path_unit_names | default([]))
+    + (threlium_timer_names | default([]))
+    + (threlium_bridge_instance_units | default([]))) | length > 0
+  tags: [never, refresh]
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+    scope: user
+  become: true
+  become_user: "{{ threlium_user }}"
+  loop: >-
+    {{ (threlium_engine_units | default([]))
+     + (threlium_path_unit_names | default([]))
+     + (threlium_timer_names | default([]))
+     + (threlium_bridge_instance_units | default([])) }}
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"

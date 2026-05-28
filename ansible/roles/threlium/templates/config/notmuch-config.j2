@@ -1,0 +1,20 @@
+# Managed by Ansible — см. docs/INDEX.md §10 решение 7 (union notmuch root = stages/).
+[database]
+path={{ threlium_home }}/stages
+
+# docs/INDEX.md §10 решение 12: X-Threlium-* заголовки в header-cache Xapian.
+# msg.header(name) отдаёт значение за O(1) без file-parse.
+# Стандартные RFC 5322 (Message-ID, Subject, In-Reply-To, From, …) индексируются всегда.
+# Кастомные заголовки: ``index.header.<Префикс>`` — notmuch-config(1); в запросе —
+# имя префикса без литерала ``header.`` (notmuch-search-terms(7)).
+# https://notmuchmail.org/doc/latest/man7/notmuch-search-terms.html
+# https://notmuchmail.org/doc/latest/man7/notmuch-sexp-queries.html
+# Префикс не должен начинаться с ``a``…``z``. После смены ``[index]``: ``notmuch reindex '*'``.
+# Xapian MAX_PROB_TERM_LENGTH = 64: base62 wire (Route, Space-Id) и
+# длинные MID (In-Reply-To local-part) молча отбрасываются.
+# Индексируются только SHA256 hex-компаньоны (ровно 64 символа).
+[index]
+header.Threliumspacehash = X-Threlium-Space-Hash
+header.Threliumirthash = X-Threlium-Irt-Hash
+[show]
+extra_headers=In-Reply-To;References;

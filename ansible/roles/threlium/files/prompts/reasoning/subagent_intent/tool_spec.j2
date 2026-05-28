@@ -1,0 +1,29 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/SUBAGENT_TABLE.md §3: tool-spec for route `subagent_intent`. -#}
+{
+  "type": "function",
+  "function": {
+    "name": "subagent_intent",
+    "description": "Delegate a subtask to a child agent with its own hop budget. Use when: (1) the task needs multi-step reasoning or exploration you cannot finish in remaining hops; (2) the subtask is logically separable (own goal and success criteria); (3) parallel or isolated context reduces risk of polluting the parent thread. Do NOT use for: a single shell command (cli_intent), a fact to remember (thread_memory/global_memory), or when you can answer from current enrich context (response_finalize). Return via IRT chain (subagent_end, see SUBAGENT_TABLE).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Brief explanation of why this task requires a separate subagent rather than being handled directly."
+        },
+        "task": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000,
+          "description": "Exact task for the subagent: goal, success criteria, constraints. No parent state assumptions — starts fresh in its own thread."
+        }
+      },
+      "required": ["reasoning", "task"],
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    docs/INDEX.md §5b.4.2: LightRAG addon_params. ENV THRELIUM_LIGHTRAG_LANGUAGE /
+    THRELIUM_LIGHTRAG_ENTITY_TYPES inject language / entity_types. -#}
+{%- set defaults = ['person','organization','location','concept','event','technology','document'] -%}
+{
+  "language": "{{ language or 'English' }}",
+  "entity_types": [
+    {%- for t in (entity_types or defaults) -%}
+      "{{ t }}"{% if not loop.last %}, {% endif %}
+    {%- endfor -%}
+  ]
+}

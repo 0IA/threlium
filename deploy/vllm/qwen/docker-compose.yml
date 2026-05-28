@@ -1,0 +1,86 @@
+name: qwen36stack
+
+services:
+  vllm-llm:
+    image: vllm/vllm-openai:v0.20.0-cu130
+    container_name: vllm_llm_qwen36
+    ipc: host
+    restart: always
+    ports:
+      - "8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    volumes:
+      - ~/.cache:/root/.cache
+      - ./vllm-start.sh:/start.sh:ro
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+      - VLLM_FLOAT32_MATMUL_PRECISION=high
+      - TORCH_CUDA_ALLOW_TF32=1
+      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
+      - VLLM_ATTENTION_BACKEND=TRITON_MLA
+    entrypoint: ["/start.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health >/dev/null"]
+      interval: 10s
+      timeout: 30s
+      retries: 10
+      start_period: 600s
+
+  vllm-embed:
+    image: vllm/vllm-openai:v0.20.0-cu130
+    container_name: vllm_embed_bge_m3
+    ipc: host
+    ports:
+      - "8001:8001"
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+      - PYTORCH_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    volumes:
+      - ~/.cache:/root/.cache
+    command:
+      - "BAAI/bge-m3"
+      - "--served-model-name=bge-m3-embed"
+      - "--port=8001"
+      - "--gpu-memory-utilization=0.07"
+      - "--max-model-len=8192"
+
+  vllm-rerank:
+    image: vllm/vllm-openai:v0.20.0-cu130
+    container_name: vllm_rerank_bge
+    ipc: host
+    ports:
+      - "8002:8002"
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - HF_TOKEN=${HF_TOKEN}
+      - PYTORCH_ALLOC_CONF=max_split_size_mb:512
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    volumes:
+      - ~/.cache:/root/.cache
+    command:
+      - "BAAI/bge-reranker-v2-m3"
+      - "--served-model-name=bge-rerank"
+      - "--port=8002"
+      - "--gpu-memory-utilization=0.07"
+      - "--max-model-len=8192"
