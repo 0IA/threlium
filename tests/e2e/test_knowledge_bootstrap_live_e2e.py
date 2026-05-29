@@ -36,6 +36,8 @@ from .wiremock_client import (
 pytestmark = pytest.mark.xdist_group(name="engine_restart")
 
 _KNOWLEDGE_FILES = [
+    "bridges_contract.md",
+    "fsm_routes.md",
     "shacl_sparql.md",
     "sparql_functions.md",
     "turtle_syntax.md",
