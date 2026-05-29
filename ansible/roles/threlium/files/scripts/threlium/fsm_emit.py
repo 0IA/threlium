@@ -8,7 +8,12 @@ from email.utils import formatdate
 from typing import Protocol, TypeAlias
 
 from threlium.settings import ThreliumSettings
-from threlium.mime_reform import EnrichPartId, _make_inline_text_part
+from threlium.mime_reform import (
+    RELAY_FAMILIES,
+    EnrichContentId,
+    EnrichPartId,
+    _make_inline_text_part,
+)
 from threlium.types import (
     CanonicalMidWire,
     FsmPlainToStageSubjectLine,
@@ -281,6 +286,10 @@ def build_fsm_multipart_to_stage(
     Тредовые заголовки — от входа (как ``build_fsm_plain_to_stage``).
     ``parts``: список ``(EnrichPartId, text)`` — каждая пара становится
     inline text/plain MIME-частью с ``Content-ID``.
+
+    Relay-семейства (:data:`RELAY_FAMILIES`) получают **уникальный** CID
+    ``<family@{inner-mid}>`` от ``Message-ID`` входящего письма — так повторные
+    хопы одной стадии накапливаются в ``enrich_fast``, а не затирают друг друга.
     """
     mid_w = RfcMessageIdWire.parse_present_from_email(incoming, HDR_MESSAGE_ID)
     irt_inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
@@ -301,7 +310,11 @@ def build_fsm_multipart_to_stage(
         out[HDR_IRT_HASH] = IrtHashWire.from_irt_header_value(irt).value
 
     for part_id, text in parts:
-        out.attach(_make_inline_text_part(part_id, text))
+        if irt_inner is not None and part_id in RELAY_FAMILIES:
+            content_id = EnrichContentId.from_relay(part_id, irt_inner)
+        else:
+            content_id = EnrichContentId.from_part_id(part_id)
+        out.attach(_make_inline_text_part(content_id, text))
 
     v = incoming.get(HDR_CAPABILITIES)
     if v:
