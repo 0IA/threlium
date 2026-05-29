@@ -26,7 +26,7 @@ Strategy for this pass:
 - If fresh context adds nothing — do NOT reflect again. Finalize and note any remaining gaps.
 - Reformulate, do not regurgitate. Do not reintroduce content already established in the previous draft unless fresh context corrects it.
 - If the previous pass skipped discovery (no memory_query/cli for an implementation task), run memory_query or cli_intent inventory this pass before proposing new code.
-- Target the unresolved root cause, not the symptom: if the previous draft glossed over WHY something holds (or an assumption it never verified), dig into that this pass. Route by the kind of gap: a logical/consistency/invariant claim → logic_validate to confirm it; a missing fact → memory_query (reflect is for a broad context rebuild, not for proving an inference).
+- Target the unresolved root cause, not the symptom: if the previous draft glossed over WHY something holds (or an assumption it never verified), dig into that this pass. Route by the kind of gap: a logical/consistency/invariant claim → formal_reason to confirm it; a missing fact → memory_query (reflect is for a broad context rebuild, not for proving an inference).
 - If you discovered a problem in the material (a contradiction, gap, or error), pursue and resolve it this cycle rather than carrying it forward unaddressed.
 
 --- previous reasoning output ---
