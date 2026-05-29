@@ -715,8 +715,8 @@ class KnowledgeSettings(BaseModel):
 class HopSettings(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    budget_root: int = Field(default=48, ge=1, description="Максимум hop FSM для root-агента.")
-    budget_sub: int = Field(default=48, ge=1, description="Максимум hop для subagent-веток.")
+    budget_root: int = Field(default=256, ge=1, description="Максимум hop FSM для root-агента.")
+    budget_sub: int = Field(default=256, ge=1, description="Максимум hop для subagent-веток.")
 
 
 class CapSettings(BaseModel):

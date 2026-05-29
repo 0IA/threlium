@@ -65,8 +65,8 @@ threlium_cli:
 # Структура 1:1 с секциями hop, cap в config/threlium.yaml.
 # =============================================================================
 threlium_hop:
-  budget_root: 48
-  budget_sub: 48
+  budget_root: 256
+  budget_sub: 256
 threlium_cap:
   root: ""
   sub: ""
