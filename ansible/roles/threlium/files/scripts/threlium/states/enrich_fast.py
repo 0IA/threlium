@@ -1,8 +1,12 @@
 """enrich_fast@localhost → reasoning@localhost.
 
 Быстрый цикл обратной связи: берёт предыдущий enriched-контекст ``E_prev``
-(multipart/mixed с MIME-частями по Content-ID), добавляет/обновляет
-``<response-state>`` и возвращает в reasoning без повторного RAG.
+(multipart/mixed с MIME-частями по Content-ID), пересобирает ``<response-state>``
+из CRDT и **аддитивно** дописывает relay-части входящего письма (с их
+оригинальными уникальными Content-ID) — возвращает в reasoning без повторного RAG.
+
+Stage-agnostic: enrich_fast не знает, какая стадия прислала relay-часть; повторные
+хопы одной стадии накапливаются (уникальный CID на хоп), а не затирают друг друга.
 """
 from __future__ import annotations
 
@@ -14,10 +18,8 @@ from threlium.fsm_emit_semantic import managed_patch_simple_fsm_step
 from threlium.irt_chain import iter_in_reply_to_ancestors_from_inner_id
 from threlium.logutil import logger
 from threlium.mime_reform import (
-    EnrichPartId,
     email_message_from_path,
-    extract_part_by_content_id,
-    replace_or_add_part,
+    splice_e_prev_with_incoming_relay,
 )
 from threlium.response.collect import collect_ops
 from threlium.response.state_summary import build_state_summary
@@ -62,32 +64,21 @@ def main(
     limit = config.enrich.context_max_chars
     trimmed_summary = trim_context_text(summary, limit)
 
-    updated = replace_or_add_part(
-        e_prev,
-        EnrichPartId.RESPONSE_STATE,
-        trimmed_summary,
+    spliced = splice_e_prev_with_incoming_relay(
+        e_prev, msg, response_state_text=trimmed_summary,
     )
 
-    _RELAY_PART_IDS = frozenset({EnrichPartId.PLAN_STATE, EnrichPartId.MEMORY_NOTE, EnrichPartId.OBSERVATION_NOTE})
-    relayed: list[str] = []
-    for part_id in _RELAY_PART_IDS:
-        text = extract_part_by_content_id(msg, part_id)
-        if text is not None:
-            trimmed = trim_context_text(text.strip(), limit)
-            if trimmed:
-                updated = replace_or_add_part(updated, part_id, trimmed)
-                relayed.append(part_id.value)
-
     log.info(
-        "spliced_response_state",
+        "spliced_relay_parts",
         ops_count=len(ops),
-        summary_chars=len(trimmed_summary),
-        relayed_parts=relayed or None,
+        response_state_chars=len(trimmed_summary),
+        appended_cids=[cid.value for cid in spliced.appended] or None,
+        skipped_duplicate_cids=[cid.value for cid in spliced.skipped] or None,
         message_id=mid_w.value if mid_w else None,
     )
 
     return emit_transition_preserving_payload(
-        updated,
+        spliced.message,
         to_addr=FsmStage.REASONING,
         from_stage=stage,
         managed_headers=managed_patch_simple_fsm_step(msg, config),

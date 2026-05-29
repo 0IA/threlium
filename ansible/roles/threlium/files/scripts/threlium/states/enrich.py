@@ -45,10 +45,11 @@ from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_pa
 from threlium.irt_chain import iter_in_reply_to_ancestors_from_inner_id
 from threlium.logutil import logger
 from threlium.mime_reform import (
+    EnrichContentId,
     EnrichPartId,
     build_enriched_multipart,
+    collect_relay_parts_of_families,
     email_message_from_path,
-    extract_part_by_content_id,
 )
 from threlium.prompts import render_prompt
 from threlium.response.collect import collect_ops
@@ -166,29 +167,35 @@ class EnrichResult:
     global_memory: EnrichGlobalMemoryText | None
 
 
-_CARRY_OVER_IDS = (EnrichPartId.PLAN_STATE,)
+# Семейства relay-частей, переносимые из e_prev при полном enrich (carry-over).
+# observation/memory намеренно НЕ переносим — полный enrich обновляет контекст RAG,
+# их накопление живёт только в быстром цикле enrich_fast.
+_CARRY_OVER_FAMILIES = (EnrichPartId.PLAN_STATE,)
 
 
 def _collect_extra_parts(
     inner: NotmuchMessageIdInner, limit: int
-) -> list[tuple[EnrichPartId, str]]:
-    """Пересчёт ``<response-state>`` из CRDT + carry-over ``<plan-state>`` из e_prev."""
-    parts: list[tuple[EnrichPartId, str]] = []
+) -> list[tuple[EnrichContentId, str]]:
+    """Пересчёт ``<response-state>`` из CRDT + carry-over ``<plan-state>`` из e_prev.
+
+    Carry-over — CID-aware: relay-части переносятся **с их оригинальными** уникальными
+    Content-ID (``<plan-state@…>``), распознавание семейства через
+    :attr:`EnrichContentId.family` (бэк-компат с каноническим ``<plan-state>``).
+    """
+    parts: list[tuple[EnrichContentId, str]] = []
 
     ops = collect_ops(inner)
     summary = build_state_summary(ops)
     trimmed = trim_context_text(summary, limit)
     if trimmed:
-        parts.append((EnrichPartId.RESPONSE_STATE, trimmed))
+        parts.append((EnrichContentId.from_part_id(EnrichPartId.RESPONSE_STATE), trimmed))
 
     chain = iter_in_reply_to_ancestors_from_inner_id(inner)
     for snap in chain:
         if snap.is_addressed_to_fsm_stage(FsmStage.REASONING):
             e_prev = email_message_from_path(snap.path)
-            for pid in _CARRY_OVER_IDS:
-                text = extract_part_by_content_id(e_prev, pid)
-                if text is not None and text.strip():
-                    parts.append((pid, trim_context_text(text.strip(), limit)))
+            for cid, text in collect_relay_parts_of_families(e_prev, _CARRY_OVER_FAMILIES):
+                parts.append((cid, trim_context_text(text, limit)))
             break
 
     return parts
