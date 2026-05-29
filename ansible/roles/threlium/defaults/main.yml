@@ -56,13 +56,15 @@ threlium_bridges:
 # =============================================================================
 # cli — песочница systemd-run для cli_exec.
 # Структура 1:1 с секцией cli в config/threlium.yaml.
+# allowlist: read-only discovery (rg, find, git grep/log/show) + basic read helpers.
+# Shell chaining (&&, ;) is blocked by deny_patterns in cli_fsm.py.
 # =============================================================================
 threlium_cli:
   exec_timeout: 30
   exec_memory_max: "256M"
   exec_cpu_quota: "100%"
   exec_tasks_max: 16
-  allowlist: "ls,cat,pwd,echo,true"
+  allowlist: "ls,cat,pwd,echo,true,head,tail,wc,find,rg,grep,git,python3,test"
 
 # =============================================================================
 # hop / cap — бюджеты FSM и capability-строки.

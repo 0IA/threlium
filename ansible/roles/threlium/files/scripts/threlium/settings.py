@@ -687,7 +687,7 @@ class CliSettings(BaseModel):
     )
     exec_tasks_max: int = Field(default=16, ge=1, description="Максимум параллельных cli-задач.")
     allowlist: str = Field(
-        default="ls,cat,pwd,echo,true",
+        default="ls,cat,pwd,echo,true,head,tail,wc,find,rg,grep,git,python3,test",
         min_length=1,
         description="Список разрешённых имён бинарников через запятую (без путей).",
     )
