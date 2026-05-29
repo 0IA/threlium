@@ -6,7 +6,10 @@ memory_query (SHACL reference) → enrich_fast → reasoning → response_finali
 Покрытие:
 - logic_validate handler: pySHACL validate, observation-note с conforms=true
 - memory_query handler: aquery к LightRAG, observation relay через enrich_fast
-- enrich_fast: relay OBSERVATION_NOTE между reasoning хопами
+- enrich_fast: **аддитивное** накопление relay observation-частей с уникальными
+  Content-ID (``<observation-note@mid>``) — observation от logic_validate НЕ
+  затирается observation от memory_query; промпт 3-го reasoning содержит оба
+  маркера (``conforms: True`` + memory_query reasoning), см. stub 102.
 - Полный FSM цикл с 3 reasoning вызовами
 
 Стабы используют фазовый автомат WireMock State Extension:

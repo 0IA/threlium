@@ -2671,12 +2671,13 @@ def assert_wiremock_reasoning_journal_preserves_context_tail(
             f"no reasoning POST chat/completions in WireMock journal for stub_tag={stub_tag!r} "
             f"correlation_key={correlation_key!r}"
         )
-    worst = max(reasoning_user_bodies, key=len)
-    if tail_marker not in worst:
+    tail_bodies = [b for b in reasoning_user_bodies if tail_marker in b]
+    if not tail_bodies:
         raise AssertionError(
             f"reasoning journal user content missing tail marker {tail_marker!r} "
-            "(trim_context_text expected to keep tail)"
+            "(trim_context_text expected to keep tail; prior thread turns may omit it)"
         )
+    worst = max(tail_bodies, key=len)
     if head_marker in worst:
         raise AssertionError(
             f"reasoning journal user content still contains head marker {head_marker!r} "

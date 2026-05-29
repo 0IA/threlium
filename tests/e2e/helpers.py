@@ -376,6 +376,35 @@ def e2e_oversized_context_trim_body(
     return core
 
 
+def e2e_oversized_context_trim_prior_turn_body(
+    *,
+    head: str,
+    correlation_key: str,
+    pad_chars: int = 25_000,
+) -> str:
+    """Предыдущий ход треда для trim e2e: HEAD + padding (без TAIL — он на текущем ходе)."""
+    pad = max(0, pad_chars)
+    return (
+        f"{E2E_CTX_TRIM_HEAD_MARKER}\n"
+        f"{head.rstrip()}\n"
+        f"{'X' * pad}\n"
+        f"e2e_ctx_prior {correlation_key}\n"
+    )
+
+
+def e2e_oversized_context_trim_current_turn_body(
+    *,
+    head: str,
+    correlation_key: str,
+) -> str:
+    """Текущий ход для trim e2e: TAIL-маркер (HEAD/pad уже в unified с прошлого ingress)."""
+    return (
+        f"{E2E_CTX_TRIM_TAIL_MARKER}\n"
+        f"{head.rstrip()}\n"
+        f"e2e_ctx_tail {correlation_key}\n"
+    )
+
+
 def e2e_summarize_overflow_inject_body(
     *,
     head: str,
@@ -3361,8 +3390,14 @@ def mailflow_inject_and_wait(
         wiremock_public_base,
     )
 
+    needs_prior_thread_turn = spec.summarize_overflow_body or spec.oversized_trim_body
+    seed_id: str | None = None
+    if needs_prior_thread_turn:
+        seed_id = f"{spec.raw_id_prefix}seed-{uuid.uuid4().hex}@localhost"
+        correlation_key = e2e_thread_root_mid_for_message_id(seed_id)
     raw_id = f"{spec.raw_id_prefix}{uuid.uuid4().hex}@localhost"
-    correlation_key = e2e_thread_root_mid_for_message_id(raw_id)
+    if not needs_prior_thread_turn:
+        correlation_key = e2e_thread_root_mid_for_message_id(raw_id)
     nm_inner = email_ingress_notmuch_id_inner(raw_id)
     canonical_id = canonical_external_msgid(raw_id)
     t0 = time.monotonic()
@@ -3395,16 +3430,70 @@ def mailflow_inject_and_wait(
 
     reset_maildrop_debug_log(deployed_stack, repo_root=REPO_ROOT)
 
+    if seed_id is not None:
+        if spec.summarize_overflow_body:
+            seed_body = e2e_summarize_overflow_inject_body(
+                head=f"{spec.body_head} (prior thread turn seed)",
+                correlation_key=correlation_key,
+            )
+        elif spec.oversized_trim_body:
+            seed_body = e2e_oversized_context_trim_prior_turn_body(
+                head=f"{spec.body_head} (prior thread turn seed)",
+                correlation_key=correlation_key,
+            )
+        else:
+            seed_body = e2e_dense_threlium_ctx_body(
+                head=f"{spec.body_head} (prior thread turn seed)",
+                correlation_key=correlation_key,
+            )
+        smtp_inject_inbound(
+            deployed_stack,
+            checkout="/unused",
+            repo_root=REPO_ROOT,
+            message_id=seed_id,
+            body=seed_body,
+        )
+        mailflow_log_phase(
+            f"{spec.label}: prior-turn seed injected mid={seed_id!r} (+{time.monotonic() - t0:.1f}s)"
+        )
+        wait_for_greenmail_inbox_message_gone_host(
+            rt.greenmail_imap_host,
+            rt.greenmail_imap_port,
+            message_id=seed_id,
+        )
+        seed_nm_inner = email_ingress_notmuch_id_inner(seed_id)
+        mailflow_wait_fsm_maildir_activity(
+            deployed_stack,
+            repo_root=REPO_ROOT,
+            message_id=seed_nm_inner,
+        )
+        wait_for_notmuch_message(
+            deployed_stack, message_id=seed_nm_inner, repo_root=REPO_ROOT
+        )
+        mailflow_log_phase(
+            f"{spec.label}: prior-turn seed indexed mid={seed_id!r} (+{time.monotonic() - t0:.1f}s)"
+        )
+
     if spec.body_override is not None:
         inject_body = spec.body_override
     elif spec.oversized_trim_body:
-        inject_body = e2e_oversized_context_trim_body(
-            head=spec.body_head, correlation_key=correlation_key
-        )
+        if seed_id is not None:
+            inject_body = e2e_oversized_context_trim_current_turn_body(
+                head=spec.body_head, correlation_key=correlation_key
+            )
+        else:
+            inject_body = e2e_oversized_context_trim_body(
+                head=spec.body_head, correlation_key=correlation_key
+            )
     elif spec.summarize_overflow_body:
-        inject_body = e2e_summarize_overflow_inject_body(
-            head=spec.body_head, correlation_key=correlation_key
-        )
+        if seed_id is not None:
+            inject_body = e2e_dense_threlium_ctx_body(
+                head=spec.body_head, correlation_key=correlation_key
+            )
+        else:
+            inject_body = e2e_summarize_overflow_inject_body(
+                head=spec.body_head, correlation_key=correlation_key
+            )
     else:
         inject_body = e2e_dense_threlium_ctx_body(
             head=spec.body_head, correlation_key=correlation_key
@@ -3415,6 +3504,7 @@ def mailflow_inject_and_wait(
         repo_root=REPO_ROOT,
         message_id=raw_id,
         body=inject_body,
+        **({"in_reply_to": seed_id} if seed_id is not None else {}),
     )
     mailflow_log_phase(f"{spec.label}: after smtp_inject_inbound (+{time.monotonic() - t0:.1f}s)")
     wait_for_greenmail_inbox_message_gone_host(

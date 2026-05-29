@@ -18,9 +18,6 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "E2E-CTX-TRIM-TAIL-MARKER"
-      },
-      {
         "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
