@@ -331,7 +331,11 @@ def _compose_prereq_failure_message() -> str | None:
 # Подготовка: ``wipe_bake`` / compose up; синхронизация кода — ``wipe_sync.py`` (``--tags refresh``).
 _E2E_COMPOSE_AUTOUSE_SKIP_MODULES = frozenset({
     "test_knowledge_bootstrap_live_e2e.py",
-    "test_logic_validate_chain_e2e.py",
+    "test_formal_reason_chain_e2e.py",
+    "test_formal_reason_inference_e2e.py",
+    "test_formal_reason_query_e2e.py",
+    "test_formal_reason_violation_e2e.py",
+    "test_task_ledger_chain_e2e.py",
     "test_mailflow_live_only_e2e.py",
     "test_greenmail_delivery_e2e.py",
     "test_matrix_wiremock_live_e2e.py",

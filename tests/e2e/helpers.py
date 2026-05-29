@@ -37,10 +37,12 @@ from threlium.types import (
     MatrixRoomEventId,
     MatrixRoomId,
     NotmuchMessageIdInner,
+    NotmuchQueryField,
     NotmuchTag,
     RfcMessageIdWire,
     TelegramNativeId,
 )
+from threlium.lightrag_drain_query import lightrag_drain_pending_search
 from tests.e2e.log import clip_log_body, log
 
 import docker  # type: ignore[import-not-found]
@@ -3258,6 +3260,129 @@ sys.exit(0)
         ) from None
 
 
+def assert_notmuch_thread_lightrag_index_filter(
+    project_name: str,
+    *,
+    anchor_message_id: str,
+    indexed_stages: tuple[FsmStage, ...],
+    excluded_stages: tuple[FsmStage, ...],
+    repo_root: Path | None = None,
+    settle_timeout: float | None = None,
+) -> None:
+    """Селективная индексация LightRAG в треде якоря (push-down whitelist).
+
+    Для каждой ``indexed_stages``: в треде есть письмо ``to:<stage>`` И оно
+    ``tag:lightrag_indexed`` (content-indexable стадия попала в drain).
+    Для каждой ``excluded_stages``: письма ``to:<stage>`` в треде есть, но НИ
+    одно НЕ ``tag:lightrag_indexed`` (SERVICE/не-whitelist стадия отсечена
+    селектором :func:`threlium.lightrag_drain_query.lightrag_drain_pending_search`
+    и в граф не попала). Drain при этом доходит до idle — отсечённые письма не
+    «застревают» в pending.
+    """
+    root = repo_root or REPO_ROOT
+    w = float(settle_timeout) if settle_timeout is not None else float(TIMEOUT_POLL_SHORT)
+    rag_term = NotmuchTag.LIGHTRAG_INDEXED.as_tag_query_term()
+    indexed_to_terms = [
+        NotmuchQueryField.TO.term(s.rfc822_mailbox) for s in indexed_stages
+    ]
+    excluded_to_terms = [
+        NotmuchQueryField.TO.term(s.rfc822_mailbox) for s in excluded_stages
+    ]
+    _id_q_lit = repr(notmuch_id_search_term(anchor_message_id))
+    py = f"""import json, os, subprocess, sys
+{_E2E_REMOTE_PROBE_LOGGER_BOOT}os.environ.setdefault("HOME", "{E2E_REMOTE_POSIX_HOME}")
+os.environ.setdefault("NOTMUCH_CONFIG", "{E2E_REMOTE_POSIX_HOME}/.notmuch-config")
+id_q = {_id_q_lit}
+rag_term = {rag_term!r}
+indexed_terms = {indexed_to_terms!r}
+excluded_terms = {excluded_to_terms!r}
+def _count(q: str) -> int:
+    c = subprocess.run(["notmuch", "count", q], capture_output=True, text=True)
+    try:
+        return int((c.stdout or "0").strip() or "0")
+    except ValueError:
+        return 0
+def _first_thread(raw: str) -> str:
+    try:
+        payload = json.loads((raw or "").strip() or "[]")
+    except json.JSONDecodeError:
+        return ""
+    if not isinstance(payload, list) or not payload:
+        return ""
+    first = payload[0]
+    if isinstance(first, str):
+        tid = first.strip()
+    elif isinstance(first, dict):
+        tid = str(first.get("thread") or first.get("thread_id") or first.get("threadid") or "").strip()
+    else:
+        tid = ""
+    if not tid:
+        return ""
+    return tid if tid.startswith("thread:") else f"thread:{{tid}}"
+p = subprocess.run(
+    ["notmuch", "search", "--limit=1", "--output=threads", "--format=json", id_q],
+    capture_output=True,
+    text=True,
+)
+tid = _first_thread(p.stdout)
+if not tid:
+    _probe_out.info("NOTMUCH_THREAD_RESOLVE_FAIL stdout=" + repr(p.stdout) + " stderr=" + repr(p.stderr))
+    sys.exit(2)
+problems = []
+for term in indexed_terms:
+    n_all = _count(tid + " and " + term)
+    n_idx = _count(tid + " and " + term + " and " + rag_term)
+    _probe_out.info("INDEXED_STAGE term=" + repr(term) + " all=" + str(n_all) + " indexed=" + str(n_idx))
+    if n_all < 1:
+        problems.append("missing stage " + term)
+    elif n_idx < 1:
+        problems.append("not indexed " + term)
+for term in excluded_terms:
+    n_all = _count(tid + " and " + term)
+    n_idx = _count(tid + " and " + term + " and " + rag_term)
+    _probe_out.info("EXCLUDED_STAGE term=" + repr(term) + " all=" + str(n_all) + " indexed=" + str(n_idx))
+    if n_all < 1:
+        problems.append("missing stage " + term)
+    elif n_idx > 0:
+        problems.append("unexpectedly indexed " + term)
+if problems:
+    _probe_out.info("INDEX_FILTER_PROBLEMS=" + repr(problems) + " tid=" + repr(tid))
+    sys.exit(5)
+sys.exit(0)
+"""
+    cmd = ["bash", "-lc", "python3 <<'PY'\n" + py + "\nPY"]
+    last: dict[str, Any] = {"r": None}
+
+    def _probe() -> bool | None:
+        r = service_exec(
+            project_name,
+            "sut",
+            cmd,
+            repo_root=root,
+            timeout=int(TIMEOUT_POLL_SHORT),
+        )
+        last["r"] = r
+        return True if r.returncode == 0 else None
+
+    try:
+        poll_until(
+            _probe,
+            timeout=w,
+            interval=2.0,
+            desc=f"lightrag index filter (anchor={anchor_message_id!r})",
+        )
+    except TimeoutError:
+        r = last["r"]
+        out = ""
+        if r is not None:
+            out = f"\nscript output:\n{r.stdout}\n{r.stderr}"
+        mailflow_pipeline_diag(project_name, anchor_message_id=anchor_message_id, repo_root=root)
+        raise AssertionError(
+            "lightrag selective indexing invariant violated within "
+            f"{w}s (anchor id={anchor_message_id!r}).{out}"
+        ) from None
+
+
 # ---------------------------------------------------------------------------
 # Mailflow scenario infrastructure: shared arrange / assert for email pipeline
 # ---------------------------------------------------------------------------
@@ -3286,14 +3411,16 @@ class MailflowScenarioSpec:
     expect_notmuch_stage_folders: tuple[str, ...] | None = None
     reply_subject_needle: str | None = None
     reply_body_needle: str | None = None
+    assert_thread_no_unread: bool = False
 
 
 def _wait_rag_drain_idle(project_name: str, *, label: str) -> None:
     """Poll until the LightRAG pending selector returns empty (drain finished)."""
+    selector = lightrag_drain_pending_search()
     cmd = [
         "bash", "-lc",
         f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; "
-        "notmuch count '* AND NOT tag:unread AND NOT tag:lightrag_indexed' 2>/dev/null || echo 99",
+        f"notmuch count '{selector}' 2>/dev/null || echo 99",
     ]
 
     def _probe() -> str | None:
@@ -3594,8 +3721,173 @@ def assert_full_mailflow_pipeline(
             stage_folder_ids=spec.expect_notmuch_stage_folders,
             repo_root=REPO_ROOT,
         )
+    if spec.assert_thread_no_unread:
+        assert_notmuch_thread_has_no_unread(
+            project, anchor_message_id=nm_inner, repo_root=REPO_ROOT
+        )
     assert_wiremock_mailflow_zero_unmatched(
         project, anchor_message_id=nm_inner, repo_root=REPO_ROOT
     )
     mailflow_log_phase(f"{spec.label}: pipeline checks OK (+{time.monotonic() - t0:.1f}s)")
 
+
+# ---------------------------------------------------------------------------
+# IMAP processed-folder helpers (email bridge UID MOVE)
+# ---------------------------------------------------------------------------
+
+E2E_IMAP_PROCESSED_FOLDER = "Threlium.Processed"
+
+
+def imap_list_uids_in_folder(
+    host: str,
+    port: int,
+    *,
+    user: str,
+    password: str,
+    folder: str,
+) -> list[int]:
+    """UID-ы писем в папке ``folder`` (``UID SEARCH ALL``)."""
+    import imaplib
+
+    with imaplib.IMAP4(host, port, timeout=int(TIMEOUT_POLL_SHORT)) as imap:
+        imap.login(user, password)
+        typ, _ = imap.select(folder, readonly=True)
+        if typ != "OK":
+            raise RuntimeError(f"IMAP SELECT {folder!r} failed: {typ}")
+        typ, data = imap.uid("SEARCH", None, "ALL")
+        if typ != "OK":
+            raise RuntimeError(f"IMAP UID SEARCH ALL failed: {typ} {data!r}")
+        raw = data[0] if data else b""
+        if not raw:
+            return []
+        return sorted(int(x) for x in raw.decode().split())
+
+
+def assert_imap_inner_mid_in_folder(
+    host: str,
+    port: int,
+    *,
+    user: str,
+    password: str,
+    folder: str,
+    inner_mid: str,
+) -> None:
+    """Письмо с ``Message-ID`` ``inner_mid`` присутствует в ``folder``."""
+    import imaplib
+
+    needle = inner_mid.strip().strip("<>")
+    with imaplib.IMAP4(host, port, timeout=int(TIMEOUT_POLL_SHORT)) as imap:
+        imap.login(user, password)
+        typ, _ = imap.select(folder, readonly=True)
+        if typ != "OK":
+            raise AssertionError(f"IMAP SELECT {folder!r} failed: {typ}")
+        typ, data = imap.uid("SEARCH", None, "HEADER", "Message-ID", f"<{needle}>")
+        if typ != "OK":
+            raise AssertionError(f"IMAP UID SEARCH Message-ID failed: {typ}")
+        uids = data[0].split() if data and data[0] else []
+        assert uids, (
+            f"expected Message-ID {needle!r} in IMAP folder {folder!r}, got no UIDs"
+        )
+
+
+def assert_imap_inner_mid_not_in_inbox(
+    host: str,
+    port: int,
+    *,
+    user: str,
+    password: str,
+    inner_mid: str,
+) -> None:
+    """После ``UID MOVE`` письма нет в INBOX (но может быть в processed)."""
+    import imaplib
+
+    needle = inner_mid.strip().strip("<>")
+    with imaplib.IMAP4(host, port, timeout=int(TIMEOUT_POLL_SHORT)) as imap:
+        imap.login(user, password)
+        typ, _ = imap.select("INBOX", readonly=True)
+        if typ != "OK":
+            raise AssertionError(f"IMAP SELECT INBOX failed: {typ}")
+        typ, data = imap.uid("SEARCH", None, "HEADER", "Message-ID", f"<{needle}>")
+        if typ != "OK":
+            raise AssertionError(f"IMAP UID SEARCH Message-ID failed: {typ}")
+        uids = data[0].split() if data and data[0] else []
+        assert not uids, (
+            f"Message-ID {needle!r} still in INBOX (uids={uids!r}); expected UID MOVE"
+        )
+
+
+def email_ingress_imap_checkpoint_from_notmuch(
+    project: str,
+    *,
+    nm_inner: str,
+    repo_root: Path | None = None,
+) -> tuple[int | None, int]:
+    """``(imap_uidvalidity, imap_uid)`` из ``X-Threlium-Route`` ingress-письма в notmuch."""
+    import json
+
+    from threlium.mail_header_names import MailHeaderName
+    from threlium.types import EmailIngressRoute, IngressRouteB62Wire
+
+    root = repo_root or REPO_ROOT
+    id_term = notmuch_id_search_term(nm_inner)
+    cmd = [
+        "bash",
+        "-lc",
+        f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; notmuch show --format=json {shlex.quote(id_term)}",
+    ]
+    r = service_exec(project, "sut", cmd, repo_root=root, timeout=int(TIMEOUT_POLL_SHORT))
+    text = (r.stdout or "").strip()
+    if not text:
+        return None, 0
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None, 0
+    headers: dict[str, str] = {}
+    if isinstance(payload, list) and payload:
+        headers = payload[0][0].get("headers", {}) if isinstance(payload[0], list) else {}
+    route_b62 = headers.get(MailHeaderName.ROUTE.value) or headers.get("X-Threlium-Route")
+    route_w = IngressRouteB62Wire.parse_route_from_optional_header(route_b62)
+    if route_w is None or not isinstance(route_w, EmailIngressRoute):
+        return None, 0
+    uid = route_w.imap_uid
+    uiv = route_w.imap_uidvalidity
+    return (int(uiv) if uiv is not None else None, int(uid) if uid is not None else 0)
+
+
+def restart_email_bridge_service(project: str, *, repo_root: Path | None = None) -> None:
+    """``systemctl --user restart threlium-bridge@email`` на SUT."""
+    from .sut_user_systemd import E2E_THRELIUM_USER
+
+    root = repo_root or REPO_ROOT
+    cmd = [
+        "bash",
+        "-lc",
+        f"runuser -u {E2E_THRELIUM_USER} -- env "
+        f"XDG_RUNTIME_DIR=/run/user/$(id -u {E2E_THRELIUM_USER}) "
+        "systemctl --user restart threlium-bridge@email.service",
+    ]
+    r = service_exec(project, "sut", cmd, repo_root=root, timeout=int(TIMEOUT_POLL_SHORT))
+    assert r.returncode == 0, f"bridge restart failed: {(r.stderr or r.stdout)!r}"
+
+
+def assert_notmuch_thread_has_no_unread(
+    project: str,
+    *,
+    anchor_message_id: str,
+    repo_root: Path | None = None,
+) -> None:
+    """После успешного прогона в треде нет ``tag:unread`` (``nm_settle``)."""
+    root = repo_root or REPO_ROOT
+    id_term = notmuch_id_search_term(anchor_message_id)
+    q = f"thread:{anchor_message_id} and tag:unread"
+    cmd = [
+        "bash",
+        "-lc",
+        f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; notmuch count {shlex.quote(q)}",
+    ]
+    r = service_exec(project, "sut", cmd, repo_root=root, timeout=int(TIMEOUT_POLL_SHORT))
+    count = (r.stdout or "0").strip().splitlines()[-1].strip()
+    assert count == "0", (
+        f"expected no unread in thread (anchor={anchor_message_id!r}), count={count!r}"
+    )
