@@ -8,7 +8,8 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from threlium import nm
-from threlium.context_budget import message_in_unified_mail_context
+from threlium.context_budget import to_stage_in_unified_role
+from threlium.irt_chain import IrtAncestorSnapshot
 from threlium.logutil import logger
 from threlium.settings import ThreliumSettings
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
@@ -20,7 +21,6 @@ from threlium.types import (
     NotmuchQueryConnective,
     NotmuchQueryField,
     NotmuchTag,
-    RfcMessageIdWire,
 )
 
 log = logger.bind(stage="enrich_context")
@@ -40,17 +40,6 @@ def _sort_email_messages_oldest_first(msgs: list[EmailMessage]) -> list[EmailMes
             return 0.0
 
     return sorted(msgs, key=_ts)
-
-
-def _dedupe_mid_key(m: EmailMessage) -> str:
-    raw = m.get(_HDR.MESSAGE_ID)
-    if raw:
-        w = RfcMessageIdWire.parse_present_optional(str(raw))
-        if w is not None:
-            inner = NotmuchMessageIdInner.from_optional_wire(w)
-            if inner is not None:
-                return inner.value
-    return ""
 
 
 def trim_prompt_text(text: str, max_chars: int) -> str:
@@ -105,64 +94,58 @@ def build_unified_email_messages(
     n_tm = settings.enrich.context_thread_memory_n
     n_gm = settings.enrich.context_global_n
 
-    tail_paths = [
-        snap.path
-        for snap in itertools.islice(
-            iter_irt_ancestors_filtered(leaf_inner), n_thread
-        )
-    ]
-    tail_paths_chrono = list(reversed(tail_paths))
+    tail_snaps = list(
+        itertools.islice(iter_irt_ancestors_filtered(leaf_inner), n_thread)
+    )
 
     tm_q = NotmuchQueryConnective.join_and(
         NotmuchQueryField.THREAD.term(thread_id),
         NotmuchQueryField.TO.term(FsmStage.THREAD_MEMORY.rfc822_mailbox),
     )
     tm_paths = nm.message_paths(tm_q, limit=n_tm, sort_newest_first=True)
-    tm_paths_chrono = list(reversed(tm_paths))
 
     gm_q = NotmuchQueryField.TO.term(FsmStage.GLOBAL_MEMORY.rfc822_mailbox)
     gm_paths = nm.message_paths(gm_q, limit=n_gm, sort_newest_first=True)
-    gm_paths_chrono = list(reversed(gm_paths))
 
-    memory_path_keys: set[str] = set()
-    for p in itertools.chain(tm_paths_chrono, gm_paths_chrono):
-        memory_path_keys.add(str(p.resolve()))
-
-    summarized_q = NotmuchQueryConnective.join_and(
-        NotmuchQueryField.THREAD.term(thread_id),
-        NotmuchTag.CONTEXT_SUMMARIZED.as_tag_query_term(),
-    )
-    summarized_path_keys: set[str] = {
-        str(p.resolve()) for p in nm.message_paths(summarized_q, limit=None, sort_newest_first=False)
+    memory_path_keys: set[str] = {
+        str(p.resolve()) for p in itertools.chain(tm_paths, gm_paths)
     }
 
-    ordered_paths: list[Path] = []
-    seen: set[str] = set()
-    for p in tail_paths_chrono:
-        key = str(p.resolve())
-        if key in seen or key in memory_path_keys or key in summarized_path_keys:
+    # Один проход лист→корень по снимкам IRT: роль и дедуп считаются на снимках
+    # (есть To и inner Message-ID), summarized — по тегам снимка, поэтому
+    # email_message_from_path вызывается только для писем, реально уходящих в
+    # unified (а не для всего хвоста с последующим отбросом). Порядок неважен —
+    # итог пересортируется по дате ниже.
+    #
+    # Ближайший к листу To: ingress — текущий ход пользователя, дублирующий
+    # <user-message> (релей ingress→enrich рендерится в user-message-часть);
+    # пропускаем его ровно один раз, прошлые ходы (старшие To: ingress) остаются.
+    _summarized_tag = NotmuchTag.CONTEXT_SUMMARIZED.value
+    by_mid: dict[str, IrtAncestorSnapshot] = {}
+    current_user_skipped = False
+    for snap in tail_snaps:
+        if _summarized_tag in snap.tags:
             continue
-        seen.add(key)
-        ordered_paths.append(p)
+        stage = snap.to_fsm_stage()
+        if not to_stage_in_unified_role(stage):
+            continue
+        if not current_user_skipped and stage is FsmStage.INGRESS:
+            current_user_skipped = True
+            continue
+        if str(snap.path.resolve()) in memory_path_keys:
+            continue
+        by_mid.setdefault(snap.message_id_inner.value, snap)
 
     loaded: list[EmailMessage] = []
-    for p in ordered_paths:
+    for snap in by_mid.values():
         try:
-            loaded.append(email_message_from_path(p))
+            loaded.append(email_message_from_path(snap.path))
         except OSError as exc:
-            log.warning("unified_load_path_skipped", path=str(p), exc_msg=str(exc))
+            log.warning("unified_load_path_skipped", path=str(snap.path), exc_msg=str(exc))
             continue
-
-    by_mid: dict[str, EmailMessage] = {}
-    for m in loaded:
-        if not message_in_unified_mail_context(m):
-            continue
-        k = _dedupe_mid_key(m) or f"__noid_{id(m)}"
-        if k not in by_mid:
-            by_mid[k] = m
 
     return UnifiedEmailContext(
-        all_messages=_sort_email_messages_oldest_first(list(by_mid.values())),
-        thread_memory_msgs=_sort_email_messages_oldest_first(_load_paths(tm_paths_chrono)),
-        global_memory_msgs=_sort_email_messages_oldest_first(_load_paths(gm_paths_chrono)),
+        all_messages=_sort_email_messages_oldest_first(loaded),
+        thread_memory_msgs=_sort_email_messages_oldest_first(_load_paths(tm_paths)),
+        global_memory_msgs=_sort_email_messages_oldest_first(_load_paths(gm_paths)),
     )

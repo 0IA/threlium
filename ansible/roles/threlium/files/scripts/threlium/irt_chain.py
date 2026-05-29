@@ -71,6 +71,12 @@ class IrtAncestorSnapshot:
             self.header_in_reply_to.value if self.header_in_reply_to is not None else None
         )
 
+    def to_fsm_stage(self) -> FsmStage | None:
+        """Стадия из ``To:`` снимка (``None`` если не ровно одна FSM-стадия @localhost)."""
+        return FsmStage.try_from_to_header_value(
+            self.header_to.value if self.header_to is not None else None
+        )
+
 
 def _snapshot_from_nm_message(nm_msg: notmuch2.Message, mid: NotmuchMessageIdInner) -> IrtAncestorSnapshot:
     return IrtAncestorSnapshot(

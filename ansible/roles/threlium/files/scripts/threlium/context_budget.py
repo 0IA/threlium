@@ -53,7 +53,9 @@ class ContextMessageType(StrEnum):
 #
 # enrich — триггер цикла и монолитный MIME enrich→reasoning; контекст в отдельных
 #   Content-ID, не в IRT-хвосте.
-# enrich_fast — relay observation/plan/memory между reasoning и вспомогательными стадиями.
+# enrich_fast — аддитивный relay observation/plan/memory между reasoning и вспомогательными
+#   стадиями: каждый хоп — отдельная MIME-часть с уникальным Content-ID <family@inner-mid>,
+#   накапливается в хвосте E_prev (не перезапись). reasoning группирует по семейству.
 # response_observe / response_edit / response_append — CRDT-наблюдения и правки ответа.
 # reflect — служебный переход (шаблон continue/final); смысл попадает в следующий ingress.
 # summarize_context — переполнение контекста → пакетное summarize; не история треда.
@@ -176,13 +178,17 @@ def _normalize_type_weights(weights: ContextMessageTypeWeights) -> ContextMessag
     )
 
 
-def message_in_unified_mail_context(msg: EmailMessage) -> bool:
-    """IRT-хвост: ``To:`` есть в :data:`CONTEXT_ROLE_BY_TO_STAGE` и роль не SERVICE."""
-    stage = FsmStage.try_from_incoming_to(msg)
+def to_stage_in_unified_role(stage: FsmStage | None) -> bool:
+    """``To``-стадия входит в unified: есть в :data:`CONTEXT_ROLE_BY_TO_STAGE` и роль не SERVICE."""
     if stage is None:
         return False
     role = CONTEXT_ROLE_BY_TO_STAGE.get(stage)
     return role is not None and role is not ContextMessageType.SERVICE
+
+
+def message_in_unified_mail_context(msg: EmailMessage) -> bool:
+    """IRT-хвост: ``To:`` есть в :data:`CONTEXT_ROLE_BY_TO_STAGE` и роль не SERVICE."""
+    return to_stage_in_unified_role(FsmStage.try_from_incoming_to(msg))
 
 
 def classify_message_type(msg: EmailMessage) -> ContextMessageType:

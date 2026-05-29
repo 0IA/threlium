@@ -108,13 +108,7 @@ class FsmStage(StrEnum):
         return cls.parse(local)
 
     @classmethod
-    def try_from_incoming_to(cls, msg: EmailMessage) -> Self | None:
-        """Как :meth:`from_incoming_to`, но ``None`` если ``To:`` не ровно одна FSM-стадия @localhost."""
-        tos = msg.get_all(_HDR.TO, [])
-        addrs = [a for _, a in getaddresses(tos) if a]
-        if len(addrs) != 1:
-            return None
-        email_addr = addrs[0]
+    def _try_stage_from_single_addr(cls, email_addr: str) -> Self | None:
         if "@" not in email_addr:
             return None
         local, domain = email_addr.split("@", 1)
@@ -124,3 +118,17 @@ class FsmStage(StrEnum):
             return cls.parse(local)
         except ValueError:
             return None
+
+    @classmethod
+    def try_from_incoming_to(cls, msg: EmailMessage) -> Self | None:
+        """Как :meth:`from_incoming_to`, но ``None`` если ``To:`` не ровно одна FSM-стадия @localhost."""
+        addrs = [a for _, a in getaddresses(msg.get_all(_HDR.TO, [])) if a]
+        return cls._try_stage_from_single_addr(addrs[0]) if len(addrs) == 1 else None
+
+    @classmethod
+    def try_from_to_header_value(cls, raw: str | None) -> Self | None:
+        """Стадия из сырого значения заголовка ``To:`` (``None`` если не ровно одна FSM-стадия @localhost)."""
+        if raw is None:
+            return None
+        addrs = [a for _, a in getaddresses([raw]) if a]
+        return cls._try_stage_from_single_addr(addrs[0]) if len(addrs) == 1 else None
