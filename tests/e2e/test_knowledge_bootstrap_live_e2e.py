@@ -3,7 +3,7 @@
 Проверяет на уже поднятом стеке (без inject):
 - P1: файлы knowledge/*.md на месте в $THRELIUM_HOME/knowledge/
 - B1: WireMock journal содержит embedding-запросы с X-Threlium-Thread-Root: e2e-bootstrap
-- R4: все промпты reasoning/memory_query, reasoning/logic_validate и observation на месте
+- R4: все промпты reasoning/memory_query, reasoning/formal_reason и observation на месте
 - B2: повторный restart engine не генерирует новых embedding-запросов к WireMock
 
 Тип: @pytest.mark.e2e_live — если стека нет, тест пропускается.
@@ -41,16 +41,21 @@ _KNOWLEDGE_FILES = [
     "shacl_sparql.md",
     "sparql_functions.md",
     "turtle_syntax.md",
+    "formal_reason_workflows.md",
+    "pyshacl_overview.md",
+    "rdflib_overview.md",
 ]
 
+_MIN_KNOWLEDGE_MD_ON_SUT = 20
+
 _KNOWLEDGE_PROMPTS = [
-    "reasoning/logic_validate/tool_spec.j2",
-    "reasoning/logic_validate/email_body.j2",
-    "reasoning/logic_validate/email_subject.j2",
+    "reasoning/formal_reason/tool_spec.j2",
+    "reasoning/formal_reason/email_body.j2",
+    "reasoning/formal_reason/email_subject.j2",
     "reasoning/memory_query/tool_spec.j2",
     "reasoning/memory_query/email_body.j2",
     "reasoning/memory_query/email_subject.j2",
-    "logic_validate/observation.j2",
+    "formal_reason/observation.j2",
     "memory_query/observation.j2",
 ]
 
@@ -140,13 +145,47 @@ def test_knowledge_files_deployed(live_bootstrap_runtime) -> None:
             f"Knowledge file missing on SUT: {path}\n"
             f"stdout={r.stdout!r} stderr={r.stderr!r}"
         )
-    log.info("knowledge_files_deployed", count=len(_KNOWLEDGE_FILES))
+    count_cmd = [
+        "bash",
+        "-lc",
+        f"find {_THRELIUM_HOME}/knowledge -name '*.md' | wc -l",
+    ]
+    r = service_exec(project, "sut", count_cmd, repo_root=REPO_ROOT, timeout=10)
+    md_count = int((r.stdout or "0").strip())
+    assert md_count >= _MIN_KNOWLEDGE_MD_ON_SUT, (
+        f"Expected at least {_MIN_KNOWLEDGE_MD_ON_SUT} knowledge/*.md on SUT, got {md_count}"
+    )
+    log.info(
+        "knowledge_files_deployed",
+        checked=len(_KNOWLEDGE_FILES),
+        md_total=md_count,
+    )
+
+
+@pytest.mark.e2e
+@pytest.mark.e2e_live
+def test_knowledge_docs_indexed_in_lightrag(live_bootstrap_runtime) -> None:
+    """LightRAG ``doc_status`` содержит ``bridges_contract`` и ``fsm_routes`` после bootstrap."""
+    project, _rt = live_bootstrap_runtime
+    cmd = [
+        "bash",
+        "-lc",
+        f"test -f {_LIGHTRAG_DOC_STATUS} && cat {_LIGHTRAG_DOC_STATUS}",
+    ]
+    r = service_exec(project, "sut", cmd, repo_root=REPO_ROOT, timeout=30)
+    text = (r.stdout or "") + (r.stderr or "")
+    assert r.returncode == 0, f"doc_status unreadable: {text[:400]!r}"
+    for doc_id in ("bridges_contract.md", "fsm_routes.md"):
+        assert doc_id in text, (
+            f"expected {doc_id!r} in lightrag doc_status; snippet={text[:500]!r}"
+        )
+    log.info("knowledge_docs_in_doc_status", docs=("bridges_contract.md", "fsm_routes.md"))
 
 
 @pytest.mark.e2e
 @pytest.mark.e2e_live
 def test_knowledge_prompts_deployed(live_bootstrap_runtime) -> None:
-    """R4: all reasoning/memory_query, reasoning/logic_validate and observation prompts on SUT."""
+    """R4: all reasoning/memory_query, reasoning/formal_reason and observation prompts on SUT."""
     project, _rt = live_bootstrap_runtime
     for rel in _KNOWLEDGE_PROMPTS:
         path = f"{_THRELIUM_HOME}/prompts/{rel}"
