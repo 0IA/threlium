@@ -36,7 +36,7 @@ FORMAL_REASON_INFERENCE_SPEC = MailflowScenarioSpec(
         f"{E2E_FORMAL_REASON_INFERENCE_BODY}\n"
         "e2e formal_reason inference derived triples test body"
     ),
-    min_chat_completion_posts=2,
+    min_chat_completion_posts=3,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
@@ -45,6 +45,7 @@ FORMAL_REASON_INFERENCE_SPEC = MailflowScenarioSpec(
         FsmStage.REASONING.value,
         FsmStage.FORMAL_REASON.value,
         FsmStage.ENRICH_FAST.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

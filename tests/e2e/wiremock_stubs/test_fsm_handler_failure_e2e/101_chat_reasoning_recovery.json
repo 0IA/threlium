@@ -16,16 +16,14 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "E2E-FSM-HANDLER-FAILURE-RECOVERY"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-fsm-handler-failure-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_failure_seen"
+        "hasProperty": "phase_failure_seen_ledger_done",
+        "hasNotProperty": "phase_failure_recovery_finalize_done"
       }
     }
   },
@@ -60,5 +58,16 @@
         }
       ]
     }
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "stub-fsm-handler-failure-01::{{request.headers.[x-threlium-thread-root]}}",
+        "state": {
+          "phase_failure_recovery_finalize_done": "1"
+        }
+      }
+    }
+  ]
 }

@@ -46,7 +46,7 @@ SUMMARIZE_CONTEXT_SPEC = MailflowScenarioSpec(
     stub_tag="stub-summarize-context-e2e-01",
     body_head=f"{REASONING_E2E_BODY_MARKER}\ne2e summarize context overflow inbound",
     summarize_overflow_body=True,
-    min_chat_completion_posts=1,
+    min_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
@@ -55,6 +55,7 @@ SUMMARIZE_CONTEXT_SPEC = MailflowScenarioSpec(
         FsmStage.SUMMARIZE_CONTEXT.value,
         FsmStage.SUMMARIZE_MEMORY.value,
         FsmStage.REASONING.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

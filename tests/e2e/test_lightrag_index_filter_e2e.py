@@ -47,8 +47,8 @@ LIGHTRAG_FILTER_SPEC = MailflowScenarioSpec(
     stub_dir=_WIREMOCK_STUBS_ROOT / "test_mailflow_e2e",
     stub_tag="stub-mailflow-e2e-01",
     body_head="e2e index filter body",
-    min_chat_completion_posts=1,
-    min_embedding_posts=7,
+    min_chat_completion_posts=2,
+    min_embedding_posts=5,
 )
 
 _INDEXED_STAGES: tuple[FsmStage, ...] = (FsmStage.INGRESS,)

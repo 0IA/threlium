@@ -22,7 +22,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-global-mem-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "live_gm_nested"
+        "hasProperty": "live_gm_nested_ledger_done"
       }
     }
   },

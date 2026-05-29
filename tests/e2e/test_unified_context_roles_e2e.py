@@ -47,7 +47,7 @@ UNIFIED_CONTEXT_TURN1_SPEC = MailflowScenarioSpec(
     stub_dir=_WIREMOCK_STUBS_ROOT / "test_unified_context_roles_e2e",
     stub_tag="stub-unified-context-roles-01",
     body_head=f"{E2E_ROLE_INGRESS_SEED}\ne2e unified context roles seed",
-    min_chat_completion_posts=3,
+    min_chat_completion_posts=5,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
@@ -57,6 +57,7 @@ UNIFIED_CONTEXT_TURN1_SPEC = MailflowScenarioSpec(
         FsmStage.RESPONSE_APPEND.value,
         FsmStage.ENRICH_FAST.value,
         FsmStage.RESPONSE_OBSERVE.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

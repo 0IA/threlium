@@ -28,7 +28,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-unified-context-roles-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_observe"
+        "hasProperty": "phase_observe_ledger_done"
       }
     }
   },

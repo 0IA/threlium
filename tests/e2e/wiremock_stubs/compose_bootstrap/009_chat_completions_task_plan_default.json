@@ -11,7 +11,7 @@
     },
     "bodyPatterns": [
       {
-        "comment": "enrich task-ledger seed prompt (lightrag/enrich_task_plan.j2). Default: seed nothing so the ledger stays empty and the response_finalize gate is fail-open. Per-test stubs with default priority (5) override this to seed real subtasks.",
+        "comment": "enrich task-ledger seed prompt (lightrag/enrich_task_plan.j2). Default: seed nothing so the ledger stays empty. Under fail-closed the response_finalize gate then blocks until the model records work via tasks_upsert (see test_task_ledger_empty_blocked_e2e). Per-test stubs with default priority (5) override this to seed real subtasks.",
         "contains": "concrete, verifiable subtasks"
       }
     ]

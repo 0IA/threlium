@@ -38,7 +38,7 @@ REASONING_CTX_TRIM_SPEC = MailflowScenarioSpec(
     body_head=f"{REASONING_E2E_BODY_MARKER}\ne2e reasoning context trim inbound",
     oversized_trim_body=True,
     warmup_body_extra=E2E_CTX_TRIM_TAIL_MARKER,
-    min_chat_completion_posts=1,
+    min_chat_completion_posts=2,
     min_embedding_posts=1,
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
@@ -46,6 +46,7 @@ REASONING_CTX_TRIM_SPEC = MailflowScenarioSpec(
         FsmStage.SUMMARIZE_CONTEXT.value,
         FsmStage.SUMMARIZE_MEMORY.value,
         FsmStage.REASONING.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

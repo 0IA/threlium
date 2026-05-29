@@ -35,7 +35,7 @@ RESPONSE_BUFFER_SPEC = MailflowScenarioSpec(
     stub_dir=_WIREMOCK_STUBS_ROOT / "test_response_buffer_e2e",
     stub_tag="stub-response-buffer-e2e-01",
     body_head=f"{E2E_RESPONSE_BUFFER_BODY_MARKER}\ne2e response buffer accumulation test body",
-    min_chat_completion_posts=3,
+    min_chat_completion_posts=4,
     min_embedding_posts=1,
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
@@ -43,6 +43,7 @@ RESPONSE_BUFFER_SPEC = MailflowScenarioSpec(
         FsmStage.REASONING.value,
         FsmStage.RESPONSE_APPEND.value,
         FsmStage.ENRICH_FAST.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

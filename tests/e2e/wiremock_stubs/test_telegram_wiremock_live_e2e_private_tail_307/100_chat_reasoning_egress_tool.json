@@ -17,7 +17,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-telegram-wiremock-live-e2e-private-tail-307::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "reasoning_release"
+        "hasProperty": "reasoning_release_ledger_done"
       }
     }
   },

@@ -31,7 +31,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-formal-reason-violation-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_logic_done"
+        "hasProperty": "phase_logic_done_ledger_done"
       }
     }
   },

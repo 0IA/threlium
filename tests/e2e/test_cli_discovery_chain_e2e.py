@@ -50,7 +50,7 @@ CLI_DISCOVERY_CHAIN_SPEC = MailflowScenarioSpec(
     stub_dir=_WIREMOCK_STUBS_ROOT / "test_cli_discovery_chain_e2e",
     stub_tag="stub-cli-discovery-chain-01",
     body_head=f"{E2E_CLI_DISCOVERY_CHAIN_BODY}\ne2e cli discovery chain test",
-    min_chat_completion_posts=2,
+    min_chat_completion_posts=3,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
@@ -59,6 +59,7 @@ CLI_DISCOVERY_CHAIN_SPEC = MailflowScenarioSpec(
         FsmStage.REASONING.value,
         FsmStage.CLI_INTENT.value,
         FsmStage.CLI_EXEC.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

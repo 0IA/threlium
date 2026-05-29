@@ -22,7 +22,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-cli-deny-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "live_cli_deny_round1"
+        "hasProperty": "live_cli_deny_round1_ledger_done"
       }
     }
   },

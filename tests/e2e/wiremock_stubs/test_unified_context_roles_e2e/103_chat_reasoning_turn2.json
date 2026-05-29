@@ -28,7 +28,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-unified-context-roles-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_turn1_done",
+        "hasProperty": "phase_turn1_done_ledger_done",
         "hasNotProperty": "phase_turn2_done"
       }
     }

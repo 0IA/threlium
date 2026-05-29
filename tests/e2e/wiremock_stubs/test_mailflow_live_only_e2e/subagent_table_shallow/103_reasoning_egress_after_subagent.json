@@ -22,7 +22,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-sat-shallow-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "live_sat_shallow_nested"
+        "hasProperty": "live_sat_shallow_nested_ledger_done"
       }
     }
   },

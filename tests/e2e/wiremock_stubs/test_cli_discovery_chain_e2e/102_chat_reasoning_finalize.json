@@ -22,7 +22,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-cli-discovery-chain-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_cli_intent_done"
+        "hasProperty": "phase_cli_intent_done_ledger_done"
       }
     }
   },

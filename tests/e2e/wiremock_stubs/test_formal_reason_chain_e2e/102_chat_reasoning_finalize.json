@@ -32,7 +32,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-formal-reason-chain-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_query_done"
+        "hasProperty": "phase_query_done_ledger_done"
       }
     }
   },

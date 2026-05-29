@@ -44,7 +44,7 @@ MEMORY_QUERY_SPEC = MailflowScenarioSpec(
     stub_dir=_WIREMOCK_STUBS_ROOT / "test_memory_query_e2e",
     stub_tag="stub-memory-query-01",
     body_head=f"{E2E_MEMORY_QUERY_BODY_MARKER}\ne2e memory query verification test body",
-    min_chat_completion_posts=2,
+    min_chat_completion_posts=3,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
@@ -53,6 +53,7 @@ MEMORY_QUERY_SPEC = MailflowScenarioSpec(
         FsmStage.REASONING.value,
         FsmStage.MEMORY_QUERY.value,
         FsmStage.ENRICH_FAST.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

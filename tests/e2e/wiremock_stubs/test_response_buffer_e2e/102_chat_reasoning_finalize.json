@@ -28,7 +28,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-response-buffer-e2e-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_append_2"
+        "hasProperty": "phase_append_2_ledger_done"
       }
     }
   },

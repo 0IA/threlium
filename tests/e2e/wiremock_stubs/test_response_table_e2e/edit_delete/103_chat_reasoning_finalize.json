@@ -28,7 +28,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-resp-edit-delete-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_delete"
+        "hasProperty": "phase_delete_ledger_done"
       }
     }
   },

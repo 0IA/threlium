@@ -15,7 +15,8 @@ memory_query (SHACL reference) → enrich_fast → reasoning → response_finali
 Стабы используют фазовый автомат WireMock State Extension:
 - phase_formal_reason_done: после первого reasoning → formal_reason
 - phase_query_done: после второго reasoning → memory_query
-- Третий reasoning видит phase_query_done → response_finalize
+- phase_query_done_ledger_done: tasks_upsert (fail-closed gate) после memory_query
+- Четвёртый reasoning видит phase_query_done_ledger_done → response_finalize
 
 **Подготовка (вне этого модуля):** shared compose + baked SUT (``wipe_bake`` / уже поднятый
 ``threlium_e2e_*``). Синхронизация кода и шаблонов на SUT — ``pytest -n0 tests/e2e/wipe_sync.py``
@@ -47,7 +48,7 @@ FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
     stub_dir=_WIREMOCK_STUBS_ROOT / "test_formal_reason_chain_e2e",
     stub_tag="stub-formal-reason-chain-01",
     body_head=f"{E2E_FORMAL_REASON_BODY_MARKER}\ne2e formal_reason chain validation test body",
-    min_chat_completion_posts=3,
+    min_chat_completion_posts=4,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
@@ -57,6 +58,7 @@ FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
         FsmStage.FORMAL_REASON.value,
         FsmStage.ENRICH_FAST.value,
         FsmStage.MEMORY_QUERY.value,
+        FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
         FsmStage.EGRESS_ROUTER.value,
         FsmStage.EGRESS_EMAIL.value,

@@ -25,7 +25,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "live_hitl_h03",
+        "hasProperty": "live_hitl_h03_ledger_done",
         "hasNotProperty": "live_hitl_h04"
       }
     }
