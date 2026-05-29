@@ -17,25 +17,6 @@ from scipy.optimize import LinearConstraint, Bounds, milp
 from threlium.mime_reform import EnrichPartId
 from threlium.types import FsmStage
 
-# Стадии FSM-переходов, исключаемые из unified ``all_messages`` и классифицируемые как SERVICE.
-SERVICE_TRANSITION_STAGES: frozenset[FsmStage] = frozenset({
-    FsmStage.ENRICH,
-    FsmStage.ENRICH_FAST,
-    FsmStage.RESPONSE_OBSERVE,
-    FsmStage.RESPONSE_EDIT,
-    FsmStage.RESPONSE_APPEND,
-    FsmStage.REFLECT,
-    FsmStage.SUMMARIZE_CONTEXT,
-})
-
-_USER_INPUT_STAGES: frozenset[FsmStage] = frozenset({FsmStage.INGRESS})
-_AGENT_RESPONSE_STAGES: frozenset[FsmStage] = frozenset({
-    FsmStage.REASONING,
-    FsmStage.RESPONSE_FINALIZE,
-})
-_TOOL_OBSERVATION_STAGES: frozenset[FsmStage] = frozenset({FsmStage.CLI_EXEC})
-
-
 class ContextMessageType(StrEnum):
     """Тип сообщения в контексте — определяет value-weight при scoring."""
 
@@ -44,6 +25,71 @@ class ContextMessageType(StrEnum):
     TOOL_OBSERVATION = "tool_observation"
     SYSTEM = "system"
     SERVICE = "service"
+
+
+# Единая таблица: канонический ``To:`` → роль в enrich-контексте.
+#
+# Whitelist unified IRT-хвоста (:func:`message_in_unified_mail_context`) = все ключи,
+# кроме ``SERVICE``. Стадии без строки здесь не попадают в ``<unified-mail-context>``
+# (``classify_message_type`` → ``SYSTEM``).
+#
+# --- В unified (содержательное тело для LLM) ---
+#
+# ingress — ввод пользователя (мост email/matrix/telegram), ответы субагента
+#   (subagent_end→ingress), reflect, ошибки cli, наблюдения cli_exec (выход уходит
+#   с ``From: cli_exec``, но в Maildir фиксируется как письмо ``To: ingress``).
+# egress_router — итоговый текст перед наружу: response_finalize (compose) и
+#   cli_hitl_out (HITL bridge); одного блока достаточно, без egress_* и archive.
+# cli_exec — входящее задание на исполнение (payload после cli_intent); stdout/stderr
+#   смотри в следующем по IRT ``To: ingress`` от cli_exec.
+# logic_validate — payload от reasoning (SHACL/логика к проверке); отчёт уходит в
+#   enrich_fast и не дублируется здесь, но входное письмо нужно в треде («проверь логику»).
+# memory_query — формулировка запроса к графу от reasoning; ответ — observation в
+#   enrich_fast, в IRT остаётся исходная постановка на ``To: memory_query``.
+#
+# --- SERVICE (явно не в unified; схлопывание в mail_context.j2) ---
+#
+# enrich — триггер цикла и монолитный MIME enrich→reasoning; контекст в отдельных
+#   Content-ID, не в IRT-хвосте.
+# enrich_fast — relay observation/plan/memory между reasoning и вспомогательными стадиями.
+# response_observe / response_edit / response_append — CRDT-наблюдения и правки ответа.
+# reflect — служебный переход (шаблон continue/final); смысл попадает в следующий ingress.
+# summarize_context — переполнение контекста → пакетное summarize; не история треда.
+#
+# --- Нет строки (не unified; отдельный канал или дублирует whitelist) ---
+#
+# reasoning — ``To: reasoning`` несёт multipart enrich (graph/unified/…); дублировал бы
+#   отдельные MIME-части и раздувал бы бюджет.
+# response_finalize — черновик собирается в handler; наружу идёт через egress_router
+#   (IRT egress часто на glue MID ingress, не на finalize).
+# thread_memory / global_memory — отдельные бакеты ``build_unified_email_messages``,
+#   не IRT-хвост ``all_messages``.
+# subagent_intent / subagent_end — границы субагента; результат subagent_end→ingress.
+# cli_intent / cli_resume — маршрутизация CLI; содержание — cli_exec или ingress.
+# cli_hitl_out — запрос подтверждения → egress_router (включён через egress_router).
+# egress_email / egress_telegram / egress_matrix — доставка и sent_raw; достаточно egress_router.
+# archive — audit egress; IRT-glue ответа пользователя, не для LLM-контекста.
+# summarize_memory — хвост summarize_context→enrich; служебная суммаризация.
+CONTEXT_ROLE_BY_TO_STAGE: dict[FsmStage, ContextMessageType] = {
+    FsmStage.INGRESS: ContextMessageType.USER_INPUT,
+    FsmStage.EGRESS_ROUTER: ContextMessageType.AGENT_RESPONSE,
+    FsmStage.CLI_EXEC: ContextMessageType.TOOL_OBSERVATION,
+    FsmStage.LOGIC_VALIDATE: ContextMessageType.AGENT_RESPONSE,
+    FsmStage.MEMORY_QUERY: ContextMessageType.AGENT_RESPONSE,
+    FsmStage.ENRICH: ContextMessageType.SERVICE,
+    FsmStage.ENRICH_FAST: ContextMessageType.SERVICE,
+    FsmStage.RESPONSE_OBSERVE: ContextMessageType.SERVICE,
+    FsmStage.RESPONSE_EDIT: ContextMessageType.SERVICE,
+    FsmStage.RESPONSE_APPEND: ContextMessageType.SERVICE,
+    FsmStage.REFLECT: ContextMessageType.SERVICE,
+    FsmStage.SUMMARIZE_CONTEXT: ContextMessageType.SERVICE,
+}
+
+SERVICE_TRANSITION_STAGES: frozenset[FsmStage] = frozenset(
+    stage
+    for stage, role in CONTEXT_ROLE_BY_TO_STAGE.items()
+    if role is ContextMessageType.SERVICE
+)
 
 
 class BucketConfigTier(StrEnum):
@@ -125,20 +171,21 @@ def _normalize_type_weights(weights: ContextMessageTypeWeights) -> ContextMessag
     )
 
 
+def message_in_unified_mail_context(msg: EmailMessage) -> bool:
+    """IRT-хвост: ``To:`` есть в :data:`CONTEXT_ROLE_BY_TO_STAGE` и роль не SERVICE."""
+    stage = FsmStage.try_from_incoming_to(msg)
+    if stage is None:
+        return False
+    role = CONTEXT_ROLE_BY_TO_STAGE.get(stage)
+    return role is not None and role is not ContextMessageType.SERVICE
+
+
 def classify_message_type(msg: EmailMessage) -> ContextMessageType:
-    """Classify by canonical ``To:`` FSM stage — единственное место определения типа для scoring."""
+    """Тип для scoring — из :data:`CONTEXT_ROLE_BY_TO_STAGE`, иначе SYSTEM."""
     stage = FsmStage.try_from_incoming_to(msg)
     if stage is None:
         return ContextMessageType.SYSTEM
-    if stage in _USER_INPUT_STAGES:
-        return ContextMessageType.USER_INPUT
-    if stage in _AGENT_RESPONSE_STAGES:
-        return ContextMessageType.AGENT_RESPONSE
-    if stage in _TOOL_OBSERVATION_STAGES:
-        return ContextMessageType.TOOL_OBSERVATION
-    if stage in SERVICE_TRANSITION_STAGES:
-        return ContextMessageType.SERVICE
-    return ContextMessageType.SYSTEM
+    return CONTEXT_ROLE_BY_TO_STAGE.get(stage, ContextMessageType.SYSTEM)
 
 
 def message_value(
