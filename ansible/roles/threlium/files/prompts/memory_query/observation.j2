@@ -3,6 +3,9 @@
     memory_query → enrich_fast observation-note. -#}
 reasoning: {{ reasoning }}
 ---
-{% if no_results %}(no results from knowledge base)
+{% if no_results %}(no results from the knowledge/memory graph)
+The graph returned no match for this query. Reformulate with concrete entity names or document filenames, or try a related-entity query. For code or file locations, try cli_intent read-only discovery (rg, find, cat) on the repo, or subagent_intent with an inventory-only task. If several entities must be connected after targeted attempts, escalate to reflect. Do not invent the answer from your own knowledge.
 {% else %}{{ answer }}
+---
+If this names entities but omits a link you still need, follow up with a relationship-focused memory_query anchored on one of these entities. If the answer describes policy but not where code lives, use cli_intent (rg/find/cat) before creating new files.
 {% endif %}

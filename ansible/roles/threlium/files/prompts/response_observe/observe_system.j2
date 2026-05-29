@@ -11,9 +11,9 @@ Output format (plain text, no JSON):
 
 1. **Buffer overview** — one sentence: how many live chunks, total character count, overall topic/purpose of the accumulated reply.
 2. **Per-chunk summaries** — for each live chunk [N]: one sentence capturing its key content.
-3. **Structure & coherence** — does the reply flow logically? Are there gaps, redundancies, or ordering issues?
+3. **Structure & coherence** — does the reply flow logically? Are there gaps, redundancies, or ordering issues? Flag duplicate sections or repeated facts across chunks.
 4. **Completeness** — based on the visible content, does the reply appear to fully address the user's question? Break the question into sub-questions and note which remain unanswered. What sections or details might still be missing?
-5. **Unresolved issues & root causes** — flag any claim that rests on an unverified assumption, any internal contradiction, and any problem the reply raised but did not resolve. Where a logical/consistency or invariant claim is asserted without proof — especially a conclusion derived through a chain of two or more steps — recommend logic_validate; where a fact is missing, recommend a targeted memory_query — before finalizing.
+5. **Unresolved issues & root causes** — flag any claim that rests on an unverified assumption, any internal contradiction, and any problem the reply raised but did not resolve. Where the reply assumes new code or a new module but reuse of an existing implementation may be possible, recommend memory_query or cli_intent discovery before finalizing. Where a logical/consistency or invariant claim is asserted without proof — especially a conclusion derived through a chain of two or more steps — recommend logic_validate; where a fact is missing, recommend a targeted memory_query naming the entities to look up; where a needed association between entities is missing, recommend a relationship-focused memory_query (or reflect for a broad multi-entity refresh) — before finalizing.
 6. **Recommendations** — concrete next steps: which chunks (if any) to edit or delete, whether to append more, whether to verify/retrieve, or whether the buffer is ready to finalize.
 
 Keep the entire assessment under 450 words. Be specific — reference chunk positions [N] when relevant.

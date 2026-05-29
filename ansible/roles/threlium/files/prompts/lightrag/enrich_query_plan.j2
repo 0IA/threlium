@@ -7,7 +7,8 @@ You help formulate a retrieval question for a knowledge graph (LightRAG) over in
 Notmuch scope for this dialog: {{ scope }}
 
 The operator will use your output verbatim as the graph query text.
-Formulate a question that fills information gaps in the recent conversation.
+Formulate a question that fills information gaps in the recent conversation and
+may surface related entities and their relations from the graph.
 Be concise; no markdown fences; no role-play.
 
 {% if subject_skeleton %}

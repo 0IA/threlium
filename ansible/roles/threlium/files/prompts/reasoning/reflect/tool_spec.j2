@@ -5,7 +5,7 @@
   "type": "function",
   "function": {
     "name": "reflect",
-    "description": "Request another reasoning cycle with refreshed LightRAG context. Use only when re-enrich will add information. Do not copy prior turns — provide a short summary and explicit clarification request for LightRAG retrieval.",
+    "description": "Request another reasoning cycle that re-runs the enrich graph retrieval (a fresh hybrid traversal of the unified knowledge/memory graph) with a new formulation. Use when a targeted memory_query cannot connect the entities you need and a broad, multi-entity refresh is warranted — not a different system, the same graph re-queried. Use only when re-enrich will add information. Do not copy prior turns — provide a short summary and an explicit clarification request that names the entities and the links you expect, so the graph query planner can rebuild a richer sample.\n\nWhen NOT to use: as a substitute for file/repo search — run memory_query and cli_intent (rg/find/cat) discovery first; reflect does not read the filesystem. If you have not yet tried at least one targeted memory_query for the missing entities, do that before reflect.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -25,7 +25,7 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 4000,
-          "description": "What to clarify or expand next — question or hypothesis for LightRAG retrieval. Target the root cause or the unresolved sub-question, not a restatement of what you already know."
+          "description": "What to clarify or expand next — question or hypothesis for the graph retrieval. List the entities and the hypothesized links you want the planner to explore. Target the root cause or the unresolved sub-question, not a restatement of what you already know."
         }
       },
       "required": ["reasoning", "summary", "clarification_request"],
