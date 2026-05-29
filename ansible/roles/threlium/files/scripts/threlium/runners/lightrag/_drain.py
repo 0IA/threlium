@@ -14,6 +14,8 @@ from threlium.litellm_route_context import (
     reset_litellm_correlation_ctxvar,
     set_litellm_correlation_ctxvar,
 )
+from threlium.context_budget import content_indexable_to_stage
+from threlium.lightrag_drain_query import lightrag_drain_pending_search
 from threlium.logutil import logger
 from threlium.mime_reform import email_message_from_path
 from threlium.lightrag_ingest import render_lightrag_ingest_document
@@ -28,12 +30,13 @@ from threlium.settings import (
 )
 from threlium.systemd_notify import notify_status
 from threlium.types import (
+    FsmStage,
+    LightragDrainSkipReason,
     LitellmCallSite,
     LitellmRoutingSite,
     MailHeaderName,
     NotmuchMessageIdInner,
     NotmuchMessageIds,
-    NotmuchQueryConnective,
     NotmuchQueryField,
     NotmuchTag,
     NotmuchThreadScopeId,
@@ -42,12 +45,6 @@ from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 from threlium.types.systemd_status import SystemdStatusBody
 
 log = logger.bind(stage="lightrag")
-
-SELECTOR = NotmuchQueryConnective.join_and(
-    "*",
-    NotmuchQueryConnective.negate(NotmuchTag.UNREAD.as_tag_query_term()),
-    NotmuchQueryConnective.negate(NotmuchTag.LIGHTRAG_INDEXED.as_tag_query_term()),
-)
 
 _drain_task: asyncio.Task[None] | None = None
 
@@ -73,8 +70,9 @@ def _effective_batch_size(settings: ThreliumSettings) -> int:
 def _collect_batch(limit: int) -> list[tuple[Path, NotmuchMessageIdInner, NotmuchThreadScopeId | None]]:
     """(path, message_id_inner, thread_scope)[…limit] под одной READ-транзакцией."""
     out: list[tuple[Path, NotmuchMessageIdInner, NotmuchThreadScopeId | None]] = []
+    selector = lightrag_drain_pending_search()
     with notmuch_database(write=False) as db:
-        for msg in db.messages(SELECTOR):
+        for msg in db.messages(selector):
             fp = Path(msg.path)
             if not fp.is_file():
                 continue
@@ -144,6 +142,30 @@ async def _ainsert_batch(
     for fp, mid_inner, tid in pending:
         try:
             msg = email_message_from_path(fp)
+        except Exception as exc:
+            log.error(
+                "index_skip",
+                reason=LightragDrainSkipReason.RENDER_FAILED.value,
+                path=str(fp),
+                exc_type=type(exc).__name__,
+                exc_msg=str(exc),
+            )
+            skip_tag_ids.append(mid_inner)
+            continue
+        # Defensive: pending-search уже отфильтровал не-индексируемые To: через
+        # lightrag_drain_pending_search(). Если письмо всё же дошло сюда — селектор
+        # и политика разошлись; не индексируем, помечаем skipped (не вечный pending).
+        stage = FsmStage.try_from_incoming_to(msg)
+        if not content_indexable_to_stage(stage):
+            log.warning(
+                "index_skip",
+                reason=LightragDrainSkipReason.SELECTOR_DRIFT.value,
+                path=str(fp),
+                to_stage=stage.value if stage is not None else None,
+            )
+            skip_tag_ids.append(mid_inner)
+            continue
+        try:
             thread_term = (
                 tid.as_notmuch_thread_term()
                 if tid is not None
@@ -152,7 +174,8 @@ async def _ainsert_batch(
             text = render_lightrag_ingest_document(msg, thread_term=thread_term)
         except Exception as exc:
             log.error(
-                "render_failed",
+                "index_skip",
+                reason=LightragDrainSkipReason.RENDER_FAILED.value,
                 path=str(fp),
                 exc_type=type(exc).__name__,
                 exc_msg=str(exc),
@@ -165,10 +188,11 @@ async def _ainsert_batch(
         file_paths.append(str(fp))
 
     if skip_tag_ids:
+        skipped_tagged = batch_tag_add(skip_tag_ids, NotmuchTag.LIGHTRAG_SKIPPED)
         log.warning(
-            "render_skipped_not_tagged",
+            "index_skipped_tagged",
             count=len(skip_tag_ids),
-            paths=[mid.value for mid in skip_tag_ids],
+            tagged=skipped_tagged,
         )
 
     if not texts:
