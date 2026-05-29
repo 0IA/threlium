@@ -3,7 +3,7 @@
 
 Аналог thread_memory — ничего не делает кроме возврата в enrich.
 Письмо To: summarize_memory@ с телом-суммаризацией остаётся в Maildir
-как durable артефакт в IRT-цепочке.
+и попадает в ``<unified-mail-context>`` (``ContextMessageType.CONTEXT_SUMMARY``).
 """
 from __future__ import annotations
 

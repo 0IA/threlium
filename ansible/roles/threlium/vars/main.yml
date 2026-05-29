@@ -132,6 +132,7 @@ _threlium_enrich_base:
   priority_extra: 5.0
   type_weight_user_input: 1.0
   type_weight_agent_response: 0.7
+  type_weight_context_summary: 1.0
   type_weight_tool_observation: 0.5
   type_weight_system: 0.3
   type_weight_service: 0.1

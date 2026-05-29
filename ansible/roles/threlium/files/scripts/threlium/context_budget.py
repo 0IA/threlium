@@ -22,6 +22,7 @@ class ContextMessageType(StrEnum):
 
     USER_INPUT = "user_input"
     AGENT_RESPONSE = "agent_response"
+    CONTEXT_SUMMARY = "context_summary"
     TOOL_OBSERVATION = "tool_observation"
     SYSTEM = "system"
     SERVICE = "service"
@@ -46,6 +47,7 @@ class ContextMessageType(StrEnum):
 #   enrich_fast и не дублируется здесь, но входное письмо нужно в треде («проверь логику»).
 # memory_query — формулировка запроса к графу от reasoning; ответ — observation в
 #   enrich_fast, в IRT остаётся исходная постановка на ``To: memory_query``.
+# summarize_memory — итог ``summarize_context`` (сжатый хвост треда); высокий tier-score.
 #
 # --- SERVICE (явно не в unified; схлопывание в mail_context.j2) ---
 #
@@ -69,13 +71,13 @@ class ContextMessageType(StrEnum):
 # cli_hitl_out — запрос подтверждения → egress_router (включён через egress_router).
 # egress_email / egress_telegram / egress_matrix — доставка и sent_raw; достаточно egress_router.
 # archive — audit egress; IRT-glue ответа пользователя, не для LLM-контекста.
-# summarize_memory — хвост summarize_context→enrich; служебная суммаризация.
 CONTEXT_ROLE_BY_TO_STAGE: dict[FsmStage, ContextMessageType] = {
     FsmStage.INGRESS: ContextMessageType.USER_INPUT,
     FsmStage.EGRESS_ROUTER: ContextMessageType.AGENT_RESPONSE,
     FsmStage.CLI_EXEC: ContextMessageType.TOOL_OBSERVATION,
     FsmStage.LOGIC_VALIDATE: ContextMessageType.AGENT_RESPONSE,
     FsmStage.MEMORY_QUERY: ContextMessageType.AGENT_RESPONSE,
+    FsmStage.SUMMARIZE_MEMORY: ContextMessageType.CONTEXT_SUMMARY,
     FsmStage.ENRICH: ContextMessageType.SERVICE,
     FsmStage.ENRICH_FAST: ContextMessageType.SERVICE,
     FsmStage.RESPONSE_OBSERVE: ContextMessageType.SERVICE,
@@ -130,6 +132,7 @@ class ContextMessageTypeWeights:
 
     user_input: float
     agent_response: float
+    context_summary: float
     tool_observation: float
     system: float
     service: float
@@ -152,6 +155,7 @@ def _normalize_type_weights(weights: ContextMessageTypeWeights) -> ContextMessag
     raw = [
         max(0.0, weights.user_input),
         max(0.0, weights.agent_response),
+        max(0.0, weights.context_summary),
         max(0.0, weights.tool_observation),
         max(0.0, weights.system),
         max(0.0, weights.service),
@@ -165,9 +169,10 @@ def _normalize_type_weights(weights: ContextMessageTypeWeights) -> ContextMessag
     return ContextMessageTypeWeights(
         user_input=raw[0],
         agent_response=raw[1],
-        tool_observation=raw[2],
-        system=raw[3],
-        service=raw[4],
+        context_summary=raw[2],
+        tool_observation=raw[3],
+        system=raw[4],
+        service=raw[5],
     )
 
 

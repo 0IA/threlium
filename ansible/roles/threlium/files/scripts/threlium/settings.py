@@ -652,6 +652,10 @@ class EnrichSettings(BaseModel):
 
     type_weight_user_input: float = Field(default=1.0, description="Вес ContextMessageType.USER_INPUT.")
     type_weight_agent_response: float = Field(default=0.7, description="Вес ContextMessageType.AGENT_RESPONSE.")
+    type_weight_context_summary: float = Field(
+        default=1.0,
+        description="Вес ContextMessageType.CONTEXT_SUMMARY (summarize_memory@ итог хвоста треда).",
+    )
     type_weight_tool_observation: float = Field(default=0.5, description="Вес ContextMessageType.TOOL_OBSERVATION.")
     type_weight_system: float = Field(default=0.3, description="Вес ContextMessageType.SYSTEM.")
     type_weight_service: float = Field(default=0.1, description="Вес ContextMessageType.SERVICE.")
@@ -662,6 +666,7 @@ class EnrichSettings(BaseModel):
         return ContextMessageTypeWeights(
             user_input=self.type_weight_user_input,
             agent_response=self.type_weight_agent_response,
+            context_summary=self.type_weight_context_summary,
             tool_observation=self.type_weight_tool_observation,
             system=self.type_weight_system,
             service=self.type_weight_service,
