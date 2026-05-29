@@ -15,6 +15,7 @@ from enum import StrEnum
 
 from .fsm_stage import FsmStage
 from .lightrag_prompt_library_key import LightragPromptLibraryKey
+from .reasoning_routes import REASONING_TARGET_STAGES
 
 
 class PromptPath(StrEnum):
@@ -60,6 +61,7 @@ class PromptPath(StrEnum):
     REASONING_USER = "reasoning/user.j2"
     REASONING_SYSTEM = "reasoning/system.j2"
     REASONING_LENGTH_RECOVERY_SYSTEM = "reasoning/length_recovery_system.j2"
+    REASONING_BUDGET_EXHAUSTED = "reasoning/budget_exhausted.j2"
 
     REASONING_EGRESS_ROUTER_TOOL_SPEC = "reasoning/egress_router/tool_spec.j2"
     REASONING_EGRESS_ROUTER_EMAIL_SUBJECT = "reasoning/egress_router/email_subject.j2"
@@ -177,23 +179,6 @@ for _LIB_KEY in LightragPromptLibraryKey:
     _LIB_KEY.prompt_path()
 
 
-_REASONING_ROUTE_STAGES: frozenset[FsmStage] = frozenset(
-    {
-        FsmStage.CLI_INTENT,
-        FsmStage.THREAD_MEMORY,
-        FsmStage.GLOBAL_MEMORY,
-        FsmStage.SUBAGENT_INTENT,
-        FsmStage.REFLECT,
-        FsmStage.RESPONSE_APPEND,
-        FsmStage.RESPONSE_EDIT,
-        FsmStage.RESPONSE_OBSERVE,
-        FsmStage.RESPONSE_FINALIZE,
-        FsmStage.FORMAL_REASON,
-        FsmStage.MEMORY_QUERY,
-        FsmStage.TASKS_UPSERT,
-    }
-)
-
 REASONING_TOOL_SPEC_BY_STAGE: dict[FsmStage, PromptPath] = {
     FsmStage.CLI_INTENT: PromptPath.REASONING_CLI_INTENT_TOOL_SPEC,
     FsmStage.THREAD_MEMORY: PromptPath.REASONING_THREAD_MEMORY_TOOL_SPEC,
@@ -239,9 +224,9 @@ REASONING_EMAIL_BODY_BY_STAGE: dict[FsmStage, PromptPath] = {
     FsmStage.TASKS_UPSERT: PromptPath.REASONING_TASKS_UPSERT_EMAIL_BODY,
 }
 
-assert set(REASONING_TOOL_SPEC_BY_STAGE.keys()) == _REASONING_ROUTE_STAGES, (
+assert set(REASONING_TOOL_SPEC_BY_STAGE.keys()) == REASONING_TARGET_STAGES, (
     set(REASONING_TOOL_SPEC_BY_STAGE),
-    _REASONING_ROUTE_STAGES,
+    REASONING_TARGET_STAGES,
 )
 assert REASONING_EMAIL_SUBJECT_BY_STAGE.keys() == REASONING_TOOL_SPEC_BY_STAGE.keys()
 assert REASONING_EMAIL_BODY_BY_STAGE.keys() == REASONING_TOOL_SPEC_BY_STAGE.keys()

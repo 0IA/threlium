@@ -31,9 +31,15 @@ from threlium.enrich_context import trim_context_text
 from threlium.mime_reform import canonicalize_mime, extract_plain_body
 from threlium.prompts import init_prompts_root, render_prompt
 from threlium.settings import load_settings, resolve_llm_endpoint
-from threlium.states.reasoning import ROUTE_TO_ADDRESS, _build_prompt
+from threlium.states.reasoning import _render_user_prompt
 from threlium.states.reasoning_tool_spec import load_tools_for_routes
-from threlium.types import HopBudgetLine, LitellmRoutingSite, MailHeaderName, PromptPath
+from threlium.types import (
+    HopBudgetLine,
+    LitellmRoutingSite,
+    MailHeaderName,
+    PromptPath,
+    REASONING_TARGET_STAGES,
+)
 
 _HDR = MailHeaderName
 MID = os.environ.get(
@@ -420,10 +426,12 @@ def main() -> None:
         tools, _schemas = build_replay_tool_specs()
         tool_spec_source = "builtin_replay_no_max_length"
     else:
-        tools, _schemas = load_tools_for_routes(list(ROUTE_TO_ADDRESS.keys()))
+        routes = sorted(REASONING_TARGET_STAGES, key=lambda s: s.value)
+        tools, _schemas = load_tools_for_routes(routes)
         tool_spec_source = "template_j2"
     system = render_prompt(PromptPath.REASONING_SYSTEM).strip()
-    user_content = _build_prompt(msg, body_text, hop)
+    del body_text  # replay: контекст как в проде — из MIME-частей enrich
+    user_content = _render_user_prompt(msg, hop, cfg.enrich.context_max_chars)
 
     model = ep.model
     if model.startswith("openai/"):

@@ -1,0 +1,14 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    Appended by states/reasoning.py when X-Threlium-Hop-Budget is exhausted
+    (remaining == 0). The thread can make no more hops, so reasoning forces a
+    final turn. Variable: retry_count (int) — how many times the model was already
+    asked to finalize in this forced-finalize loop and returned a different tool. -#}
+FORCED FINALIZE — the FSM hop-budget for this thread is exhausted. No further reasoning, tool work, delegation, memory lookups, or task-ledger updates are possible. This is the LAST turn: whatever response is assembled now will be hard-returned to the user by response_finalize unconditionally, regardless of the task ledger or any still-open work.
+
+You MUST call the response_finalize tool now. Put the best possible final answer for the user into its content, using only the information already gathered in this thread. Do NOT call any other tool — any other tool call will be rejected and you will be asked again.
+
+Forced-finalize retry counter: {{ retry_count }}.
+{% if retry_count > 0 -%}
+You have already been asked {{ retry_count }} time(s) to finalize and returned a different tool call. Stop choosing other tools and call response_finalize immediately.
+{%- endif %}

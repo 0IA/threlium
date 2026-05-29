@@ -265,7 +265,9 @@ The task ledger is your anti-drift anchor — a durable plan reconstructed from 
 - enrich seeds the ledger from the user's request. Refine it: use tasks_upsert to add concrete subtasks (new_subtasks) and to set statuses (subtask_updates by content_id).
 - As you make progress, mark subtasks done (you may batch several done in one tasks_upsert call after a series of discovery hops). Mark a subtask cancelled when it is no longer needed (scope narrowed, duplicate, user dropped that part) — do not leave stale pending work.
 - Keep at most one subtask in_progress. Adding by text is content-addressed: reuse the EXACT text of an existing subtask to avoid duplicates; changing wording = a new subtask plus cancelling the old one.
-- HARD GATE: response_finalize will refuse to send the reply while any subtask is pending/in_progress, or if every subtask is cancelled with none done. Before response_finalize, ensure every subtask is done or cancelled (with at least one done, or a real answer that records completion). This applies even to trivial requests — close the seeded subtask via tasks_upsert before finalizing.
+- HARD GATE (fail-closed): response_finalize will refuse to send the reply if the ledger is EMPTY, while any subtask is pending/in_progress, or if every subtask is cancelled with none done. There is no way to finalize by skipping the ledger.
+- Before response_finalize, ensure the ledger has at least one done subtask and no open ones. This applies even to trivial requests: if <task_state> is empty (enrich seeded nothing), call tasks_upsert with one new_subtask describing the answer and status "done" in the same call, then finalize.
+- Blocked work: if an open subtask genuinely cannot be completed, set its blocker via tasks_upsert (blockers) and pass allow_finalize_with_blocker=true to finalize after closing the rest. This bypass only applies when the ledger already has subtasks — it cannot unblock an empty ledger.
 </task_ledger_rules>
 
 <todo_rules>

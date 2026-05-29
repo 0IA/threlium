@@ -9,7 +9,9 @@ from typing import Union
 
 import msgspec
 
+from .fsm_stage import FsmStage
 from .knowledge_stage import LogicInferenceMode
+from .reasoning_routes import REASONING_TARGET_STAGES
 from .task_ledger import SubtaskStatus
 
 
@@ -131,24 +133,26 @@ ReasoningToolRouteArgs = Union[
 ]
 
 
-_REASONING_ROUTE_STRUCTS: dict[str, type[msgspec.Struct]] = {
-    "cli_intent": CliIntentToolArgs,
-    "thread_memory": ThreadMemoryToolArgs,
-    "global_memory": GlobalMemoryToolArgs,
-    "subagent_intent": SubagentIntentToolArgs,
-    "reflect": ReflectToolArgs,
-    "response_append": ResponseAppendToolArgs,
-    "response_edit": ResponseEditToolArgs,
-    "response_observe": ResponseObserveToolArgs,
-    "response_finalize": ResponseFinalizeToolArgs,
-    "formal_reason": FormalReasonToolArgs,
-    "memory_query": MemoryQueryToolArgs,
-    "tasks_upsert": TasksUpsertToolArgs,
+_REASONING_ROUTE_STRUCTS: dict[FsmStage, type[msgspec.Struct]] = {
+    FsmStage.CLI_INTENT: CliIntentToolArgs,
+    FsmStage.THREAD_MEMORY: ThreadMemoryToolArgs,
+    FsmStage.GLOBAL_MEMORY: GlobalMemoryToolArgs,
+    FsmStage.SUBAGENT_INTENT: SubagentIntentToolArgs,
+    FsmStage.REFLECT: ReflectToolArgs,
+    FsmStage.RESPONSE_APPEND: ResponseAppendToolArgs,
+    FsmStage.RESPONSE_EDIT: ResponseEditToolArgs,
+    FsmStage.RESPONSE_OBSERVE: ResponseObserveToolArgs,
+    FsmStage.RESPONSE_FINALIZE: ResponseFinalizeToolArgs,
+    FsmStage.FORMAL_REASON: FormalReasonToolArgs,
+    FsmStage.MEMORY_QUERY: MemoryQueryToolArgs,
+    FsmStage.TASKS_UPSERT: TasksUpsertToolArgs,
 }
 
+assert set(_REASONING_ROUTE_STRUCTS.keys()) == REASONING_TARGET_STAGES
 
-def reasoning_tool_struct_for_route(route: str) -> type[msgspec.Struct]:
-    """Тип Struct для маршрута ``route`` (ключ ``ROUTE_TO_ADDRESS``)."""
+
+def reasoning_tool_struct_for_route(route: FsmStage) -> type[msgspec.Struct]:
+    """Тип Struct для целевой стадии маршрута reasoning."""
     t = _REASONING_ROUTE_STRUCTS.get(route)
     if t is None:
         raise ValueError(f"unknown reasoning route: {route!r}")

@@ -139,6 +139,21 @@ from .notmuch import (
 from .notmuch_message_id import NotmuchMessageIdInner
 from .notmuch_query import NotmuchBridgeFromLocalhost, NotmuchIndexedHeader, NotmuchQuery, NotmuchQueryConnective, NotmuchQueryField
 from .notmuch_tag import NotmuchTag
+from .reasoning_routes import REASONING_TARGET_STAGES
+from .reasoning import (
+    ReasoningEnrichContext,
+    ReasoningIncomingEnvelope,
+    ReasoningResponseStateText,
+    ReasoningRouteDecision,
+    ReasoningTaskStateText,
+    ReasoningToolCallArgumentsWire,
+    ReasoningToolFunctionName,
+    ReasoningUserMessageText,
+    reasoning_assistant_message,
+    reasoning_assistant_plain_text,
+    reasoning_finish_reason,
+    reasoning_first_tool_call,
+)
 from .reasoning_tool_args import (
     CliIntentToolArgs,
     EgressRouterToolArgs,
@@ -287,11 +302,20 @@ __all__ = [
     "OrphanNoticePrefixLine",
     "PromptPath",
     "ReasoningAssistantMessageText",
+    "ReasoningEnrichContext",
+    "ReasoningIncomingEnvelope",
+    "ReasoningResponseStateText",
+    "ReasoningRouteDecision",
+    "ReasoningTaskStateText",
+    "ReasoningToolCallArgumentsWire",
+    "ReasoningToolFunctionName",
     "ReasoningToolRouteArgs",
     "ReasoningToolRouteEmailBody",
+    "ReasoningUserMessageText",
     "RawIngressCaptureAttachmentFilename",
     "ReasoningToolRouteEmailSubject",
     "REASONING_EMAIL_BODY_BY_STAGE",
+    "REASONING_TARGET_STAGES",
     "REASONING_EMAIL_SUBJECT_BY_STAGE",
     "REASONING_TOOL_SPEC_BY_STAGE",
     "ReflectJinjaSubjectContext",
@@ -341,6 +365,10 @@ __all__ = [
     "ThreadMemoryToolArgs",
     "TNative",
     "references_angle_bracket_tokens",
+    "reasoning_assistant_message",
+    "reasoning_assistant_plain_text",
+    "reasoning_finish_reason",
+    "reasoning_first_tool_call",
     "reasoning_tool_struct_for_route",
     "truncate_rfc_references_wire",
     "UnionNotmuchFromHeaderWire",

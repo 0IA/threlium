@@ -2,23 +2,15 @@
 
 Контракт (см. план «Шаблоны LLM и LightRAG», блок D):
 
-* Каждый возможный маршрут FSM (`ROUTE_TO_ADDRESS` в
-  :mod:`threlium.states.reasoning`) — это **отдельный** tool со своим
-  JSON-Schema. Шаблоны живут в ``$THRELIUM_HOME/prompts/reasoning/<route>/``
-  тройкой ``tool_spec.j2`` / ``email_body.j2`` / ``email_subject.j2``.
-* Имя tool'а ОБЯЗАНО совпадать с ключом маршрута
-  (``function.name == route_key``); :func:`load_tools_for_routes` проверяет
-  это инвариантом и падает RuntimeError'ом, если оператор сломал
-  именование при правке шаблона.
-* Python только: рендерит шаблоны, валидирует ответ модели через
-  ``jsonschema``, рендерит ``subject`` / ``body`` для исходящего письма
-  следующей стадии. Сам JSON-Schema полностью контролируется
-  пользователем через шаблон ``tool_spec.j2``.
+* Каждый возможный маршрут FSM (:data:`~threlium.types.reasoning.REASONING_TARGET_STAGES`)
+  — отдельный tool со своим JSON-Schema. Шаблоны в ``prompts/reasoning/<stage>/``.
+* Имя tool'а ОБЯЗАНО совпадать с ``FsmStage.value`` целевой стадии.
+* Python: рендер шаблонов, jsonschema, :class:`~threlium.types.reasoning.ReasoningRouteDecision`.
 """
 from __future__ import annotations
 
 import json
-
+from collections.abc import Iterable
 from typing import cast
 
 import jsonschema
@@ -30,35 +22,26 @@ from threlium.types import (
     REASONING_EMAIL_BODY_BY_STAGE,
     REASONING_EMAIL_SUBJECT_BY_STAGE,
     REASONING_TOOL_SPEC_BY_STAGE,
-)
-from threlium.types.reasoning_tool_args import (
+    ReasoningRouteDecision,
     ReasoningToolRouteArgs,
+    ReasoningToolRouteEmailBody,
+    ReasoningToolRouteEmailSubject,
     reasoning_tool_struct_for_route,
+)
+from threlium.types.reasoning import (
+    ReasoningToolCallArgumentsWire,
+    ReasoningToolFunctionName,
 )
 
 
 def load_tools_for_routes(
-    route_keys: list[str],
-) -> tuple[list[dict[str, object]], dict[str, dict[str, object]]]:
-    """Собрать tool-specs и schemas для перечисленных маршрутов.
-
-    Возвращает кортеж ``(tools, schemas_by_name)``:
-
-    * ``tools`` — список tool-spec'ов в формате OpenAI; передаётся в
-      ``litellm.completion(tools=...)``.
-    * ``schemas_by_name[function.name]`` — объект ``parameters`` каждого
-      tool'а, готовый к ``jsonschema.validate(args, schema)``.
-
-    Имя tool'а ОБЯЗАНО совпадать с ``route_key``: если шаблон
-    ``reasoning/<route>/tool_spec.j2`` задаёт ``function.name``,
-    отличное от ``route``, поднимается ``RuntimeError`` (защита от
-    неосторожной правки оператором).
-    """
+    routes: Iterable[FsmStage],
+) -> tuple[list[dict[str, object]], dict[FsmStage, dict[str, object]]]:
+    """Собрать tool-specs и schemas для перечисленных целевых стадий."""
     tools: list[dict[str, object]] = []
-    schemas: dict[str, dict[str, object]] = {}
-    for route in route_keys:
-        target = FsmStage(route)
-        spec_path = REASONING_TOOL_SPEC_BY_STAGE[target]
+    schemas: dict[FsmStage, dict[str, object]] = {}
+    for route in routes:
+        spec_path = REASONING_TOOL_SPEC_BY_STAGE[route]
         rendered = render_prompt(spec_path)
         raw = json.loads(rendered)
         if not isinstance(raw, dict):
@@ -72,58 +55,60 @@ def load_tools_for_routes(
         params_o = fn.get("parameters")
         if not isinstance(name_o, str):
             raise RuntimeError(f"{spec_path}: function.name must be a string")
-        name = name_o
         if not isinstance(params_o, dict):
             raise RuntimeError(f"{spec_path}: function.parameters must be an object")
         params = cast(dict[str, object], params_o)
-        if name != route:
+        if name_o != route.value:
             raise RuntimeError(
-                f"{spec_path}: function.name={name!r}; "
-                "имя инструмента должно совпадать с ключом маршрута"
+                f"{spec_path}: function.name={name_o!r}; "
+                "имя инструмента должно совпадать с FsmStage.value целевой стадии"
             )
         tools.append(spec)
-        schemas[name] = params
+        schemas[route] = params
     return tools, schemas
 
 
 def validate_tool_args(
-    route: str, schema: dict[str, object], raw_args: str | bytes
+    route: FsmStage,
+    schema: dict[str, object],
+    wire: ReasoningToolCallArgumentsWire,
 ) -> ReasoningToolRouteArgs:
-    """Распарсить ``raw_args`` (JSON от LLM), провалидировать schema и привести к Struct.
-
-    Бросает ``json.JSONDecodeError`` или ``jsonschema.ValidationError`` при
-    невалидном JSON или несоответствии схеме (проброс наружу без обёртки).
-    ``msgspec.ValidationError`` — если dict после jsonschema не совпадает с доменным Struct.
-    """
-    if isinstance(raw_args, bytes):
-        raw_args = raw_args.decode("utf-8", errors="replace")
+    """Распарсить wire JSON, провалидировать schema, привести к Struct маршрута."""
+    raw_args = wire.value
     args = json.loads(raw_args)
     jsonschema.validate(instance=args, schema=schema)
     struct_t = reasoning_tool_struct_for_route(route)
     return msgspec.convert(args, type=struct_t)
 
 
-def render_route_email(route: str, args: ReasoningToolRouteArgs) -> tuple[str, str]:
-    """Отрендерить ``(subject, body)`` для следующей стадии из аргументов tool'а.
-
-    Шаблоны ``reasoning/<route>/email_subject.j2`` и
-    ``email_body.j2`` получают поля Struct как Jinja2-переменные;
-    ``StrictUndefined`` ловит несоответствие ``required``-полей
-    шаблону на этапе рендера.
-    """
-    target = FsmStage(route)
+def render_route_decision(
+    route: FsmStage, args: ReasoningToolRouteArgs
+) -> ReasoningRouteDecision:
+    """Отрендерить subject/body для следующей стадии из аргументов tool'а."""
     kw = msgspec.to_builtins(args)
     subject = render_prompt(
-        REASONING_EMAIL_SUBJECT_BY_STAGE[target], **kw
+        REASONING_EMAIL_SUBJECT_BY_STAGE[route], **kw
     ).strip()
     body = render_prompt(
-        REASONING_EMAIL_BODY_BY_STAGE[target], **kw
+        REASONING_EMAIL_BODY_BY_STAGE[route], **kw
     ).rstrip("\n")
-    return subject, body
+    return ReasoningRouteDecision.from_rendered(route, subject=subject, body=body)
+
+
+def route_decision_from_tool_call(
+    tool_name: ReasoningToolFunctionName,
+    wire: ReasoningToolCallArgumentsWire,
+    schemas: dict[FsmStage, dict[str, object]],
+) -> ReasoningRouteDecision:
+    """Полный путь tool_call → :class:`ReasoningRouteDecision`."""
+    route = tool_name.target_stage()
+    args = validate_tool_args(route, schemas[route], wire)
+    return render_route_decision(route, args)
 
 
 __all__ = [
     "load_tools_for_routes",
+    "render_route_decision",
+    "route_decision_from_tool_call",
     "validate_tool_args",
-    "render_route_email",
 ]

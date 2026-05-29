@@ -203,6 +203,7 @@ threlium_required_prompts:
   - subagent_intent/budget_exhausted_subject.j2
   - reasoning/system.j2
   - reasoning/user.j2
+  - reasoning/budget_exhausted.j2
   - reasoning/egress_router/tool_spec.j2
   - reasoning/egress_router/email_body.j2
   - reasoning/egress_router/email_subject.j2
