@@ -67,6 +67,17 @@ POST /__threlium/e2e/state/setup
 → recordState: context=<composite_key>, state={active: "1"}
 ```
 
+Между ходами одного треда (тот же `composite_key`) сброс защёлки reasoning:
+
+```http
+POST /__threlium/e2e/state/phase_reset
+{"correlation_key": "<composite_key>"}
+→ recordState: phase_tasks_ledger_done="null"  (удаляет только это свойство)
+```
+
+В pytest: `wiremock_state_reset_phase`. Admin `DELETE /__admin/state-extension/contexts/{name}`
+для составного ключа — no-op (всегда 204, контекст остаётся); не использовать.
+
 Имя контекста — составной ключ `{stub_tag}::{correlation_key}`.
 Каждый набор стабов хардкодит свой `stub_tag` в `hasContext`, поэтому
 стабы тестов A и B никогда не cross-match: контексты `stub-A::route_X`
@@ -582,6 +593,7 @@ FIX:     "join":{ {{#each ...}}   → пробел разделяет литер
 Cold reset (`reset_non_bootstrap_wiremock_mappings`) сохраняет стабы с тегом
 `THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG`. На SUT после остановки pipeline выполняется ротация и vacuum user-journal `threlium` (`journalctl --user --rotate` + `--vacuum-time=1s`), чтобы в e2e-дампах не тянулись записи прошлых сессий с того же контейнера. Под этим тегом лежат:
 - `000_e2e_state_setup.json`
+- `001_e2e_state_phase_reset.json`
 - `010_e2e_matrix_register_room.json` / `011_e2e_matrix_unregister_room.json`
 - `020_matrix_sync.json`
 - `030_telegram_get_me.json` / `031_telegram_get_updates.json`
