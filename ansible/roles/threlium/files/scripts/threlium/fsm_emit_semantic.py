@@ -21,7 +21,6 @@ from threlium.types import (
     FsmStage,
     HopBudgetLine,
     MailHeaderName,
-    RfcInReplyToWire,
     ThreliumCapabilitiesBudgetLine,
 )
 
@@ -59,25 +58,6 @@ def emit_transition_simple_step_preserving_payload(
         to_addr=to_addr,
         from_stage=from_stage,
         managed_headers=managed_patch_simple_fsm_step(incoming, settings),
-    )
-
-
-def emit_transition_egress_terminal_with_route_irt_preserving_payload(
-    incoming: EmailMessage,
-    *,
-    to_addr: FsmStage,
-    from_stage: FsmStage,
-    reply_to_mid: RfcInReplyToWire,
-    settings: ThreliumSettings,
-) -> EmailMessage:
-    """Терминальный egress с каналом из route: In-Reply-To с route; hop/cap как простой шаг."""
-    patch = managed_patch_simple_fsm_step(incoming, settings)
-    patch[MailHeaderName.IN_REPLY_TO] = reply_to_mid
-    return emit_transition_preserving_payload(
-        incoming,
-        to_addr=to_addr,
-        from_stage=from_stage,
-        managed_headers=patch,
     )
 
 

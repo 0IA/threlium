@@ -8,7 +8,6 @@ cli_hitl_out → egress_* (HITL bridge, без RA).
 from email.message import EmailMessage
 
 from threlium.fsm_emit_semantic import (
-    emit_transition_egress_terminal_with_route_irt_preserving_payload,
     emit_transition_simple_step_preserving_payload,
 )
 from threlium.ingress_route_resolve import (
@@ -74,21 +73,23 @@ def main(
         )
         addr = egress_addr_for_channel(channel)
         log.info("external_reply", channel=channel.value, target=addr.rfc822_mailbox)
-        return emit_transition_egress_terminal_with_route_irt_preserving_payload(
+        # Линейный IRT-инвариант: терминальный egress тредится на свой FSM-вход
+        # (response_finalize), а НЕ на route-MID. Внутренний FSM-тред остаётся
+        # полностью линейным (см. docs/THREAD_MODEL.md); канал/получатель/reply_target
+        # для внешнего письма резолвятся подъёмом по IRT до tag:route отдельно.
+        return emit_transition_simple_step_preserving_payload(
             msg,
             to_addr=addr,
             from_stage=stage,
-            reply_to_mid=route.message_id_inner.as_rfc_in_reply_to_wire(),
             settings=config,
         )
 
     from_hdr = msg.get(MailHeaderName.FROM, "<unknown>")
     channel = _require_resolved_channel(route, ctx=f"unknown From={from_hdr!r}")
     addr = egress_addr_for_channel(channel)
-    return emit_transition_egress_terminal_with_route_irt_preserving_payload(
+    return emit_transition_simple_step_preserving_payload(
         msg,
         to_addr=addr,
         from_stage=stage,
-        reply_to_mid=route.message_id_inner.as_rfc_in_reply_to_wire(),
         settings=config,
     )
