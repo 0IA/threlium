@@ -24,6 +24,7 @@ from typing import Any, Final, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict, YamlConfigSettingsSource
 
+from threlium.types.fsm_stage import FsmStage
 from threlium.types.litellm_routing_site import LitellmRoutingSite
 
 # Режимы LightRAG QueryParam.mode (см. ``states/enrich.py``).
@@ -650,27 +651,50 @@ class EnrichSettings(BaseModel):
         description="Минимальный избыток символов для запуска суммаризации (порог overflow).",
     )
 
-    type_weight_user_input: float = Field(default=1.0, description="Вес ContextMessageType.USER_INPUT.")
-    type_weight_agent_response: float = Field(default=0.7, description="Вес ContextMessageType.AGENT_RESPONSE.")
-    type_weight_context_summary: float = Field(
-        default=1.0,
-        description="Вес ContextMessageType.CONTEXT_SUMMARY (summarize_memory@ итог хвоста треда).",
-    )
-    type_weight_tool_observation: float = Field(default=0.5, description="Вес ContextMessageType.TOOL_OBSERVATION.")
-    type_weight_system: float = Field(default=0.3, description="Вес ContextMessageType.SYSTEM.")
-    type_weight_service: float = Field(default=0.1, description="Вес ContextMessageType.SERVICE.")
+    # Базовый вес сообщения теперь — X-Threlium-Content-Score его <history>-части
+    # (скоринг отправителя), оператор настраивает через HistorySettings.score_by_stage.
+    # Прежние per-type веса (ContextMessageType) удалены вместе с SERVICE-классификацией.
 
-    def message_type_weights(self) -> "ContextMessageTypeWeights":
-        """Typed container из flat-полей для передачи в scorer."""
-        from threlium.context_budget import ContextMessageTypeWeights
-        return ContextMessageTypeWeights(
-            user_input=self.type_weight_user_input,
-            agent_response=self.type_weight_agent_response,
-            context_summary=self.type_weight_context_summary,
-            tool_observation=self.type_weight_tool_observation,
-            system=self.type_weight_system,
-            service=self.type_weight_service,
-        )
+
+class HistorySettings(BaseModel):
+    """Базовый скоринг ``<history>``-частей по стадии-источнику (``X-Threlium-Content-Score``).
+
+    Источник (``formal_reason``, ``ingress``, …) при эмите ``<history>`` берёт вес отсюда:
+    ``score_for(stage)`` = override из ``score_by_stage`` иначе ``score_default``. Потребитель
+    (``enrich``/scoring/reasoning) домножает на позиционные множители (recency/size).
+    Оператор задаёт лишь нужные стадии — остальные берут умолчание (Ansible-зеркало:
+    ``threlium_history`` в defaults/host_vars).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    score_default: float = Field(
+        default=1.0,
+        ge=0.0,
+        description="Базовый вес history-части по умолчанию для стадий без явного override.",
+    )
+    score_by_stage: dict[FsmStage, float] = Field(
+        default_factory=dict,
+        description=(
+            "Override базового веса по стадии-источнику (ключ — id FSM-стадии, напр. "
+            "ingress/formal_reason/egress_router). Отсутствующие стадии берут score_default."
+        ),
+    )
+
+    @field_validator("score_by_stage", mode="after")
+    @classmethod
+    def _scores_finite_nonneg(cls, v: dict[FsmStage, float]) -> dict[FsmStage, float]:
+        for stage, score in v.items():
+            if not math.isfinite(score) or score < 0.0:
+                raise ValueError(
+                    f"history.score_by_stage[{stage.value}]: ожидается конечное число ≥ 0 "
+                    f"(получено {score!r})."
+                )
+        return v
+
+    def score_for(self, stage: FsmStage) -> float:
+        """Базовый вес для стадии-источника: override иначе умолчание."""
+        return self.score_by_stage.get(stage, self.score_default)
 
 
 class CliSettings(BaseModel):
@@ -842,6 +866,7 @@ class ThreliumSettings(BaseSettings):
     lightrag: LightragSettings = Field(default_factory=LightragSettings)
     bridges: BridgesSettings = Field(default_factory=BridgesSettings)
     enrich: EnrichSettings = Field(default_factory=EnrichSettings)
+    history: HistorySettings = Field(default_factory=HistorySettings)
     knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
     cli: CliSettings = Field(default_factory=CliSettings)
     hop: HopSettings = Field(default_factory=HopSettings)
@@ -868,6 +893,7 @@ class ThreliumSettings(BaseSettings):
         "lightrag",
         "bridges",
         "enrich",
+        "history",
         "knowledge",
         "cli",
         "hop",
