@@ -19,7 +19,6 @@ from threlium.settings import ThreliumSettings
 from threlium.task import collect_task_ops, reduce_task_ops
 from threlium.types import (
     FsmStage,
-    HopBudgetLine,
     LiteLlmChatMessage,
     LitellmRoutingSite,
     MailHeaderName,
@@ -56,8 +55,7 @@ def main(
     ops = collect_ops(inner)
     data = build_state_data(ops)
 
-    hop_line = HopBudgetLine.parse(msg.get(MailHeaderName.HOP_BUDGET.value))
-    ledger = reduce_task_ops(collect_task_ops(inner, hop_line))
+    ledger = reduce_task_ops(collect_task_ops(inner))
 
     data_kw: dict[str, object] = {
         "is_empty": data.is_empty,

@@ -1,11 +1,12 @@
-"""Сбор response-операций из IRT-цепочки (leaf → tag:route boundary)."""
+"""Сбор response-операций из IRT-цепочки (фрейм-локально, leaf → tag:route boundary)."""
 from __future__ import annotations
 
 import json
 
-from threlium.irt_chain import IrtAncestorSnapshot, iter_in_reply_to_ancestors_from_inner_id
+from threlium.irt_chain import IrtAncestorSnapshot
 from threlium.mime_reform import extract_plain_body, email_message_from_path
-from threlium.types import FsmStage, NotmuchMessageIdInner, NotmuchTag
+from threlium.thread_context_filter import iter_irt_ancestors_filtered
+from threlium.types import FsmStage, NotmuchMessageIdInner
 
 from .ops import AppendOp, EditOp, ResponseOp
 
@@ -44,17 +45,15 @@ def _read_append_content(snap: IrtAncestorSnapshot) -> str:
 
 
 def collect_ops(start_inner: NotmuchMessageIdInner) -> list[ResponseOp]:
-    """Собрать response-операции из IRT-цепочки до ``tag:route``.
+    """Собрать response-операции своего фрейма из IRT-цепочки до ``tag:route``.
 
+    Фрейм-локальный обход (``stop_at_route=True``): операции вложенных субагентов
+    в родительский буфер не утекают, а обход обрывается на корне текущего хода.
     Возвращает хронологический список (корень → лист).
     ``AppendOp.position`` — 0-based индекс среди append-операций.
     """
-    chain = iter_in_reply_to_ancestors_from_inner_id(start_inner)
-
     relevant: list[IrtAncestorSnapshot] = []
-    for snap in chain:
-        if NotmuchTag.ROUTE.value in snap.tags:
-            break
+    for snap in iter_irt_ancestors_filtered(start_inner, stop_at_route=True):
         if _is_response_stage(snap):
             relevant.append(snap)
 

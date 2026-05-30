@@ -10,9 +10,9 @@ from __future__ import annotations
 from email.message import EmailMessage
 
 from threlium.fsm_emit import build_fsm_plain_to_stage
-from threlium.irt_chain import iter_in_reply_to_ancestors_from_inner_id
 from threlium.logutil import logger
 from threlium.mime_reform import email_message_from_path, extract_plain_body
+from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.settings import ThreliumSettings
 from threlium.types import (
     FsmStage,
@@ -26,8 +26,11 @@ log = logger.bind(stage="summarize_memory")
 
 
 def _find_enrich_trigger_body(inner: NotmuchMessageIdInner) -> str:
-    """Walk IRT chain to find the original enrich-trigger body."""
-    for snap in iter_in_reply_to_ancestors_from_inner_id(inner):
+    """Walk own-frame IRT chain to find the original enrich-trigger body.
+
+    Фрейм-локальный обход: enrich-триггеры вложенных субагентов игнорируются.
+    """
+    for snap in iter_irt_ancestors_filtered(inner):
         if snap.is_addressed_to_fsm_stage(FsmStage.ENRICH):
             ancestor = email_message_from_path(snap.path)
             return extract_plain_body(ancestor).strip()

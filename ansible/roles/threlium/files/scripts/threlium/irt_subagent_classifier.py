@@ -9,9 +9,8 @@ from dataclasses import dataclass
 from email.message import EmailMessage
 
 from threlium import nm
-from threlium.irt_chain import iter_in_reply_to_ancestors_from_inner_id
+from threlium.irt_chain import IrtSubagentMarker, iter_in_reply_to_ancestors_from_inner_id
 from threlium.types import (
-    FsmStage,
     HopBudgetLine,
     MailHeaderName,
     NotmuchMessageIdInner,
@@ -32,9 +31,10 @@ def classify_subagent_depth_from_inner(
     """Баланс depth по IRT от ``start_inner`` до корня."""
     depth = 0
     for snap in iter_in_reply_to_ancestors_from_inner_id(start_inner):
-        if snap.is_sent_from_fsm_stage(FsmStage.SUBAGENT_END):
+        marker = snap.subagent_marker()
+        if marker is IrtSubagentMarker.SUBAGENT_END:
             depth -= 1
-        elif snap.is_sent_from_fsm_stage(FsmStage.SUBAGENT_INTENT):
+        elif marker is IrtSubagentMarker.SUBAGENT_INTENT:
             depth += 1
         if depth > 0:
             return SubagentDepthResult(depth=depth)
@@ -74,9 +74,10 @@ def find_matching_subagent_intent_ancestor(
     """
     depth = 0
     for snap in iter_in_reply_to_ancestors_from_inner_id(start_inner):
-        if snap.is_sent_from_fsm_stage(FsmStage.SUBAGENT_END):
+        marker = snap.subagent_marker()
+        if marker is IrtSubagentMarker.SUBAGENT_END:
             depth -= 1
-        elif snap.is_sent_from_fsm_stage(FsmStage.SUBAGENT_INTENT):
+        elif marker is IrtSubagentMarker.SUBAGENT_INTENT:
             depth += 1
             if depth == 1:
                 parent_inner = snap.in_reply_to_inner()

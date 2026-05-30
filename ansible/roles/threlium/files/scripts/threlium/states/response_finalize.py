@@ -64,7 +64,7 @@ def main(
     # (иначе finalize↔ingress зациклится). См. states/reasoning.py (force_finalize).
     hop_line = HopBudgetLine.parse(msg.get(MailHeaderName.HOP_BUDGET.value))
     budget_exhausted = hop_budget_remaining(hop_line, config) < 1
-    ledger = reduce_task_ops(collect_task_ops(inner, hop_line))
+    ledger = reduce_task_ops(collect_task_ops(inner))
     if (
         not budget_exhausted
         and (has_buffer or has_content)

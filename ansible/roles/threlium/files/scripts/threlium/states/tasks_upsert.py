@@ -14,7 +14,7 @@ from email.message import EmailMessage
 
 import msgspec
 
-from threlium.fsm_emit import HDR_HOP_BUDGET, build_fsm_plain_to_stage
+from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
 from threlium.logutil import logger
 from threlium.mime_reform import extract_plain_body
@@ -25,7 +25,6 @@ from threlium.task.ops import TasksUpsertOp
 from threlium.types import (
     FsmStage,
     FsmTransitionPlainBody,
-    HopBudgetLine,
     MailHeaderName,
     NotmuchMessageIdInner,
     PromptPath,
@@ -65,11 +64,9 @@ def main(
     if inner is None:
         raise RuntimeError("tasks_upsert: no Message-ID on incoming message")
 
-    hop_line = HopBudgetLine.parse(msg.get(HDR_HOP_BUDGET))
-
     irt_w = RfcInReplyToWire.parse_present_from_email(msg, _HDR.IN_REPLY_TO.value)
     parent_inner = NotmuchMessageIdInner.from_optional_raw(irt_w.value if irt_w else None)
-    prior_ops = collect_task_ops(parent_inner, hop_line) if parent_inner is not None else []
+    prior_ops = collect_task_ops(parent_inner) if parent_inner is not None else []
     prior_ledger = reduce_task_ops(prior_ops)
 
     body_raw = extract_plain_body(msg).strip()

@@ -42,7 +42,6 @@ from threlium.litellm_route_context import e2e_route_wire_tail, get_litellm_http
 from threlium.enrich_context import build_unified_email_messages, trim_context_text, UnifiedEmailContext
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
-from threlium.irt_chain import iter_in_reply_to_ancestors_from_inner_id
 from threlium.logutil import logger
 from threlium.mime_reform import (
     EnrichContentId,
@@ -55,6 +54,7 @@ from threlium.litellm_client import litellm_site_completion_text
 from threlium.prompts import render_prompt
 from threlium.response.collect import collect_ops
 from threlium.response.state_summary import build_state_summary
+from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.runners.lightrag import daemon_lightrag, run_rag_coroutine
 from threlium.task import (
     build_task_state_summary,
@@ -69,7 +69,6 @@ from threlium.types import (
     EnrichThreadMemoryText,
     EnrichUnifiedMailContextText,
     FsmTransitionPlainBody,
-    HopBudgetLine,
     LightragPromptLibraryKey,
     LitellmCallSite,
     LiteLlmChatMessage,
@@ -203,8 +202,7 @@ def _collect_extra_parts(
     if trimmed:
         parts.append((EnrichContentId.from_part_id(EnrichPartId.RESPONSE_STATE), trimmed))
 
-    chain = iter_in_reply_to_ancestors_from_inner_id(inner)
-    for snap in chain:
+    for snap in iter_irt_ancestors_filtered(inner, stop_at_route=True):
         if snap.is_addressed_to_fsm_stage(FsmStage.REASONING):
             e_prev = email_message_from_path(snap.path)
             for cid, text in collect_relay_parts_of_families(e_prev, _CARRY_OVER_FAMILIES):
@@ -240,7 +238,6 @@ def _build_task_parts(
     *,
     config: ThreliumSettings,
     inner: NotmuchMessageIdInner,
-    hop_line: HopBudgetLine,
     user_message_text: str,
 ) -> list[tuple[EnrichContentId, str]]:
     """Seed-набор подзадач (``<task-init>``) + детерминированный ``<task-state>``.
@@ -249,7 +246,7 @@ def _build_task_parts(
     пустой ledger). ensure-exists в reduce гарантирует, что повторный enrich не сбрасывает
     статусы и не воскрешает ``cancelled`` задачи.
     """
-    existing_ops = collect_task_ops(inner, hop_line)
+    existing_ops = collect_task_ops(inner)
     existing_ledger = reduce_task_ops(existing_ops)
 
     plan_prompt = render_prompt(
@@ -788,12 +785,10 @@ def main(
     extra_parts = _collect_extra_parts(inner, budget_extra) if inner is not None else []
 
     if inner is not None:
-        hop_line = HopBudgetLine.parse(msg.get(_HDR.HOP_BUDGET))
         extra_parts.extend(
             _build_task_parts(
                 config=config,
                 inner=inner,
-                hop_line=hop_line,
                 user_message_text=user_message_text,
             )
         )

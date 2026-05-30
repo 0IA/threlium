@@ -15,7 +15,6 @@ from email.message import EmailMessage
 from threlium.enrich_context import trim_context_text
 from threlium.fsm_emit import emit_transition_preserving_payload
 from threlium.fsm_emit_semantic import managed_patch_simple_fsm_step
-from threlium.irt_chain import iter_in_reply_to_ancestors_from_inner_id
 from threlium.logutil import logger
 from threlium.mime_reform import (
     email_message_from_path,
@@ -25,9 +24,9 @@ from threlium.response.collect import collect_ops
 from threlium.response.state_summary import build_state_summary
 from threlium.settings import ThreliumSettings
 from threlium.task import build_task_state_summary, collect_task_ops, reduce_task_ops
+from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.types import (
     FsmStage,
-    HopBudgetLine,
     MailHeaderName,
     NotmuchMessageIdInner,
     RfcMessageIdWire,
@@ -37,9 +36,11 @@ log = logger.bind(stage="enrich_fast")
 
 
 def _find_e_prev(start_inner: NotmuchMessageIdInner) -> EmailMessage | None:
-    """Найти ``E_prev``: первый предок, адресованный reasoning@localhost."""
-    chain = iter_in_reply_to_ancestors_from_inner_id(start_inner)
-    for snap in chain:
+    """Найти ``E_prev``: первый предок своего фрейма, адресованный reasoning@localhost.
+
+    Фрейм-локальный обход: reasoning вложенных субагентов не подхватывается.
+    """
+    for snap in iter_irt_ancestors_filtered(start_inner):
         if snap.is_addressed_to_fsm_stage(FsmStage.REASONING):
             return email_message_from_path(snap.path)
     return None
@@ -66,8 +67,7 @@ def main(
     limit = config.enrich.context_max_chars
     trimmed_summary = trim_context_text(summary, limit)
 
-    hop_line = HopBudgetLine.parse(msg.get(MailHeaderName.HOP_BUDGET.value))
-    task_ledger = reduce_task_ops(collect_task_ops(inner, hop_line))
+    task_ledger = reduce_task_ops(collect_task_ops(inner))
     task_state_text = trim_context_text(build_task_state_summary(task_ledger), limit)
 
     spliced = splice_e_prev_with_incoming_relay(
