@@ -30,6 +30,7 @@ from .helpers import (
     service_exec,
     smtp_inject_inbound,
     wait_for_greenmail_inbox_message_gone_host,
+    wait_for_sut_threlium_user_workers_idle,
 )
 from .sut_user_systemd import E2E_THRELIUM_USER, e2e_threlium_user_unit_journalctl_bash
 
@@ -186,6 +187,9 @@ def test_fsm_handler_failure_then_recovery(deployed_stack: str) -> None:
             _assert_journal_has_traceback(project)
             _assert_ingress_settled(project, nm_inner=nm_a)
             _wait_act1_reasoning_drained(project, nm_inner=nm_a)
+            # Act1 стабы закрывают тред через response_finalize → egress; дождаться
+            # завершения work@*, иначе act2 гоняется с хвостом act1 (reasoning new:1, нет reply).
+            wait_for_sut_threlium_user_workers_idle(project, timeout=TIMEOUT_POLL_SHORT)
 
         raw_b = f"{E2E_FSM_HANDLER_FAILURE_RECOVERY}-{uuid.uuid4().hex}@localhost"
         smtp_inject_inbound(

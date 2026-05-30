@@ -34,13 +34,12 @@ from tests.e2e.log import log
 from tests.e2e.sut_user_systemd import E2E_THRELIUM_USER
 
 from .helpers import (
+    E2EComposeRuntime,
     E2E_KNOWLEDGE_PROBE_FILENAME,
     REPO_ROOT,
     TIMEOUT_POLL_SHORT,
-    discover_live_e2e_project_name,
     discover_runtime,
     e2e_start_threlium_user_pipeline_services,
-    e2e_stop_threlium_user_pipeline_services,
     poll_until,
     service_exec,
     wait_for_sut_threlium_user_workers_idle,
@@ -80,6 +79,14 @@ def _bootstrap_embedding_entries(wm_base: str) -> list[dict]:
         header_value=_BOOTSTRAP_THREAD_ROOT,
         url_contains="/embeddings",
     )
+
+
+def _bootstrap_embedding_entry_ids(wm_base: str) -> set[str]:
+    return {
+        str(e.get("id") or "")
+        for e in _bootstrap_embedding_entries(wm_base)
+        if e.get("id")
+    }
 
 
 def _wait_bootstrap_embeddings_in_wiremock(wm_base: str) -> None:
@@ -133,27 +140,21 @@ def _clear_doc_status_and_restart_engine(project: str) -> None:
 
 
 @pytest.fixture(scope="module")
-def live_bootstrap_runtime():
-    """Live stack + свежий детерминированный bootstrap (корпус уже подменён в cold reset)."""
-    pn = discover_live_e2e_project_name()
-    if not pn:
-        pytest.skip(
-            "No live e2e stack: start compose (pytest tests/e2e / wipe_bake)."
-        )
-    try:
-        rt = discover_runtime(pn)
-    except Exception as e:
-        pytest.skip(f"live e2e stack not reachable: {e}")
+def live_bootstrap_runtime(compose_stack: E2EComposeRuntime):
+    """Live stack + свежий детерминированный bootstrap (корпус уже подменён в cold reset).
+
+    Обязательно после ``compose_stack``: session cold reset делает ``DELETE /__admin/requests``.
+    Без этой зависимости module-фикстура поднималась раньше autouse compose_stack, bootstrap
+    embeddings попадали в журнал, cold reset их стирал, тело теста видело пустой journal.
+    """
+    pn = compose_stack.project_name
+    rt = discover_runtime(pn)
 
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    # 1) остановить pipeline: после mailflow-тестов reasoning-воркер может зависнуть в
-    #    auto-restart (WM unmatched) — пассивное ожидание idle тогда не завершается.
-    e2e_stop_threlium_user_pipeline_services(rt)
-    # 2) чистый журнал WireMock — исключаем e2e-bootstrap записи прошлых модулей.
+    # compose_stack/cold reset уже остановил pipeline, подменил knowledge на probe и поднял engine.
+    # Здесь только: чистый журнал → rm doc_status → restart (переиндексация probe) → ждём embedding.
     reset_request_journal(wm_base)
-    # 3) свежий bootstrap: rm doc_status + restart engine (корпус = один probe-док из cold reset).
     _clear_doc_status_and_restart_engine(pn)
-    # 4) дождаться bootstrap-embedding в журнале.
     _wait_bootstrap_embeddings_in_wiremock(wm_base)
     try:
         yield pn, rt
@@ -261,8 +262,9 @@ def test_bootstrap_idempotent_on_restart(live_bootstrap_runtime) -> None:
     project, rt = live_bootstrap_runtime
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
 
-    count_before = len(_bootstrap_embedding_entries(wm_base))
-    log.info("bootstrap_idempotent_pre_restart", count_before=count_before)
+    ids_before = _bootstrap_embedding_entry_ids(wm_base)
+    assert ids_before, "expected bootstrap embedding journal entries before restart"
+    log.info("bootstrap_idempotent_pre_restart", count_before=len(ids_before))
 
     wait_for_sut_threlium_user_workers_idle(project, repo_root=REPO_ROOT)
 
@@ -280,10 +282,15 @@ def test_bootstrap_idempotent_on_restart(live_bootstrap_runtime) -> None:
     import time
     time.sleep(8)
 
-    count_after = len(_bootstrap_embedding_entries(wm_base))
-    log.info("bootstrap_idempotent_post_restart", count_before=count_before, count_after=count_after)
-    assert count_after == count_before, (
-        f"Bootstrap generated new embedding requests after restart: "
-        f"before={count_before}, after={count_after}. "
+    ids_after = _bootstrap_embedding_entry_ids(wm_base)
+    new_ids = ids_after - ids_before
+    log.info(
+        "bootstrap_idempotent_post_restart",
+        count_before=len(ids_before),
+        count_after=len(ids_after),
+        new_ids=sorted(new_ids),
+    )
+    assert not new_ids, (
+        f"Bootstrap generated new embedding requests after restart: new_ids={sorted(new_ids)!r}. "
         f"LightRAG deduplication did not prevent re-indexing."
     )
