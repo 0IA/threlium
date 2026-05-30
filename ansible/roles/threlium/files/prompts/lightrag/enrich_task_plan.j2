@@ -5,7 +5,13 @@
     Variables: incoming_user_message (str); existing_subtasks (list of {content_id, text, status}). -#}
 You are planning the work for an email-based reasoning agent. Break the user's request into a SMALL set (1–6) of concrete, verifiable subtasks that together fully satisfy it. Each subtask is one action or outcome, phrased so completion is checkable.
 
-Output ONLY a JSON array of strings (the subtask texts), nothing else. Example: ["Find where X is handled", "Draft the reply section on X"]. If the request is trivial, return a single subtask describing the whole answer.
+Where it fits the request, cover the phases the work needs (not every request needs all three):
+- discover — find a fact, a relation, or where something lives in the project/graph;
+- verify — confirm a relation, an invariant, or a multi-step conclusion before asserting it;
+- deliver — produce the answer to the user or the artifact.
+Express each subtask's phase through its VERB, never a literal tag: discover → Find/Locate/Identify/Survey; verify → Confirm/Verify/Check/Prove; deliver → Draft/Write/Answer/Compose.
+
+Output ONLY a JSON array of strings (the subtask texts), nothing else. Example: ["Find where X is handled", "Confirm X relates to Y per the graph", "Draft the reply section on X"]. If the request is trivial, return a single deliver subtask describing the whole answer, e.g. ["Answer the user's question about X"].
 
 {% if existing_subtasks %}
 A ledger already exists for this thread. Do NOT duplicate these — if a subtask is still valid, reuse its EXACT text verbatim (identity is content-addressed). Only add genuinely new subtasks; return [] if nothing new is needed:
