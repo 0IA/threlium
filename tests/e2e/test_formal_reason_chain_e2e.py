@@ -6,10 +6,13 @@ memory_query (SHACL reference) → enrich_fast → reasoning → response_finali
 Покрытие:
 - formal_reason handler: pySHACL validate, observation-note с conforms=true
 - memory_query handler: aquery к LightRAG, observation relay через enrich_fast
-- enrich_fast: **аддитивное** накопление relay observation-частей с уникальными
-  Content-ID (``<observation-note@mid>``) — observation от formal_reason НЕ
-  затирается observation от memory_query; промпт 3-го reasoning содержит оба
-  маркера (``conforms: True`` + memory_query reasoning), см. stub 102.
+- enrich_fast: relay ``<observation-note@mid>`` и ``<unified-delta@mid>`` (IRT unified-role
+  письма с прошлого ``To: reasoning``) → в промпте reasoning секция ``<conversation_delta>``
+- enrich_fast: **аддитивное** накопление relay-частей — observation от formal_reason НЕ
+  затирается observation от memory_query; дельта 1-го цикла (``ex:PositiveAgeShape`` из входа
+  formal_reason) видна в 3-м reasoning вместе с маркерами memory_query
+- post-assert: WireMock journal (``ex:PositiveAgeShape``) + notmuch ``PositiveAgeShape`` в
+  ``reasoning/Maildir`` (тело relay unified-delta на диске; без ``:`` — notmuch phrase-tokenizer)
 - Полный FSM цикл с 3 reasoning вызовами
 
 Стабы используют фазовый автомат WireMock State Extension:
@@ -33,14 +36,26 @@ from threlium.types import FsmStage
 
 from .helpers import (
     MailflowScenarioSpec,
+    REPO_ROOT,
     assert_full_mailflow_pipeline,
+    assert_notmuch_folder_contains_body_token,
+    discover_runtime,
     dump_failure_artifacts,
     mailflow_inject_and_wait,
-    REPO_ROOT,
+)
+from .wiremock_client import (
+    find_wiremock_requests_by_body_contains,
+    wiremock_public_base,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_BODY_MARKER = "E2E-FORMAL-REASON-CHAIN-BODY"
+E2E_UNIFIED_DELTA_SHAPE_MARKER = "ex:PositiveAgeShape"
+# notmuch фразовый поиск трактует ``:`` как разделитель префикса поля даже в кавычках —
+# для on-disk проверки берём бесколоночный терм того же shape-маркера.
+E2E_UNIFIED_DELTA_NOTMUCH_TOKEN = "PositiveAgeShape"
+E2E_UNIFIED_DELTA_SECTION = "<conversation_delta>"
+E2E_MEMORY_QUERY_REASONING_MARKER = "SHACL sh:sparql constraint SELECT variable binding"
 
 FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
     label="formal_reason_chain",
@@ -68,6 +83,33 @@ FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
 )
 
 
+def _assert_chat_journal_contains(
+    wm_base: str, stub_tag: str, needle: str
+) -> None:
+    matches = find_wiremock_requests_by_body_contains(
+        wm_base, needle, stub_tag=stub_tag
+    )
+    chat_matches = [
+        e
+        for e in matches
+        if "/chat/completions" in (e.get("request", {}).get("url") or "")
+    ]
+    assert chat_matches, (
+        f"No chat/completions requests contain {needle!r} (stub_tag={stub_tag!r})"
+    )
+
+
+def _assert_unified_delta_in_reasoning_journal(project: str, stub_tag: str) -> None:
+    """2-й/3-й reasoning: unified-delta relay дошёл до LLM-промпта (не только observation)."""
+    rt = discover_runtime(project, repo_root=REPO_ROOT)
+    wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+    for needle in (E2E_UNIFIED_DELTA_SECTION, E2E_UNIFIED_DELTA_SHAPE_MARKER):
+        _assert_chat_journal_contains(wm_base, stub_tag, needle)
+    for needle in (E2E_UNIFIED_DELTA_SHAPE_MARKER, E2E_MEMORY_QUERY_REASONING_MARKER):
+        _assert_chat_journal_contains(wm_base, stub_tag, needle)
+    log.info("formal_reason_chain_unified_delta_journal_verified", stub_tag=stub_tag)
+
+
 @pytest.fixture()
 def formal_reason_chain_processed_stack(live_e2e_stack_ready: str) -> object:
     """WireMock (formal_reason_chain) -> inject -> \\Seen -> FSM activity (live stack)."""
@@ -93,6 +135,14 @@ def test_formal_reason_chain_full_pipeline(
             nm_inner=nm_inner,
             stub_tag=stub_tag,
             correlation_key=correlation_key,
+        )
+        _assert_unified_delta_in_reasoning_journal(project, stub_tag)
+        assert_notmuch_folder_contains_body_token(
+            project,
+            stage_folder_id=FsmStage.REASONING.value,
+            body_token=E2E_UNIFIED_DELTA_NOTMUCH_TOKEN,
+            min_count=1,
+            repo_root=REPO_ROOT,
         )
     except Exception:
         log.debug(

@@ -25,6 +25,10 @@
         "contains": "SHACL-SPARQL reference after successful validation"
       },
       {
+        "comment": "unified-delta durability: дельта 1-го цикла (вход formal_reason, ex:PositiveAgeShape) перенесена через части прошлых enrich_fast и видна в промпте 3-го reasoning (tasks_upsert) вместе с дельтой 2-го цикла (вход memory_query).",
+        "contains": "ex:PositiveAgeShape"
+      },
+      {
         "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
