@@ -185,6 +185,7 @@ threlium_required_prompts:
   - cli_intent/invalid_subject.j2
   - cli_intent/denied.j2
   - cli_intent/denied_subject.j2
+  - cli_intent/route_collision.j2
   - cli_resume/intent_not_found.j2
   - cli_resume/intent_not_found_subject.j2
   - cli_resume/bad_intent.j2

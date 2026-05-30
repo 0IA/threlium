@@ -42,6 +42,7 @@ class PromptPath(StrEnum):
     CLI_INTENT_INVALID_SUBJECT = "cli_intent/invalid_subject.j2"
     CLI_INTENT_DENIED = "cli_intent/denied.j2"
     CLI_INTENT_DENIED_SUBJECT = "cli_intent/denied_subject.j2"
+    CLI_INTENT_ROUTE_COLLISION = "cli_intent/route_collision.j2"
 
     CLI_RESUME_INTENT_NOT_FOUND = "cli_resume/intent_not_found.j2"
     CLI_RESUME_INTENT_NOT_FOUND_SUBJECT = "cli_resume/intent_not_found_subject.j2"

@@ -10,8 +10,13 @@ import msgspec
 
 from threlium.settings import ThreliumSettings
 from threlium.types import (
+    CliExecDecision,
+    CliIntentDecision,
     CliIntentPayload,
     CliIntentPolicy,
+    CliRouteCollision,
+    FsmStage,
+    REASONING_TARGET_STAGES,
 )
 
 _SHELL_OP_TOKENS = frozenset({"&&", "||", ";", "|"})
@@ -154,6 +159,45 @@ def _policy_for_shell_line(line: str, settings: ThreliumSettings) -> CliIntentPo
     if all(b in allow for b in bins):
         return CliIntentPolicy.ALLOW
     return CliIntentPolicy.HITL
+
+
+def cli_argv_route_collision(
+    argv: list[str], settings: ThreliumSettings
+) -> FsmStage | None:
+    """Имя FSM-маршрута в позиции бинаря (а не аргумента) → коллизия.
+
+    Имена reasoning-маршрутов (``memory_query``, ``reflect``, …) — это tools,
+    а не CLI-бинари. Если ``argv[0]`` (или первый бинарь сегмента цепочки)
+    совпадает с именем маршрута и НЕ входит в allowlist (явное разрешение
+    оператора имеет приоритет), возвращаем эту стадию. ``rg memory_query …``
+    не ловится: имя стоит в позиции аргумента, не бинаря.
+    """
+    route_by_name = {s.value: s for s in REASONING_TARGET_STAGES}
+    allow = _allowlist_basenames(settings)
+    if argv_is_sh_c_wrapper(argv) or argv_uses_shell_chaining(argv):
+        bins = _binaries_in_shell_line(shell_command_line_for_argv(argv))
+    else:
+        bins = [os.path.basename(argv[0].strip() or " ").lower()]
+    for b in bins:
+        if b in route_by_name and b not in allow:
+            return route_by_name[b]
+    return None
+
+
+def classify_cli_intent(
+    cli: CliIntentPayload, settings: ThreliumSettings
+) -> CliIntentDecision:
+    """Единая граница-фабрика решения роутера ``cli_intent``.
+
+    Сперва — коллизия имени маршрута (семантический misroute), иначе —
+    обычная политика исполнения allow / deny / hitl.
+    """
+    collision = cli_argv_route_collision(cli.argv, settings)
+    if collision is not None:
+        return CliRouteCollision(
+            route=collision, cmd=shell_command_line_for_argv(cli.argv)
+        )
+    return CliExecDecision(policy=classify_cli_policy(cli, settings))
 
 
 def classify_cli_policy(cli: CliIntentPayload, settings: ThreliumSettings) -> CliIntentPolicy:

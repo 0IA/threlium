@@ -32,7 +32,12 @@ from .bridges import (
 )
 from .bridge_ingress_channel import BridgeIngressChannel
 from .bridge_raw import RawIngressCaptureAttachmentFilename
-from .cli_intent_policy import CliIntentPolicy
+from .cli_intent_policy import (
+    CliExecDecision,
+    CliIntentDecision,
+    CliIntentPolicy,
+    CliRouteCollision,
+)
 from .cli_mail import CliIntentPayload
 from .engine_socket import EngineWireError, EngineWireOk, EngineWireRequest
 from .fsm_stage import FsmStage
@@ -221,7 +226,10 @@ __all__ = [
     "BridgeIngressChannel",
     "CanonicalMidWire",
     "classify_hitl_parent_notmuch",
+    "CliExecDecision",
+    "CliIntentDecision",
     "CliIntentPolicy",
+    "CliRouteCollision",
     "CliIntentPayload",
     "CliIntentToolArgs",
     "EmailStruct",
