@@ -12,7 +12,7 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "response-buffer analyst"
+        "contains": "response-state analyst"
       },
       {
         "doesNotContain": "\"tools\""
