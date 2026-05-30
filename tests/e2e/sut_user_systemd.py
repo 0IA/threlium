@@ -65,6 +65,9 @@ def e2e_stop_threlium_user_pipeline_bash() -> str:
 uid=$(id -u {u})
 export XDG_RUNTIME_DIR=/run/user/$uid
 runuser -u {u} -- systemctl --user stop threlium-engine.service 2>/dev/null || true
+# Зависший/failed engine (напр. прерванный job): сбросить состояние, чтобы последующий
+# start не упёрся в "Job canceled"/failed.
+runuser -u {u} -- systemctl --user reset-failed threlium-engine.service 2>/dev/null || true
 for u in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-bridge@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
   runuser -u {u} -- systemctl --user reset-failed "$u" 2>/dev/null || true
   runuser -u {u} -- systemctl --user stop "$u" 2>/dev/null || true
@@ -113,6 +116,8 @@ mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\\nRateLimitIntervalSec=0\\n' > /etc/systemd/journald.conf.d/e2e-no-ratelimit.conf
 systemctl restart systemd-journald 2>/dev/null || true
 
+# Сбросить failed-состояние перед стартом (идемпотентный рестарт на живом контейнере).
+runuser -u {u} -- systemctl --user reset-failed threlium-engine.service 2>/dev/null || true
 runuser -u {u} -- systemctl --user start threlium-engine.service
 for u in $(runuser -u {u} -- systemctl --user list-unit-files 'threlium-bridge@*.service' --no-legend 2>/dev/null | awk '$2=="enabled"{{print $1}}' || true); do
   runuser -u {u} -- systemctl --user start "$u" 2>/dev/null || true
