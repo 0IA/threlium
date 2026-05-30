@@ -16,6 +16,9 @@
       },
       {
         "contains": "\"tools\""
+      },
+      {
+        "contains": "sat-shallow-01"
       }
     ],
     "customMatcher": {
@@ -23,7 +26,7 @@
       "parameters": {
         "hasContext": "stub-mailflow-live-sat-shallow-01::{{request.headers.[x-threlium-thread-root]}}",
         "hasProperty": "active",
-        "hasNotProperty": "live_sat_shallow_nested"
+        "hasNotProperty": "phase_nested"
       }
     }
   },
@@ -65,7 +68,7 @@
       "parameters": {
         "context": "stub-mailflow-live-sat-shallow-01::{{request.headers.[x-threlium-thread-root]}}",
         "state": {
-          "live_sat_shallow_nested": "1"
+          "phase_nested": "1"
         }
       }
     }

@@ -12,14 +12,18 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "sat-shallow-01"
+        "contains": "<envelope>"
+      },
+      {
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-sat-shallow-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_tasks_ledger_done"
+        "hasProperty": "phase_l1_tasks_ledger_done",
+        "hasNotProperty": "phase_l1_done"
       }
     }
   },
@@ -29,7 +33,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-live-egress-pop",
+      "id": "chatcmpl-e2e-live-egress-l1-pop",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -42,11 +46,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_threlium_e2e_egress",
+                "id": "call_threlium_e2e_egress_l1",
                 "type": "function",
                 "function": {
                   "name": "response_finalize",
-                  "arguments": "{\"reasoning\": \"e2e: finalizing response with verified content\", \"subject\": \"e2e reply\", \"verification_summary\": \"e2e: direct answer, content verified\", \"content\": \"ok from llm-mock\"}"
+                  "arguments": "{\"reasoning\": \"e2e L1: returning result to parent frame\", \"subject\": \"e2e subagent result\", \"verification_summary\": \"e2e: nested subtask complete\", \"content\": \"e2e L1 subagent frame result (POP to L0).\"}"
                 }
               }
             ]
@@ -54,5 +58,16 @@
         }
       ]
     }
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "stub-mailflow-live-sat-shallow-01::{{request.headers.[x-threlium-thread-root]}}",
+        "state": {
+          "phase_l1_done": "1"
+        }
+      }
+    }
+  ]
 }
