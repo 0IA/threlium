@@ -4,7 +4,7 @@ from __future__ import annotations
 from email import policy
 from email.message import EmailMessage
 
-from threlium.mime_reform import extract_plain_body
+from threlium.mime_reform import history_part_text, iter_history_parts
 from threlium.prompts import render_prompt
 from threlium.types import (
     MailHeaderName,
@@ -50,9 +50,24 @@ def _copy_graph_headers(src: EmailMessage, dst: EmailMessage) -> None:
         dst[name] = folded
 
 
+def _history_body_for_index(msg: EmailMessage) -> str:
+    """Содержательное тело письма для графа — конкатенация его ``<history>``-частей.
+
+    Drain индексирует только письма с history (:func:`message_has_history`), поэтому тело
+    графа берётся из ``<history>``-частей, а не из ``<system>`` (payload-команда) или
+    первого попавшегося text/plain. Несколько частей объединяются разделителем.
+    """
+    chunks = [
+        text
+        for _cid, part in iter_history_parts(msg)
+        if (text := history_part_text(part).strip())
+    ]
+    return "\n\n---\n\n".join(chunks)
+
+
 def render_lightrag_ingest_document(msg: EmailMessage, *, thread_term: str) -> str:
     """RFC822-текст для ``rag.ainsert``: ``EmailMessage`` + ``policy.default``, тело из Jinja."""
-    body_plain = extract_plain_body(msg)
+    body_plain = _history_body_for_index(msg)
     tt = thread_term.strip()
     subj_w = RfcSubjectWire.parse_present_from_email(msg, _HDR.SUBJECT)
     from_w = RfcFromWire.parse_present_from_email(msg, _HDR.FROM)

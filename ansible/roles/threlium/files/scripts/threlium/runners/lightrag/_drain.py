@@ -14,10 +14,9 @@ from threlium.litellm_route_context import (
     reset_litellm_correlation_ctxvar,
     set_litellm_correlation_ctxvar,
 )
-from threlium.context_budget import content_indexable_to_stage
 from threlium.lightrag_drain_query import lightrag_drain_pending_search
 from threlium.logutil import logger
-from threlium.mime_reform import email_message_from_path
+from threlium.mime_reform import email_message_from_path, message_has_history
 from threlium.lightrag_ingest import render_lightrag_ingest_document
 from threlium.nm import (
     batch_tag_add,
@@ -152,16 +151,17 @@ async def _ainsert_batch(
             )
             skip_tag_ids.append(mid_inner)
             continue
-        # Defensive: pending-search уже отфильтровал не-индексируемые To: через
-        # lightrag_drain_pending_search(). Если письмо всё же дошло сюда — селектор
-        # и политика разошлись; не индексируем, помечаем skipped (не вечный pending).
-        stage = FsmStage.try_from_incoming_to(msg)
-        if not content_indexable_to_stage(stage):
-            log.warning(
+        # Финальный предикат содержательности (selector даёт лишь tag-негативы): письмо
+        # достойно графа, только если несёт ``<history>``-часть. Системные/control-письма
+        # (только ``<system>``, без history) индексировать нечем — помечаем skipped, чтобы
+        # не оставлять их в вечном pending.
+        if not message_has_history(msg):
+            to_stage = FsmStage.try_from_incoming_to(msg)
+            log.info(
                 "index_skip",
-                reason=LightragDrainSkipReason.SELECTOR_DRIFT.value,
+                reason=LightragDrainSkipReason.NO_HISTORY.value,
                 path=str(fp),
-                to_stage=stage.value if stage is not None else None,
+                to_stage=to_stage.value if to_stage is not None else None,
             )
             skip_tag_ids.append(mid_inner)
             continue
