@@ -19,6 +19,8 @@ HITL-родитель: ``HitlParentRouting`` (``HitlParentWithoutIntent`` | ``Hi
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ._core import NonEmptyStr
 from .bridges import (
     BridgeEmailSubjectLine,
@@ -140,20 +142,24 @@ from .notmuch_message_id import NotmuchMessageIdInner
 from .notmuch_query import NotmuchBridgeFromLocalhost, NotmuchIndexedHeader, NotmuchQuery, NotmuchQueryConnective, NotmuchQueryField
 from .notmuch_tag import NotmuchTag
 from .reasoning_routes import REASONING_TARGET_STAGES
-from .reasoning import (
-    ReasoningEnrichContext,
-    ReasoningIncomingEnvelope,
-    ReasoningResponseStateText,
-    ReasoningRouteDecision,
-    ReasoningTaskStateText,
-    ReasoningToolCallArgumentsWire,
-    ReasoningToolFunctionName,
-    ReasoningUserMessageText,
-    reasoning_assistant_message,
-    reasoning_assistant_plain_text,
-    reasoning_finish_reason,
-    reasoning_first_tool_call,
-)
+# ``.reasoning`` тянет ``litellm.types.utils`` → весь ``litellm`` (~1.5 c импорта).
+# Lazy через PEP 562 ``__getattr__`` (ниже): submitter/тонкие импортёры ``threlium.types``
+# не платят за litellm; символы грузятся при первом обращении (в engine). См. ниже _LAZY_REASONING.
+if TYPE_CHECKING:
+    from .reasoning import (
+        ReasoningEnrichContext,
+        ReasoningIncomingEnvelope,
+        ReasoningResponseStateText,
+        ReasoningRouteDecision,
+        ReasoningTaskStateText,
+        ReasoningToolCallArgumentsWire,
+        ReasoningToolFunctionName,
+        ReasoningUserMessageText,
+        reasoning_assistant_message,
+        reasoning_assistant_plain_text,
+        reasoning_finish_reason,
+        reasoning_first_tool_call,
+    )
 from .reasoning_tool_args import (
     CliIntentToolArgs,
     EgressRouterToolArgs,
@@ -374,3 +380,37 @@ __all__ = [
     "UnionNotmuchFromHeaderWire",
     "UnionNotmuchRouteHeaderWire",
 ]
+
+# PEP 562 lazy: символы ``.reasoning`` (тянет litellm) грузятся при первом обращении,
+# а не при ``import threlium.types``. Кешируются в ``globals()`` после первого доступа.
+_LAZY_REASONING = frozenset(
+    {
+        "ReasoningEnrichContext",
+        "ReasoningIncomingEnvelope",
+        "ReasoningResponseStateText",
+        "ReasoningRouteDecision",
+        "ReasoningTaskStateText",
+        "ReasoningToolCallArgumentsWire",
+        "ReasoningToolFunctionName",
+        "ReasoningUserMessageText",
+        "reasoning_assistant_message",
+        "reasoning_assistant_plain_text",
+        "reasoning_finish_reason",
+        "reasoning_first_tool_call",
+    }
+)
+
+
+def __getattr__(name: str) -> object:
+    if name in _LAZY_REASONING:
+        import importlib
+
+        module = importlib.import_module(".reasoning", __name__)
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted([*globals().keys(), *_LAZY_REASONING])
