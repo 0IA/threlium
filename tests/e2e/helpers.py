@@ -3018,6 +3018,85 @@ raise SystemExit(0 if check() else 1)
     )
 
 
+def _imap_message_plain_body(msg: Any) -> str:
+    """``text/plain`` тело письма (или payload non-multipart) как строка."""
+    if msg.is_multipart():
+        for p in msg.walk():
+            if p.get_content_type() == "text/plain":
+                pl = p.get_payload(decode=True)
+                if isinstance(pl, bytes):
+                    return pl.decode("utf-8", errors="replace")
+                return str(pl or "")
+        return ""
+    pl = msg.get_payload(decode=True)
+    if isinstance(pl, bytes):
+        return pl.decode("utf-8", errors="replace")
+    return str(pl or "")
+
+
+def greenmail_wait_agent_reply_message_id(
+    host: str,
+    port: int,
+    *,
+    in_reply_to_anchor: str,
+    user: str = E2E_GREENMAIL_REPLY_USER,
+    password: str = E2E_FETCHMAIL_PASS,
+    body_substring: str = E2E_REPLY_BODY_SNIPPET,
+    since_uid: int = 0,
+    timeout: float = TIMEOUT_POLL_SHORT,
+) -> str:
+    """Дождаться ответа агента в INBOX GreenMail (host-side IMAP) и вернуть его ``Message-ID``.
+
+    Ответ коррелируется по первому токену ``In-Reply-To`` == ``in_reply_to_anchor`` (inner MID
+    исходной инъекции, без скобок) — так же, как :func:`wait_for_greenmail_user_reply`; тело
+    дополнительно проверяется по ``body_substring``. Возвращается ``Message-ID`` ответа агента
+    в угловых скобках — пригоден как ``in_reply_to`` следующего письма пользователя.
+
+    Реалистичный threading: пользователь отвечает на письмо бота, а не на собственную инъекцию.
+    Egress glue-record (см. :mod:`threlium.egress_self_archive`) держит IRT-цепочку непрерывной —
+    ход вверх по In-Reply-To из нового хода проходит через ``tasks_upsert`` прошлого хода, поэтому
+    per-frame task-ledger наследуется без ручного сброса WireMock-латча.
+    """
+    anchor = in_reply_to_anchor.strip().strip("<>")
+    found: dict[str, str] = {}
+
+    def _probe() -> bool | None:
+        with imaplib.IMAP4(host, port, timeout=int(TIMEOUT_POLL_SHORT)) as imap:
+            imap.login(user, password)
+            imap.select("INBOX")
+            crit = f'HEADER In-Reply-To "{anchor}"'
+            if since_uid > 0:
+                crit = f"UID {since_uid + 1}:* {crit}"
+            _, data = imap.uid("search", None, crit)
+            uids = data[0].split() if data and data[0] else []
+            for uid in reversed(uids):
+                _, raw_data = imap.uid("fetch", uid, "(RFC822)")
+                if not raw_data or not isinstance(raw_data[0], tuple):
+                    continue
+                msg = message_from_bytes(raw_data[0][1])
+                m = re.search(r"<([^>]+)>", msg.get("In-Reply-To") or "")
+                first = m.group(1).strip().lower() if m else ""
+                if first != anchor.lower():
+                    continue
+                body = _imap_message_plain_body(msg)
+                if body_substring and body_substring.lower() not in body.lower():
+                    continue
+                mid = (msg.get("Message-ID") or "").strip()
+                if mid:
+                    found["mid"] = mid if mid.startswith("<") else f"<{mid.strip('<>')}>"
+                    imap.logout()
+                    return True
+            imap.logout()
+            return None
+
+    poll_until_backoff(
+        _probe,
+        timeout=timeout,
+        desc=f"greenmail agent reply Message-ID (in_reply_to={anchor!r}) on {host}:{port}",
+    )
+    return found["mid"]
+
+
 def _e2e_log_sut_workers_stall_diag(project_name: str, *, repo_root: Path, banner: str) -> None:
     """Снимок SUT при таймауте ``wait_for_sut_threlium_user_workers_idle`` (list-units + journal)."""
     r = service_exec(
@@ -3565,15 +3644,14 @@ def mailflow_inject_and_wait(
     Teardown не чистит журнал WireMock (оставлен для ручной отладки).
     """
     from .wiremock_client import (  # noqa: PLC0415
-        composite_context_key,
         prepare_wiremock_scenario,
         teardown_wiremock_scenario,
         wiremock_public_base,
-        wiremock_state_reset_phase,
     )
 
     needs_prior_thread_turn = spec.summarize_overflow_body or spec.oversized_trim_body
     seed_id: str | None = None
+    main_in_reply_to: str | None = None
     if needs_prior_thread_turn:
         seed_id = f"{spec.raw_id_prefix}seed-{uuid.uuid4().hex}@localhost"
         correlation_key = e2e_thread_root_mid_for_message_id(seed_id)
@@ -3669,14 +3747,17 @@ def mailflow_inject_and_wait(
             f"{spec.label}: prior-turn seed pipeline settled mid={seed_id!r} "
             f"(+{time.monotonic() - t0:.1f}s)"
         )
-        # Seed reasoning sets ``phase_tasks_ledger_done``; main turn must run
-        # tasks_ledger_done → egress_tool again (fail-closed finalize per-hop ledger).
-        # NB: admin DELETE контекста — no-op для составных имён со спецсимволами, поэтому
-        # снимаем именно свойство-защёлку через phase_reset-стаб (контекст остаётся).
-        ctx_key = composite_context_key(spec.stub_tag, correlation_key)
-        wiremock_state_reset_phase(wm_base, ctx_key)
+        # Реалистичный threading: основной ход тредится на ОТВЕТ агента (egress glue-record),
+        # а не на собственную seed-инъекцию. Тогда IRT-цепочка основного хода проходит через
+        # ``tasks_upsert`` seed-хода → per-frame task-ledger наследуется и finalize-gate
+        # проходит без ручного сброса WireMock-латча ``phase_tasks_ledger_done``.
+        main_in_reply_to = greenmail_wait_agent_reply_message_id(
+            rt.greenmail_imap_host,
+            rt.greenmail_imap_port,
+            in_reply_to_anchor=seed_id,
+        )
         mailflow_log_phase(
-            f"{spec.label}: prior-turn WM state reset before main inject "
+            f"{spec.label}: prior-turn agent reply mid={main_in_reply_to!r} "
             f"(+{time.monotonic() - t0:.1f}s)"
         )
 
@@ -3710,7 +3791,7 @@ def mailflow_inject_and_wait(
         repo_root=REPO_ROOT,
         message_id=raw_id,
         body=inject_body,
-        **({"in_reply_to": seed_id} if seed_id is not None else {}),
+        **({"in_reply_to": main_in_reply_to} if main_in_reply_to is not None else {}),
     )
     mailflow_log_phase(f"{spec.label}: after smtp_inject_inbound (+{time.monotonic() - t0:.1f}s)")
     wait_for_greenmail_inbox_message_gone_host(

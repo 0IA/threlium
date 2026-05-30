@@ -22,6 +22,7 @@ from .helpers import (
     dump_failure_artifacts,
     e2e_dense_threlium_ctx_body,
     email_ingress_notmuch_id_inner,
+    greenmail_wait_agent_reply_message_id,
     mailflow_inject_and_wait,
     mailflow_wait_fsm_maildir_activity,
     smtp_inject_inbound,
@@ -209,12 +210,22 @@ def test_summarize_idempotent_second_enrich(deployed_stack: str) -> None:
         raw_id2 = f"e2e-summarize-ctx2-{uuid.uuid4().hex}@localhost"
         nm_inner2 = email_ingress_notmuch_id_inner(raw_id2)
         rt = discover_runtime(project, repo_root=REPO_ROOT)
+        wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+        # Реалистичный threading: второе письмо тредится на ОТВЕТ агента (его Message-ID),
+        # а не на исходный inbound. Тогда IRT-цепочка второго хода проходит через tasks_upsert
+        # первого хода (egress glue-record), per-frame task-ledger наследуется и finalize-gate
+        # проходит без ручного сброса WireMock-латча phase_tasks_ledger_done.
+        agent_reply_mid = greenmail_wait_agent_reply_message_id(
+            rt.greenmail_imap_host,
+            rt.greenmail_imap_port,
+            in_reply_to_anchor=raw_id,
+        )
         smtp_inject_inbound(
             project,
             checkout="/unused",
             repo_root=REPO_ROOT,
             message_id=raw_id2,
-            in_reply_to=raw_id,
+            in_reply_to=agent_reply_mid,
             body=e2e_dense_threlium_ctx_body(
                 head="e2e summarize second turn short body",
                 correlation_key=correlation_key,
@@ -234,7 +245,6 @@ def test_summarize_idempotent_second_enrich(deployed_stack: str) -> None:
             repo_root=REPO_ROOT,
         )
 
-        wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
         n_after_second = _count_summarize_llm_posts(wm_base, stub_tag=stub_tag)
         assert n_after_second == n_after_first, (
             f"expected idempotent summarize LLM count {n_after_first}, got {n_after_second}"
