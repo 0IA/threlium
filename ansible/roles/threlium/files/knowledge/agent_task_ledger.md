@@ -88,6 +88,13 @@ hash). Two consequences:
 - **Changing the wording** of a subtask = add the new text as a `new_subtask` **and**
   `cancel` the old `content_id`.
 
+A subtask's work **phase** (discover / verify / deliver) is conveyed by its **verb**
+(Find/Locate, Confirm/Verify, Draft/Answer), never by a literal tag like `[verify]` in
+the text. A bracketed tag would change the normalized text and therefore the
+`content_id`, creating a duplicate on the next enrich seed and possibly blocking the
+gate; nothing parses the tag, so it adds no function. See `agent_navigation.md` for the
+explore → verify → deliver model.
+
 ## Tool call shape
 
 One call may BOTH add new subtasks AND update existing statuses. `reasoning` is required;

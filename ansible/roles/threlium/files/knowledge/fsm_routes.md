@@ -38,6 +38,7 @@ Discovery order: in-context → `memory_query` → `cli_intent` (files) → `sub
 
 ## Related bootstrap docs
 
+- **Navigation:** `agent_navigation.md` — moving through a task under partial context (explore → verify → deliver), route-as-move map, verify-before-commit discipline.
 - **Core:** `turtle_syntax.md`, `shacl_sparql.md`, `sparql_functions.md` — SHACL/Turtle/SPARQL for `formal_reason`.
 - **Workflows:** `formal_reason_workflows.md` — tool-call JSON examples and observation patterns.
 - **Task ledger:** `agent_task_ledger.md` — `tasks_upsert` tool contract, content-addressed dedupe, monotonic status lattice, the `response_finalize` gate, batch patches.
