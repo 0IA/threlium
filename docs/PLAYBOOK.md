@@ -264,6 +264,16 @@ ansible/
 | `threlium_home`               | `$THRELIUM_HOME` (данные). Дефолт после getent: `{{ ansible_facts.getent_passwd[threlium_user][4] }}/threlium/data`. |
 | `threlium_systemd_user_dir`   | Симлинки user units. Дефолт: `{{ threlium_posix_home }}/.config/systemd/user`. |
 
+#### 7.1.1. systemd — backoff рестартов
+
+Единые дефолты для `threlium-engine.service`, `threlium-work@.service`, `threlium-bridge@.service` (`defaults/main.yml` → include в шаблонах). `[Unit]` **`StartLimitIntervalSec=0`** — без потолка числа рестартов.
+
+| Переменная | Дефолт | Назначение |
+| ---------- | ------ | ---------- |
+| `threlium_systemd_restart_sec` | `1s` | Первая пауза перед рестартом (`RestartSec`). |
+| `threlium_systemd_restart_steps` | `10` | Число ступеней роста задержки (`RestartSteps`, systemd ≥254). |
+| `threlium_systemd_restart_max_delay_sec` | `5min` | Потолок паузы (`RestartMaxDelaySec`). |
+
 **Факты Ansible:** `inject_facts_as_vars` не отключаем (дефолт ansible-core). В play/tasks/Jinja для setup-фактов — `ansible_facts['distribution_release']`, `ansible_facts['date_time']`, `ansible_facts['env']`, не top-level `ansible_*` (deprecation). Пути агента — только через `getent` + `ansible_facts.getent_passwd`, не `ansible_facts['env'].HOME` (это HOME SSH-сессии, часто root).
 
 ### 7.2. Каналы и секреты
@@ -281,7 +291,7 @@ ansible/
 | `threlium_fetchmail_tls`        | `true` → `MailBox` (IMAPS); `false` → `MailBoxUnencrypted`. Дефолт `true`. |
 | `threlium_imap_ssl_verify`     | Дефолт `1` (роль); в e2e для self-signed GreenMail без CA в trust — `0` (`bridges.email.imap_ssl_verify` в `threlium.yaml`). |
 
-**Unit-специфика:** `Restart=on-failure`, `RestartSec=1s`, `[Unit]` `StartLimitIntervalSec=0` (мост).
+**Unit-специфика:** `Restart=on-failure`, backoff рестартов (§7.1.1), `[Unit]` `StartLimitIntervalSec=0` (мост).
 
 ### 7.4. Исходящая почта (msmtp)
 

@@ -576,6 +576,31 @@
         label: "{{ item.item.path | basename }}"
       tags: [deploy, refresh]
 
+    - name: Acceptance — slurp restartable FSM service units (backoff)
+      ansible.builtin.slurp:
+        path: "{{ threlium_repo_path }}/systemd/user/{{ item }}"
+      loop:
+        - threlium-engine.service
+        - threlium-work@.service
+        - threlium-bridge@.service
+      loop_control:
+        label: "{{ item }}"
+      register: threlium_restartable_service_slurp
+      tags: [deploy, refresh]
+
+    - name: Acceptance — restart backoff and StartLimitIntervalSec=0 in FSM services
+      ansible.builtin.assert:
+        that:
+          - (item.content | b64decode | regex_search('(?m)^RestartSec=' ~ threlium_systemd_restart_sec ~ '$')) is not none
+          - (item.content | b64decode | regex_search('(?m)^RestartSteps=' ~ (threlium_systemd_restart_steps | string) ~ '$')) is not none
+          - (item.content | b64decode | regex_search('(?m)^RestartMaxDelaySec=' ~ threlium_systemd_restart_max_delay_sec ~ '$')) is not none
+          - (item.content | b64decode | regex_search('(?m)^StartLimitIntervalSec=0$')) is not none
+        fail_msg: "В {{ item.item }} нет ожидаемых Restart* / StartLimitIntervalSec=0"
+      loop: "{{ threlium_restartable_service_slurp.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: [deploy, refresh]
+
     - name: Symlink all systemd units for user manager
       ansible.builtin.file:
         src: "{{ item.path }}"

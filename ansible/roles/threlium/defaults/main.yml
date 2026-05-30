@@ -100,6 +100,11 @@ threlium_mail_archive_caddy_bind_port: 8080
 threlium_mail_archive_web_root: "{{ threlium_home }}/www/cockpit-mail-plugin"
 threlium_mail_archive_cockpit_origins_extra: []
 
+# systemd user services — backoff рестартов (engine, work@, bridge@); StartLimit не задаём (0 = без потолка)
+threlium_systemd_restart_sec: 1s
+threlium_systemd_restart_steps: 10
+threlium_systemd_restart_max_delay_sec: 5min
+
 # systemd user units (списки для loop в site.yml / refresh.yml).
 threlium_engine_units: ['threlium-engine.service']
 threlium_work_slice: ['threlium-work.slice']

@@ -15,7 +15,8 @@ Environment=PATH={{ threlium_repo_path }}/.venv/bin:/usr/local/sbin:/usr/local/b
 WorkingDirectory={{ threlium_repo_path }}
 ExecStart={{ threlium_repo_path }}/.venv/bin/python -m threlium.runners.engine
 Restart=always
-RestartSec=1s
+{% include '_restart_backoff_service.inc.j2' %}
+
 TimeoutStartSec=150
 {# ThreadingUnixStreamServer: после SIGTERM ``server_close()`` делает join активных
    handler'ов; in-flight ``process_thread_message`` (enrich + LightRAG + цепочка LLM)

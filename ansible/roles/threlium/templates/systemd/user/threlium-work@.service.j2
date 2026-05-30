@@ -17,7 +17,8 @@ OnSuccess=threlium-sweep@%i.service
 [Service]
 Type=exec
 Restart=on-failure
-RestartSec=1s
+{% include '_restart_backoff_service.inc.j2' %}
+
 EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env
 Environment=PATH={{ threlium_repo_path }}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory={{ threlium_repo_path }}
