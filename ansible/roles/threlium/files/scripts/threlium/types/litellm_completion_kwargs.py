@@ -5,6 +5,24 @@ from typing import Any
 
 import msgspec
 
+LITELLM_ACOMPLETION_PAYLOAD_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "timeout",
+        "max_retries",
+        "api_key",
+        "api_base",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "response_format",
+        "extra_headers",
+        "chat_template_kwargs",
+        "thinking_token_budget",
+    }
+)
+
 
 class LiteLlmChatMessage(msgspec.Struct, frozen=True):
     """Один элемент ``messages`` для chat completion."""

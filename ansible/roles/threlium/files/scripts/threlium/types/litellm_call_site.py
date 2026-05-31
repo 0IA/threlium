@@ -2,7 +2,7 @@
 
 Гранулярные значения ``lightrag_index_*`` / ``lightrag_query_*`` позволяют
 WireMock-стабам различать фазы LightRAG **без** инспекции тела запроса
-(``bodyPatterns``). Детекция фазы — в ``runners/lightrag._detect_lightrag_phase``.
+(``bodyPatterns``). Детекция фазы — в ``types.lightrag_tool_phase.detect_lightrag_call_site_wire``.
 """
 from __future__ import annotations
 
@@ -15,10 +15,12 @@ class LitellmCallSite(StrEnum):
     Значения ``lightrag_index`` / ``lightrag_query`` — базовые; гранулярные
     подфазы (``*_entity``, ``*_gleaning``, …) определяются в рантайме
     по сигналам ``llm_func`` (``keyword_extraction``, ``history_messages``,
-    ``system_prompt``), не по содержимому промптов.
+    ``system_prompt``), не по содержимому промптов — см.
+    :func:`~threlium.types.lightrag_tool_phase.detect_lightrag_call_site_wire`.
     """
 
     FSM = "fsm"
+    CLI_HITL_RESUME = "cli_hitl_resume"
     SUMMARIZE_CONTEXT = "summarize_context"
 
     LIGHTRAG_INDEX = "lightrag_index"
