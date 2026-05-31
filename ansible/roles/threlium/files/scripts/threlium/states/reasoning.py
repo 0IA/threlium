@@ -2,14 +2,14 @@
 """reasoning@localhost: LLM reducer → следующая стадия (ARCHITECTURE §6.1).
 
 Маршрут — через OpenAI-compatible ``tool_calls``: для каждой целевой
-:class:`~threlium.types.fsm_stage.FsmStage` из
-:data:`~threlium.types.reasoning.REASONING_TARGET_STAGES` загружается отдельный
-tool из ``prompts/reasoning/<stage>/tool_spec.j2``. ``tool_choice`` = ``required``.
+:class:`~threlium.types.fsm_stage.FsmStage` из разрешённого набора загружается
+отдельный tool из ``prompts/reasoning/<stage>/tool_spec.j2``. ``tool_choice`` = ``required``.
 """
 from __future__ import annotations
 
 from email.message import EmailMessage
 
+from threlium.formal_reason_gate import formal_reason_gate_active
 from threlium.litellm_client import litellm_completion_sync
 from litellm.types.utils import Message
 
@@ -51,9 +51,19 @@ _HDR = MailHeaderName
 
 log = logger.bind(stage="reasoning")
 
+_MAX_WRONG_TOOL_RETRIES = 12
+
 
 class ReasoningStageError(Exception):
     """Ошибка стадии reasoning."""
+
+
+def compute_allowed_routes(msg: EmailMessage, remaining: int) -> frozenset[FsmStage]:
+    if remaining < 1:
+        return frozenset({FsmStage.RESPONSE_FINALIZE})
+    if formal_reason_gate_active(msg):
+        return frozenset({FsmStage.FORMAL_REASON, FsmStage.MEMORY_QUERY})
+    return REASONING_TARGET_STAGES
 
 
 def _render_user_prompt(
@@ -116,6 +126,27 @@ def _route_from_assistant(
     return decision
 
 
+def _mode_notices(
+    msg: EmailMessage,
+    remaining: int,
+    retry_count: int,
+) -> list[str]:
+    notices: list[str] = []
+    if remaining < 1:
+        notices.append(
+            render_prompt(
+                PromptPath.REASONING_BUDGET_EXHAUSTED, retry_count=retry_count
+            ).strip()
+        )
+    elif formal_reason_gate_active(msg):
+        notices.append(
+            render_prompt(
+                PromptPath.REASONING_FORMAL_REASON_GATE, retry_count=retry_count
+            ).strip()
+        )
+    return notices
+
+
 def _decide(
     msg: EmailMessage,
     hop_budget: HopBudgetLine,
@@ -129,22 +160,41 @@ def _decide(
         if ep.length_recovery_max_attempts is not None
         else config.litellm.length_recovery_max_attempts
     )
-    log.info("litellm_routing", site=LitellmRoutingSite.REASONING.value, score=ep.score)
+    remaining = hop_budget_remaining(hop_budget, config)
+    gate_active = formal_reason_gate_active(msg)
+    log.info(
+        "litellm_routing",
+        site=LitellmRoutingSite.REASONING.value,
+        score=ep.score,
+        remaining_hops=remaining,
+        formal_reason_gate_active=gate_active,
+    )
 
-    routes = sorted(REASONING_TARGET_STAGES, key=lambda s: s.value)
+    allowed = compute_allowed_routes(msg, remaining)
+    routes = sorted(allowed, key=lambda s: s.value)
     tools, schemas = load_tools_for_routes(routes)
+    restricted = len(allowed) < len(REASONING_TARGET_STAGES)
 
     system = render_prompt(PromptPath.REASONING_SYSTEM).strip()
     length_recovery_system = render_prompt(
         PromptPath.REASONING_LENGTH_RECOVERY_SYSTEM
     ).strip()
     user_content = _render_user_prompt(msg, hop_budget, config.enrich.context_max_chars)
-    messages: list[LiteLlmChatMessage] = [
-        LiteLlmChatMessage(role="system", content=system),
-        LiteLlmChatMessage(role="user", content=user_content),
-    ]
 
-    for attempt in range(length_max_attempts):
+    wrong_tool_retries = 0
+    length_attempt = 0
+    length_recovery_extra: list[LiteLlmChatMessage] = []
+
+    while True:
+        notices = _mode_notices(msg, remaining, wrong_tool_retries)
+        messages: list[LiteLlmChatMessage] = [
+            LiteLlmChatMessage(role="system", content=system),
+            LiteLlmChatMessage(role="user", content=user_content),
+            *length_recovery_extra,
+        ]
+        for notice in notices:
+            messages.append(LiteLlmChatMessage(role="system", content=notice))
+
         call = LiteLlmAcompletionKwargs(
             model=ep.model,
             messages=messages,
@@ -167,88 +217,70 @@ def _decide(
         if finish == "length":
             log.warning(
                 "llm_finish_reason_length",
-                attempt=attempt + 1,
+                attempt=length_attempt + 1,
                 max_attempts=length_max_attempts,
             )
-            if attempt + 1 >= length_max_attempts:
+            length_attempt += 1
+            if length_attempt >= length_max_attempts:
                 raise ReasoningStageError(
                     "LLM completion truncated (finish_reason=length) after recovery retry"
                 )
-            messages = [
-                *messages,
-                LiteLlmChatMessage(role="system", content=length_recovery_system),
-            ]
+            length_recovery_extra.append(
+                LiteLlmChatMessage(role="system", content=length_recovery_system)
+            )
             continue
 
         assistant = reasoning_assistant_message(resp)
-        return _route_from_assistant(assistant, schemas)
-
-    raise ReasoningStageError("reasoning LLM attempt loop exhausted")
-
-
-def _decide_force_finalize(
-    msg: EmailMessage,
-    hop_budget: HopBudgetLine,
-    *,
-    config: ThreliumSettings,
-) -> ReasoningRouteDecision:
-    """Hop-budget исчерпан: LLM с промптом ``budget_exhausted.j2`` (``retry_count``)
-    до ``response_finalize`` tool call; жёсткий egress — в ``response_finalize``."""
-    ep = resolve_llm_endpoint(config.litellm, LitellmRoutingSite.REASONING)
-    mr = ep.max_retries if ep.max_retries is not None else config.litellm.max_retries
-    log.info(
-        "litellm_routing_force_finalize",
-        site=LitellmRoutingSite.REASONING.value,
-        score=ep.score,
-    )
-
-    routes = sorted(REASONING_TARGET_STAGES, key=lambda s: s.value)
-    tools, schemas = load_tools_for_routes(routes)
-    system = render_prompt(PromptPath.REASONING_SYSTEM).strip()
-    user_content = _render_user_prompt(msg, hop_budget, config.enrich.context_max_chars)
-
-    retry_count = 0
-    while True:
-        budget_notice = render_prompt(
-            PromptPath.REASONING_BUDGET_EXHAUSTED, retry_count=retry_count
-        ).strip()
-        messages: list[LiteLlmChatMessage] = [
-            LiteLlmChatMessage(role="system", content=system),
-            LiteLlmChatMessage(role="user", content=user_content),
-            LiteLlmChatMessage(role="system", content=budget_notice),
-        ]
-        call = LiteLlmAcompletionKwargs(
-            model=ep.model,
-            messages=messages,
-            timeout=float(ep.timeout),
-            max_retries=mr,
-            api_key=ep.api_key,
-            api_base=ep.api_base,
-            max_tokens=ep.max_tokens,
-            thinking_token_budget=ep.thinking_token_budget,
-            tools=tools,
-            tool_choice="required",
-            chat_template_kwargs=ep.chat_template_kwargs or None,
-        )
-        kwargs = lite_llm_acompletion_to_dict(call)
-        resp = require_chat_model_response(
-            litellm_completion_sync(settings=config, **kwargs, stream=False)
-        )
-        assistant = reasoning_assistant_message(resp)
         tc = reasoning_first_tool_call(assistant)
-        if tc is not None:
-            name = ReasoningToolFunctionName.parse_tool_call(tc)
-            if name.target_stage() == FsmStage.RESPONSE_FINALIZE:
-                log.info("force_finalize_resolved", retry_count=retry_count)
-                return _route_from_assistant(assistant, schemas)
+        if tc is None:
+            if remaining < 1:
+                wrong_tool_retries += 1
+                if wrong_tool_retries > _MAX_WRONG_TOOL_RETRIES:
+                    raise ReasoningStageError(
+                        "hop budget exhausted: no tool_call after max retries"
+                    )
+                log.warning(
+                    "restricted_mode_no_tool_call",
+                    retry_count=wrong_tool_retries,
+                    mode="force_finalize",
+                )
+                continue
+            return _route_from_assistant(assistant, schemas)
+
+        name = ReasoningToolFunctionName.parse_tool_call(tc)
+        route = name.target_stage()
+        if restricted and route not in allowed:
+            wrong_tool_retries += 1
+            if wrong_tool_retries > _MAX_WRONG_TOOL_RETRIES:
+                raise ReasoningStageError(
+                    f"wrong tool {name.value!r} after max retries "
+                    f"(allowed={[s.value for s in allowed]})"
+                )
+            log.warning(
+                "wrong_tool_rejected",
+                got=name.value,
+                retry_count=wrong_tool_retries,
+                allowed=[s.value for s in allowed],
+                formal_reason_gate_active=gate_active,
+            )
+            continue
+
+        if remaining < 1 and route != FsmStage.RESPONSE_FINALIZE:
+            wrong_tool_retries += 1
+            if wrong_tool_retries > _MAX_WRONG_TOOL_RETRIES:
+                raise ReasoningStageError(
+                    f"hop budget exhausted: got {name.value!r} after max retries"
+                )
             log.warning(
                 "force_finalize_wrong_tool",
-                retry_count=retry_count,
+                retry_count=wrong_tool_retries,
                 got=name.value,
             )
-        else:
-            log.warning("force_finalize_no_tool_call", retry_count=retry_count)
-        retry_count += 1
+            continue
+
+        if remaining < 1:
+            log.info("force_finalize_resolved", retry_count=wrong_tool_retries)
+        return _route_from_assistant(assistant, schemas)
 
 
 def main(
@@ -259,27 +291,20 @@ def main(
     hop_line = HopBudgetLine.parse(canonical.get(HDR_HOP_BUDGET))
     remaining = hop_budget_remaining(hop_line, config)
     mid_w = RfcMessageIdWire.parse_present_from_email(canonical, _HDR.MESSAGE_ID)
-    log.info("envelope", message_id=mid_w.value if mid_w else None)
+    log.info(
+        "envelope",
+        message_id=mid_w.value if mid_w else None,
+        remaining_hops=remaining,
+        formal_reason_gate_active=formal_reason_gate_active(canonical),
+    )
 
-    if remaining < 1:
-        log.warning(
-            "hop_budget_exhausted_force_finalize",
-            remaining=remaining,
-            message_id=mid_w.value if mid_w else None,
-        )
-        decision = _decide_force_finalize(canonical, hop_line, config=config)
-    else:
-        decision = _decide(canonical, hop_line, config=config)
+    decision = _decide(canonical, hop_line, config=config)
 
     log.info(
         "decision",
         route=decision.target.value,
         target=decision.target.rfc822_mailbox,
     )
-    # Модель «callee владеет историей»: тело tool-call едет ТОЛЬКО как <system>
-    # (исполняемая команда адресату). reasoning НЕ кладёт <history> — что из запроса
-    # достойно памяти, решает сама вызванная стадия (эхо-запрос через request_echo).
-    # Так мутаторы (response_append/edit/tasks_upsert) не засоряют контекст сырым буфером.
     decision_body = FsmTransitionPlainBody.parse(decision.body.value).value
     return build_fsm_step_to_stage(
         canonical,

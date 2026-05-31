@@ -2,9 +2,9 @@
 
 Быстрый цикл обратной связи: берёт предыдущий enriched-контекст ``E_prev``
 (multipart/mixed с MIME-частями по Content-ID), пересобирает ``<response-state>``
-и ``<task-state>`` из CRDT и **аддитивно** дописывает ``<history>``-части окна-дельты
-(всё, что появилось с прошлого ``To: reasoning`` до листа) — возвращает в reasoning
-без повторного RAG.
+и ``<task-state>`` из CRDT и **аддитивно** дописывает ``<history>`` и ``<system>`` из
+окна-дельты (всё, что появилось с прошлого ``To: reasoning`` до листа; старые
+``@system`` из ``E_prev`` не копируются) — возвращает в reasoning без повторного RAG.
 
 Контент-адресные CID ``<{sha256(body)}@history>`` дают автоматический дедуп по телу:
 оригинал и его relay-копии схлопываются в одну часть. Origin (стадия-источник) — единственная
@@ -18,6 +18,7 @@ from __future__ import annotations
 from email.message import EmailMessage
 
 from threlium.enrich_context import collect_unified_delta_msgs, trim_context_text
+from threlium.formal_reason_gate import assert_formal_reason_relay_after_splice
 from threlium.fsm_emit import emit_transition_preserving_payload
 from threlium.fsm_emit_semantic import managed_patch_simple_fsm_step
 from threlium.logutil import logger
@@ -25,6 +26,7 @@ from threlium.mime_reform import (
     EnrichContentId,
     email_message_from_path,
     iter_history_parts,
+    iter_system_parts,
     splice_e_prev_with_history,
 )
 from threlium.response.collect import collect_ops
@@ -75,6 +77,20 @@ def _collect_delta_history_parts(
     return out
 
 
+def _collect_delta_system_parts(
+    delta_msgs: list[EmailMessage],
+) -> list[tuple[EnrichContentId, EmailMessage]]:
+    """``<system>``-части окна-дельты со штампом ``X-Threlium-Origin`` (= конвертный From)."""
+    out: list[tuple[EnrichContentId, EmailMessage]] = []
+    for dm in delta_msgs:
+        origin = FsmStage.try_from_mailbox(dm.get(_HDR.FROM.value))
+        for cid, part in iter_system_parts(dm):
+            if origin is not None and not part.get(_HDR.ORIGIN.value):
+                part[_HDR.ORIGIN.value] = origin.rfc822_mailbox
+            out.append((cid, part))
+    return out
+
+
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
@@ -101,12 +117,20 @@ def main(
 
     delta_msgs = collect_unified_delta_msgs(inner)
     history_parts = _collect_delta_history_parts(delta_msgs)
+    system_parts = _collect_delta_system_parts(delta_msgs)
 
     spliced = splice_e_prev_with_history(
         e_prev,
         response_state_text=trimmed_summary,
         task_state_text=task_state_text,
         history_parts=history_parts,
+        system_parts=system_parts,
+    )
+
+    assert_formal_reason_relay_after_splice(
+        spliced.message,
+        delta_msgs=delta_msgs,
+        message_id=mid_w.value if mid_w else None,
     )
 
     log.info(
@@ -115,6 +139,7 @@ def main(
         response_state_chars=len(trimmed_summary),
         delta_msgs=len(delta_msgs),
         delta_history_parts=len(history_parts),
+        delta_system_parts=len(system_parts),
         appended_cids=[cid.value for cid in spliced.appended] or None,
         skipped_duplicate_cids=[cid.value for cid in spliced.skipped] or None,
         message_id=mid_w.value if mid_w else None,

@@ -1,0 +1,9 @@
+{#- LLM-facing text is English-only. Appended by reasoning when formal_reason gate is ON. -#}
+FORMAL REASON GATE — the last formal_reason run ended with a technical failure (see observation above).
+Only formal_reason and memory_query are available until a clean formal_reason run or hop budget ends.
+You MUST NOT call response_finalize, reflect, cli_intent, subagent_intent, or other routes — other tool calls will be rejected and you will be asked again.
+
+Gate retry counter: {{ retry_count }}.
+{% if retry_count > 0 -%}
+You have already returned a disallowed tool {{ retry_count }} time(s). Use formal_reason (fix inputs) or memory_query (syntax/docs) next.
+{%- endif %}

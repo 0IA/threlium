@@ -1,0 +1,12 @@
+{#- LLM-facing text is English-only. formal_reason fatal (parse/shape/runtime) observation. -#}
+reasoning: {{ reasoning }}
+---
+{% if error_kind == "parse" %}PARSE ERROR (Turtle): {{ error_message }}
+Fix the Turtle syntax of facts_ttl/shapes_ttl/ontology_ttl and retry formal_reason. If unsure of the syntax, memory_query the unified knowledge/memory graph for turtle_syntax.md / shacl_sparql.md before retrying.
+{% elif error_kind == "shape" %}SHAPE LOAD ERROR (SHACL): {{ error_message }}
+A shape/constraint is malformed (e.g. bad sh:declare, sh:select, or sh:path). Fix the shape definition and retry formal_reason. If unsure of the syntax, memory_query the unified knowledge/memory graph for shacl_sparql.md / turtle_syntax.md before retrying.
+{% elif error_kind == "runtime" %}RUNTIME ERROR (validation): {{ error_message }}
+Often an undeclared prefix in sh:select (declare via sh:prefixes/sh:declare) or a malformed shape. Fix and retry formal_reason. memory_query shacl_sparql.md / sparql_functions.md if needed.
+{% endif %}
+---
+FSM locked after a technical formal_reason failure: only formal_reason and memory_query are available until a clean run or hop budget ends. Other tool calls will be rejected.

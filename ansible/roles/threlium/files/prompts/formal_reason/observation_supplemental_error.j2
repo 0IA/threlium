@@ -1,0 +1,23 @@
+{#- LLM-facing text is English-only. formal_reason SHACL ok but query/derived error. -#}
+reasoning: {{ reasoning }}
+---
+conforms: {{ conforms }}
+violations: {{ violations }}
+{% if conforms and violations | int == 0 %}conforms=true means no targeted node violated the shapes. This is only a proof if your sh:targetClass/targetNode/targetSubjectsOf/targetObjectsOf actually matched nodes — confirm coverage yourself (e.g. add a query SELECT (COUNT(?n) AS ?c) WHERE { ?n a <YourTargetClass> } in the same call, or check the facts contain the targeted nodes). Mind prefixes and enable inference if you rely on subclass/equivalence.
+{% endif %}{% if return_derived_ignored %}NOTE: return_derived was ignored because inference is none — set inference to rdfs/owlrl/both to read entailed triples.
+{% endif %}{{ report_text }}
+{% if derived_ttl %}---
+derived_triples (inference delta):
+{{ derived_ttl }}
+{% endif %}{% if query_result %}---
+query_result:
+{{ query_result }}
+{% endif %}{% if has_derived_error %}---
+DERIVED ERROR (inference): {{ derived_error }}
+Fix the ontology_ttl / inference mode and retry formal_reason if you need the entailed triples.
+{% endif %}{% if has_query_error %}---
+QUERY ERROR (SPARQL): {{ query_error }}
+Fix the SPARQL (PREFIX declarations, syntax) and retry formal_reason. If unsure, memory_query sparql_functions.md / shacl_sparql.md before retrying.
+{% endif %}
+---
+FSM locked after a technical formal_reason failure: only formal_reason and memory_query are available until a clean run or hop budget ends. Other tool calls will be rejected.

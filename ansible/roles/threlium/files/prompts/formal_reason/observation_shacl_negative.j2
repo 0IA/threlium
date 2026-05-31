@@ -1,0 +1,16 @@
+{#- LLM-facing text is English-only. formal_reason logical refutation (not pipeline error). -#}
+reasoning: {{ reasoning }}
+---
+conforms: {{ conforms }}
+violations: {{ violations }}
+{{ report_text }}
+{% if derived_ttl %}---
+derived_triples (inference delta):
+{{ derived_ttl }}
+{% endif %}{% if query_result %}---
+query_result:
+{{ query_result }}
+{% endif %}
+SHACL validation completed; reported violations are a logical finding (counterexample / refutation), not a pipeline error.
+You may retry formal_reason with revised facts or shapes, or call response_finalize with verification_summary explaining the gap to the user.
+Do not treat violations as permission to ignore them in verification_summary — but you are not blocked from finalizing if you explain the gap.

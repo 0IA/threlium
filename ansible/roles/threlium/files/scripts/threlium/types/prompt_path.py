@@ -29,7 +29,14 @@ class PromptPath(StrEnum):
 
     CLI_EXEC_OBSERVATION = "cli_exec/observation.j2"
 
-    FORMAL_REASON_OBSERVATION = "formal_reason/observation.j2"
+    FORMAL_REASON_OBSERVATION_PASSED = "formal_reason/observation_passed.j2"
+    FORMAL_REASON_OBSERVATION_FATAL = "formal_reason/observation_fatal.j2"
+    FORMAL_REASON_OBSERVATION_SUPPLEMENTAL_ERROR = (
+        "formal_reason/observation_supplemental_error.j2"
+    )
+    FORMAL_REASON_OBSERVATION_SHACL_NEGATIVE = (
+        "formal_reason/observation_shacl_negative.j2"
+    )
     MEMORY_QUERY_OBSERVATION = "memory_query/observation.j2"
 
     EGRESS_SELF_ARCHIVE_SUBJECT = "egress/self_archive_subject.j2"
@@ -40,8 +47,6 @@ class PromptPath(StrEnum):
     CLI_HITL_OUT_SUBJECT = "cli_hitl_out/subject.j2"
     CLI_INTENT_INVALID = "cli_intent/invalid.j2"
     CLI_INTENT_INVALID_SUBJECT = "cli_intent/invalid_subject.j2"
-    CLI_INTENT_DENIED = "cli_intent/denied.j2"
-    CLI_INTENT_DENIED_SUBJECT = "cli_intent/denied_subject.j2"
     CLI_INTENT_ROUTE_COLLISION = "cli_intent/route_collision.j2"
 
     CLI_RESUME_INTENT_NOT_FOUND = "cli_resume/intent_not_found.j2"
@@ -63,6 +68,7 @@ class PromptPath(StrEnum):
     REASONING_SYSTEM = "reasoning/system.j2"
     REASONING_LENGTH_RECOVERY_SYSTEM = "reasoning/length_recovery_system.j2"
     REASONING_BUDGET_EXHAUSTED = "reasoning/budget_exhausted.j2"
+    REASONING_FORMAL_REASON_GATE = "reasoning/formal_reason_gate.j2"
 
     REASONING_EGRESS_ROUTER_TOOL_SPEC = "reasoning/egress_router/tool_spec.j2"
     REASONING_EGRESS_ROUTER_EMAIL_SUBJECT = "reasoning/egress_router/email_subject.j2"

@@ -385,6 +385,19 @@ def history_part_text(part: EmailMessage) -> str:
     return _leaf_part_text(part)
 
 
+def system_leaf_part_text(part: EmailMessage) -> str:
+    """Декодированное тело leaf ``<system>``-части (граница чтения MIME-тела)."""
+    return _leaf_part_text(part)
+
+
+def part_origin_label(part: EmailMessage) -> str:
+    """Local-part ``X-Threlium-Origin`` leaf-части; иначе ``?``."""
+    raw = part.get(MailHeaderName.ORIGIN.value)
+    if raw and str(raw).strip():
+        return str(raw).strip().split("@", 1)[0]
+    return "?"
+
+
 def iter_history_parts(msg: EmailMessage) -> list[tuple[EnrichContentId, EmailMessage]]:
     """Leaf ``<history>``-части письма как ``(EnrichContentId, part)`` в порядке walk.
 
@@ -476,17 +489,16 @@ def splice_e_prev_with_history(
     response_state_text: str,
     task_state_text: str | None = None,
     history_parts: Iterable[tuple[EnrichContentId, EmailMessage]] = (),
+    system_parts: Iterable[tuple[EnrichContentId, EmailMessage]] = (),
 ) -> RelaySpliceResult:
-    """``E_prev`` + сырые ``<history>``-части окна-дельты → новый multipart для reasoning.
+    """``E_prev`` + сырые ``<history>`` / ``<system>`` из окна-дельты → multipart для reasoning.
 
     Stage-agnostic быстрый цикл ``enrich_fast``:
 
-    * копирует все части ``E_prev``;
+    * копирует части ``E_prev``, **кроме** ``@system`` (свежие system — только из дельты);
     * **пересобирает** ``<response-state>`` из ``response_state_text`` (CRDT) и — если
       передан ``task_state_text`` — ``<task-state>`` из него (детерминированный recompute);
-    * **дописывает в хвост** переданные ``history_parts`` (``(cid, part)``) как есть, с их
-      оригинальным контент-адресным ``Content-ID`` ``<{hash}@history>``. Origin на частях
-      уже проставлен вызывающим (``enrich_fast``) — здесь только append+dedup.
+    * **дописывает в хвост** ``history_parts`` и ``system_parts`` (append+dedup по CID).
 
     Дедуп по контенту: повторный ``Content-ID`` (= идентичное тело, оригинал и relay-копия)
     не добавляется и попадает в ``skipped``; новые — в ``appended``. Никакой ``To:``-логики:
@@ -503,6 +515,8 @@ def splice_e_prev_with_history(
     replaced_ts = False
 
     for cid, part in _iter_relay_leaf_parts(e_prev):
+        if cid.family is EnrichPartId.SYSTEM:
+            continue
         if cid == rs:
             out.attach(_make_inline_text_part(EnrichPartId.RESPONSE_STATE, response_state_text))
             replaced_rs = True
@@ -524,6 +538,16 @@ def splice_e_prev_with_history(
     appended: list[EnrichContentId] = []
     skipped: list[EnrichContentId] = []
     for cid, part in history_parts:
+        if cid.is_core:
+            continue
+        if cid in seen:
+            skipped.append(cid)
+            continue
+        out.attach(part)
+        seen.add(cid)
+        appended.append(cid)
+
+    for cid, part in system_parts:
         if cid.is_core:
             continue
         if cid in seen:

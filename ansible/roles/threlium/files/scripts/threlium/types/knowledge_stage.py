@@ -85,11 +85,32 @@ class FormalReasonDerivedErrorText(_OptionalStripEmpty):
     """Доп. (не фатальная) ошибка построения entailed-дельты."""
 
 
+class FormalReasonOutcome(enum.StrEnum):
+    """Класс исхода ``formal_reason`` для FSM gate и ``<system>`` JSON."""
+
+    PASSED = "passed"
+    TECHNICAL_FAILED = "technical_failed"
+    SHACL_NEGATIVE = "shacl_negative"
+
+
+class FormalReasonResultPayload(msgspec.Struct, frozen=True):
+    """Исходящий machine payload ``formal_reason`` (``<system>`` на enrich_fast)."""
+
+    outcome: FormalReasonOutcome
+    error_kind: FormalReasonErrorKind
+    conforms: bool
+    violations: int
+    has_query_error: bool
+    has_derived_error: bool
+
+
 __all__ = [
     "FormalReasonDerivedErrorText",
     "FormalReasonDerivedTtlText",
     "FormalReasonErrorKind",
     "FormalReasonFatalErrorText",
+    "FormalReasonOutcome",
+    "FormalReasonResultPayload",
     "FormalReasonQueryErrorText",
     "FormalReasonQueryResultText",
     "FormalReasonReportText",

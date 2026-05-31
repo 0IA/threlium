@@ -1,0 +1,15 @@
+{#- LLM-facing text is English-only. formal_reason passed observation. -#}
+reasoning: {{ reasoning }}
+---
+conforms: {{ conforms }}
+violations: {{ violations }}
+{% if conforms and violations | int == 0 %}conforms=true means no targeted node violated the shapes. This is only a proof if your sh:targetClass/targetNode/targetSubjectsOf/targetObjectsOf actually matched nodes — confirm coverage yourself (e.g. add a query SELECT (COUNT(?n) AS ?c) WHERE { ?n a <YourTargetClass> } in the same call, or check the facts contain the targeted nodes). Mind prefixes and enable inference if you rely on subclass/equivalence.
+{% endif %}{% if return_derived_ignored %}NOTE: return_derived was ignored because inference is none — set inference to rdfs/owlrl/both to read entailed triples.
+{% endif %}{{ report_text }}
+{% if derived_ttl %}---
+derived_triples (inference delta):
+{{ derived_ttl }}
+{% endif %}{% if query_result %}---
+query_result:
+{{ query_result }}
+{% endif %}

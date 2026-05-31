@@ -18,6 +18,7 @@ from threlium.mime_reform import (
     extract_part_by_content_id,
     history_part_text,
     iter_history_parts,
+    part_origin_label,
 )
 
 from ._core import _OptionalStripEmpty, _RequiredNonEmpty
@@ -121,29 +122,6 @@ class ReasoningHistoryEntry(msgspec.Struct, frozen=True, kw_only=True):
     text: str
 
 
-def _origin_label(part: EmailMessage) -> str:
-    """Метка источника ``<history>``-части: local-part ``X-Threlium-Origin`` или ``?``."""
-    raw = part.get(_HDR.ORIGIN.value)
-    if raw and str(raw).strip():
-        return str(raw).strip().split("@", 1)[0]
-    return "?"
-
-
-def _budget_history(entries: list[ReasoningHistoryEntry], max_chars: int) -> list[ReasoningHistoryEntry]:
-    """Урезание стрима по суммарному телу с хвоста (новейшее остаётся)."""
-    if max_chars <= 0 or not entries:
-        return entries
-    kept: list[ReasoningHistoryEntry] = []
-    total = 0
-    for entry in reversed(entries):
-        if kept and total + len(entry.text) > max_chars:
-            break
-        kept.append(entry)
-        total += len(entry.text)
-    kept.reverse()
-    return kept
-
-
 def _extract_context_part_vo(
     vo_type: type[_OptionalStripEmpty],
     msg: EmailMessage,
@@ -181,8 +159,8 @@ class ReasoningEnrichContext(msgspec.Struct, frozen=True, kw_only=True):
             text = history_part_text(part).strip()
             if not text:
                 continue
-            entries.append(ReasoningHistoryEntry(origin=_origin_label(part), text=text))
-        history = tuple(_budget_history(entries, max_chars))
+            entries.append(ReasoningHistoryEntry(origin=part_origin_label(part), text=text))
+        history = tuple(entries)
         return cls(
             user_message=_extract_context_part_vo(
                 ReasoningUserMessageText, msg, EnrichPartId.USER_MESSAGE, max_chars

@@ -4,6 +4,9 @@ Formal reasoning over RDF: SHACL validation, optional RDFS/OWL inference (entail
 triples), and optional SPARQL query against the model's graph. Idempotent, safe,
 no HITL. Returns observation-note for the reasoning loop.
 """
+from __future__ import annotations
+
+import msgspec
 from email.message import EmailMessage
 
 from rdflib import Graph
@@ -11,6 +14,7 @@ from rdflib.namespace import RDF, SH
 from pyshacl import validate
 from pyshacl.errors import ConstraintLoadError, RuleLoadError, ShapeLoadError
 
+from threlium.formal_reason_gate import compute_formal_reason_outcome
 from threlium.fsm_emit import build_fsm_step_to_stage
 from threlium.knowledge_fsm import parse_formal_reason_payload
 from threlium.mime_reform import system_part_text
@@ -28,6 +32,8 @@ from threlium.types import (
     FormalReasonDerivedTtlText,
     FormalReasonErrorKind,
     FormalReasonFatalErrorText,
+    FormalReasonOutcome,
+    FormalReasonResultPayload,
     FormalReasonQueryErrorText,
     FormalReasonQueryResultText,
     FormalReasonReportText,
@@ -38,6 +44,18 @@ from threlium.types import (
 
 def _count_violations(results_graph: Graph) -> int:
     return sum(1 for _ in results_graph.subjects(RDF.type, SH.ValidationResult))
+
+
+def _observation_prompt_path(
+    outcome: FormalReasonOutcome, error_kind: FormalReasonErrorKind
+) -> PromptPath:
+    if outcome is FormalReasonOutcome.PASSED:
+        return PromptPath.FORMAL_REASON_OBSERVATION_PASSED
+    if outcome is FormalReasonOutcome.SHACL_NEGATIVE:
+        return PromptPath.FORMAL_REASON_OBSERVATION_SHACL_NEGATIVE
+    if error_kind is not FormalReasonErrorKind.NONE:
+        return PromptPath.FORMAL_REASON_OBSERVATION_FATAL
+    return PromptPath.FORMAL_REASON_OBSERVATION_SUPPLEMENTAL_ERROR
 
 
 def main(
@@ -156,8 +174,27 @@ def main(
 
     return_derived_ignored = bool(payload.return_derived) and inference_py is None
 
+    has_query_error = query_err_vo is not None
+    has_derived_error = derived_err_vo is not None
+    outcome = compute_formal_reason_outcome(
+        error_kind=error_kind,
+        conforms=conforms,
+        violations=violations,
+        has_query_error=has_query_error,
+        has_derived_error=has_derived_error,
+    )
+    result = FormalReasonResultPayload(
+        outcome=outcome,
+        error_kind=error_kind,
+        conforms=conforms,
+        violations=violations,
+        has_query_error=has_query_error,
+        has_derived_error=has_derived_error,
+    )
+    system_json = msgspec.json.encode(result).decode()
+
     observation = render_prompt(
-        PromptPath.FORMAL_REASON_OBSERVATION,
+        _observation_prompt_path(outcome, error_kind),
         reasoning=payload.reasoning,
         conforms=conforms,
         error_kind=error_kind.value,
@@ -186,5 +223,6 @@ def main(
         from_stage=stage,
         history=note,
         request_echo=request_payload,
+        system=system_json,
         settings=config,
     )

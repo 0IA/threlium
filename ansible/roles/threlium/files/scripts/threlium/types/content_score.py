@@ -6,7 +6,7 @@
 (recency/size). Wire — строка-число после strip; числовой доступ — метод-VO
 ``as_score()`` (граница типобезопасна, без голых ``float`` в стадиях).
 
-Прецедент: ``HopBudgetLine`` / ``ThreliumCapabilitiesBudgetLine`` (строковый wire +
+Прецедент: ``HopBudgetLine`` (строковый wire +
 доменные методы), ``IrtHashWire`` (кодек только внутри VO).
 """
 from __future__ import annotations
