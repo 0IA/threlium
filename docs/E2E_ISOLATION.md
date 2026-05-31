@@ -505,8 +505,10 @@ reasoning call: первый возвращает `tool_calls`, второй —
 | `room_send` (matrix)  | URL path (room_id)                                   |
 | `sendMessage` (tg)    | Request body (chat_id)                               |
 
+Запросы LightRAG к `/chat/completions` несут `"tools"` + `"tool_choice":"required"`; ответы стабов — `finish_reason: tool_calls`, аргументы в `tool_calls[].function.arguments` (delimiter/JSON/plain внутри JSON args). Изоляция по-прежнему: `hasContext` + granular `X-Threlium-Call-Site` (дополнительно в request можно `"contains": "\"tools\""`). Offline-проверка стабов: `python scripts/audit_lightrag_wiremock_stubs.py` (exit 0). Smoke сериализатора tool→delimiter: `.venv/bin/python scripts/verify_lightrag_tool_roundtrip.py`. Исключение: `079_chat_enrich_plan_lightrag` — `stop`+`content` (маршрут `ENRICH_PLAN`, не `build_llm_func`). Контракт типов и bridge — [`TYPES.md`](TYPES.md) § «LightRAG tool bridge».
+
 Гранулярные значения `X-Threlium-Call-Site` для LightRAG определяются в рантайме
-функцией `runners/lightrag._detect_lightrag_phase` по сигналам `llm_func`:
+функцией `threlium.types.lightrag_tool_phase.detect_lightrag_call_site_wire` по сигналам `llm_func`:
 `keyword_extraction`, `history_messages`, `system_prompt` — без инспекции
 prompt content. Стадия ``summarize_context`` выставляет ``summarize_context``
 явно в handler (как ``memory_query`` → ``lightrag_query``). Enum —

@@ -104,7 +104,7 @@ flowchart LR
 
 | Стадия | To: | echo | resp | sys | Роль |
 |---|---|:--:|:--:|:--:|---|
-| `ingress` | `enrich` (или `cli_resume`) | — | да¹ | да | Единая точка входа. Ход пользователя → `<history>` + `<system>`; HITL-ответ → `cli_resume` только `<system>` (yes/no — управляющий сигнал, ¹без history). |
+| `ingress` | `enrich` (или `cli_resume`) | — | да¹ | да | Единая точка входа. Ход пользователя → `<history>` + `<system>`; HITL-ответ → `cli_resume` только `<system>` (текст ответа для LLM-классификатора, ¹без history). |
 | `enrich` | `reasoning` / `summarize_context` | — | — | да² | → `reasoning`: **`<system>` НЕТ** (reasoning не читает payload, см. ниже) — собирает core-CID §4 + `<unified-mail-context>` из `<history>`-частей треда; своих `<history>` не создаёт. ²Только → `summarize_context` есть `<system>`. |
 | `enrich_fast` | `reasoning` | — | — | **релей** | Relay-сборщик дельты: `<history>` + `<system>` из окна (штампует `origin`); replace `<response-state>`/`<task-state>`. Старые `@system` из `E_prev` не копируются — только свежие из дельты. `reasoning` не кладёт их в LLM-промпт, но читает для FSM gate (`formal_reason`). |
 | `reasoning` | tool | **нет** | **нет** | да | Чистый `<system>`-эмиттер tool-call (команда адресату). История — забота callee. На ВХОДЕ сам `<system>` не читает. |
@@ -138,7 +138,7 @@ flowchart LR
 |---|---|:--:|:--:|:--:|---|
 | `cli_exec` | `enrich_fast` | —⁴ | да | да | Результат команды (observation: cmd_line+stdout/stderr/exit) → `<history>` (origin=cli_exec) + `<system>`. ⁴cmd_line уже в observation, отдельный echo избыточен. |
 | `cli_hitl_out` | `egress_router` | — | да | да | Вопрос пользователю: `<system>` = тело отправки, `<history>` = копия вопроса. |
-| `cli_resume` | `ingress` / `cli_exec` | — | нет | да | Возобновление после HITL-ответа; только `<system>`. |
+| `cli_resume` | `ingress` / `cli_exec` | — | нет | да | Возобновление после HITL: `<system>` = ответ пользователя; решение — sync LLM tool `confirm_cli_hitl` (score 0), не regex. |
 
 **Субагент-возврат / сжатие / терминальные.**
 

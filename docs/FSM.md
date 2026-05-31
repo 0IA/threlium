@@ -159,7 +159,7 @@ stateDiagram-v2
 | `subagent_intent` | Маркер начала фрейма субагента L+1: изолированный hop-budget, непрерывный `In-Reply-To`. |
 | `cli_intent` | Политика для CLI-намерения от `reasoning`: SANDBOX → `cli_exec`; PRIVILEGED + `privileged_hitl_enabled` → `cli_hitl_out`; PRIVILEGED без HITL → `cli_exec` (uid=0); route-collision / invalid → `enrich_fast`. |
 | `cli_hitl_out` | HITL-вопрос пользователю наружу через `egress_router` (`From: cli_hitl_out@localhost` — маркер HITL-происхождения для детекции в `ingress`). |
-| `cli_resume` | Приём ответа пользователя на HITL (детекция через IRT-обход до `From: cli_hitl_out@localhost` в notmuch); `Approve` → `cli_exec`, `Reject` / ошибки → `enrich_fast`. |
+| `cli_resume` | Приём ответа пользователя на HITL (IRT-обход до `From: cli_hitl_out@localhost`); LLM-классификатор (`LitellmRoutingSite.CLI_HITL_RESUME`, tool `confirm_cli_hitl`) → `cli_exec` при approve, иначе `enrich_fast`. |
 | `cli_exec` | Исполнение команды в transient `systemd-run --scope` (sandbox или privileged); observation → `enrich_fast@localhost`. |
 | `response_append` | Приём чанка ответа от reasoning, forward в `enrich_fast`. Content сохраняется в Maildir (durable). |
 | `response_edit` | Правка/удаление чанка по 0-based position; валидация через `collect_ops`; ошибка → `ingress`, ok → `enrich_fast`. |
