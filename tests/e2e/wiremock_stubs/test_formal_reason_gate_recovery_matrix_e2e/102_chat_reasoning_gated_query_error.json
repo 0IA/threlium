@@ -18,7 +18,24 @@
         "contains": "\"tools\""
       },
       {
+        "contains": "PARSE ERROR"
+      },
+      {
+        "contains": "FSM locked"
+      },
+      {
         "contains": "FORMAL REASON GATE"
+      },
+      {
+        "comment": "memory_query relay after first gate hop must remain in prompt",
+        "contains": "turtle_syntax.md SHACL gate recovery"
+      },
+      {
+        "comment": "unified-delta: first formal_reason tool-call reasoning preserved",
+        "contains": "e2e matrix: intentional invalid Turtle"
+      },
+      {
+        "contains": "<conversation_delta>"
       },
       {
         "contains": "E2E-FORMAL-REASON-GATE-MATRIX-BODY"

@@ -2,6 +2,9 @@
 
 Один inject, фазовый WireMock State (``stub-formal-reason-gate-matrix-01``).
 Стабы: ``wiremock_stubs/test_formal_reason_gate_recovery_matrix_e2e/``.
+
+Post-assert: несколько циклов gate ON; ``enrich_fast`` не затирает прошлые
+observation/tool-call контексты ``formal_reason`` (PARSE + QUERY + memory_query relay).
 """
 from __future__ import annotations
 
@@ -12,9 +15,12 @@ import pytest
 from threlium.types import FsmStage
 
 from .formal_reason_assertions import (
+    assert_chat_request_contains_all,
+    assert_gated_formal_reason_history_accumulated,
     assert_gated_reasoning_calls,
     assert_gated_reasoning_includes_memory_query,
     assert_journal_contains,
+    assert_memory_query_tool_served,
     assert_ungated_reasoning_has_finalize,
 )
 from .helpers import (
@@ -32,6 +38,13 @@ from .wiremock_client import (
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_GATE_MATRIX_BODY = "E2E-FORMAL-REASON-GATE-MATRIX-BODY"
+# Маркеры reasoning/tool-call из matrix-стабов (должны дойти до позднего reasoning через enrich_fast).
+E2E_MATRIX_FR_FATAL_REASONING = "e2e matrix: intentional invalid Turtle"
+E2E_MATRIX_FR_QUERY_ERR_REASONING = (
+    "e2e matrix: valid Turtle but broken SPARQL"
+)
+E2E_MATRIX_MEMORY_QUERY_TEXT = "turtle_syntax.md SHACL gate recovery"
+E2E_MATRIX_MQ_TOOL_CALL_ID = "call_e2e_memory_query_matrix_gate"
 
 FORMAL_REASON_GATE_MATRIX_SPEC = MailflowScenarioSpec(
     label="formal_reason_gate_recovery_matrix",
@@ -111,6 +124,53 @@ def test_formal_reason_gate_recovery_matrix_full_pipeline(
         _assert_at_least_two_gated_reasoning_calls(wm_base, stub_tag)
         assert_gated_reasoning_calls(wm_base, stub_tag)
         assert_gated_reasoning_includes_memory_query(wm_base, stub_tag)
+        assert_memory_query_tool_served(
+            wm_base,
+            stub_tag,
+            tool_call_id=E2E_MATRIX_MQ_TOOL_CALL_ID,
+        )
+        assert_journal_contains(
+            wm_base, stub_tag, E2E_MATRIX_MEMORY_QUERY_TEXT
+        )
+        # После memory_query: parse fatal + MQ relay видны перед 2-м formal_reason под gate.
+        assert_chat_request_contains_all(
+            wm_base,
+            stub_tag,
+            (
+                "PARSE ERROR",
+                "FSM locked",
+                "FORMAL REASON GATE",
+                E2E_MATRIX_MEMORY_QUERY_TEXT,
+                E2E_MATRIX_FR_FATAL_REASONING,
+                "<conversation_delta>",
+            ),
+            gate_only=True,
+        )
+        # После 2-го formal_reason (QUERY ERROR): оба hop'а formal_reason + MQ в одном промпте.
+        assert_gated_formal_reason_history_accumulated(
+            wm_base,
+            stub_tag,
+            prior_formal_reason_markers=(
+                E2E_MATRIX_FR_FATAL_REASONING,
+                E2E_MATRIX_FR_QUERY_ERR_REASONING,
+            ),
+            memory_query_marker=E2E_MATRIX_MEMORY_QUERY_TEXT,
+        )
+        # Финальный ungated reasoning: весь накопленный контур ошибок + успешный query_result.
+        assert_chat_request_contains_all(
+            wm_base,
+            stub_tag,
+            (
+                "PARSE ERROR",
+                "QUERY ERROR",
+                E2E_MATRIX_MEMORY_QUERY_TEXT,
+                E2E_MATRIX_FR_FATAL_REASONING,
+                E2E_MATRIX_FR_QUERY_ERR_REASONING,
+                "query_result:",
+                "<conversation_delta>",
+            ),
+            gate_only=False,
+        )
         assert_ungated_reasoning_has_finalize(
             wm_base, stub_tag, needle="query_result:"
         )

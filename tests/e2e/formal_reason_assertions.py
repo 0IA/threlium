@@ -183,6 +183,96 @@ def assert_journal_contains(
     )
 
 
+def _gated_reasoning_chat_bodies(wm_base: str, stub_tag: str) -> list[str]:
+    matches = find_wiremock_requests_by_body_contains(
+        wm_base, GATE_NOTICE, stub_tag=stub_tag
+    )
+    return [
+        _journal_request_body(e)
+        for e in matches
+        if _is_chat_completions_entry(e)
+    ]
+
+
+def assert_chat_request_contains_all(
+    wm_base: str,
+    stub_tag: str,
+    needles: tuple[str, ...],
+    *,
+    gate_only: bool = False,
+) -> None:
+    """At least one chat/completions **request** body contains every ``needle``."""
+    if gate_only:
+        bodies = _gated_reasoning_chat_bodies(wm_base, stub_tag)
+    else:
+        bodies = [
+            _journal_request_body(e)
+            for e in fsm_reasoning_chat_entries(wm_base, stub_tag)
+        ]
+    for body in bodies:
+        if all(needle in body for needle in needles):
+            return
+    scope = "gated reasoning" if gate_only else "reasoning"
+    raise AssertionError(
+        f"No {scope} chat/completions request contains all of {needles!r} "
+        f"(stub_tag={stub_tag!r})"
+    )
+
+
+def assert_gated_formal_reason_history_accumulated(
+    wm_base: str,
+    stub_tag: str,
+    *,
+    prior_formal_reason_markers: tuple[str, ...],
+    error_observation_markers: tuple[str, ...] = (
+        "PARSE ERROR",
+        "QUERY ERROR",
+        "FSM locked",
+    ),
+    memory_query_marker: str | None = None,
+    require_conversation_delta: bool = True,
+) -> None:
+    """Gated LLM prompt carries prior formal_reason tool I/O and error observations.
+
+    Verifies enrich_fast relay: multiple ``formal_reason`` hops leave both fatal/supplemental
+    observations and earlier tool-call context in one later reasoning request under gate.
+    """
+    needles: list[str] = list(error_observation_markers)
+    needles.extend(prior_formal_reason_markers)
+    if memory_query_marker:
+        needles.append(memory_query_marker)
+    if require_conversation_delta:
+        needles.append("<conversation_delta>")
+    assert_chat_request_contains_all(
+        wm_base, stub_tag, tuple(needles), gate_only=True
+    )
+
+
+def assert_memory_query_tool_served(
+    wm_base: str,
+    stub_tag: str,
+    *,
+    tool_call_id: str,
+    tool_name: str = FsmStage.MEMORY_QUERY.value,
+) -> None:
+    """WireMock served a reasoning response with ``memory_query`` tool_calls (FSM executed)."""
+    want = f'"name": "{tool_name}"'
+    for entry in journal_entries_for_stub_tag(wm_base, stub_tag=stub_tag):
+        if not _is_chat_completions_entry(entry):
+            continue
+        resp = entry.get("response")
+        if not isinstance(resp, dict):
+            continue
+        body = resp.get("body")
+        text = body if isinstance(body, str) else ""
+        if tool_call_id in text and want in text:
+            return
+    raise AssertionError(
+        f"No journal entry served {tool_name!r} tool_call {tool_call_id!r} "
+        f"(stub_tag={stub_tag!r})"
+    )
+
+
 def assert_violation_reasoning_without_gate(
     wm_base: str, stub_tag: str, *, violation_needle: str = "conforms: False"
 ) -> None:

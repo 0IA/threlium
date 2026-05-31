@@ -139,4 +139,4 @@ E2e-покрытие (журнал WireMock, `tests/e2e/formal_reason_assertions
 | `passed` + `memory_query` без gate | `test_formal_reason_chain_e2e.py` |
 | `passed` + query, gate OFF | `test_formal_reason_query_e2e.py` |
 | inference success, gate OFF | `test_formal_reason_inference_e2e.py` |
-| parse fatal → gate → `memory_query` под gate → QUERY ERROR → recovery → finalize | `test_formal_reason_gate_recovery_matrix_e2e.py` |
+| parse fatal → gate → `memory_query` под gate → QUERY ERROR → recovery → finalize; накопление observation/tool-call через enrich_fast | `test_formal_reason_gate_recovery_matrix_e2e.py` |
