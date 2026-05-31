@@ -1,0 +1,93 @@
+---
+# Acceptance: user-scope systemd sandbox (ProtectSystem=strict) for cli_exec.
+# Runs after linger; needs systemd >= 248 and loginctl enable-linger for threlium_user.
+
+- name: Assert systemd version supports sandbox properties
+  ansible.builtin.command:
+    argv: [systemctl, --version]
+  register: threlium_systemd_version
+  changed_when: false
+  failed_when: threlium_systemd_version.rc != 0
+  tags: [deploy]
+
+- name: Parse systemd major version
+  ansible.builtin.set_fact:
+    threlium_systemd_major: "{{ threlium_systemd_version.stdout_lines[0].split()[1] | int }}"
+  tags: [deploy]
+
+- name: Require systemd >= 248 for cli sandbox
+  ansible.builtin.assert:
+    that:
+      - threlium_systemd_major | int >= 248
+    fail_msg: "systemd {{ threlium_systemd_major }} < 248 — cli sandbox properties unavailable"
+  tags: [deploy]
+
+- name: Acceptance — sandbox allows read under ProtectSystem=strict
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --user
+      - --wait
+      - --pipe
+      - --property=ProtectSystem=strict
+      - --property=ProtectHome=read-only
+      - --property=ReadWritePaths=/tmp
+      - --
+      - /bin/ls
+      - /etc
+  become: true
+  become_user: "{{ threlium_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+  register: threlium_cli_sandbox_ls
+  changed_when: false
+  failed_when: threlium_cli_sandbox_ls.rc != 0
+  tags: [deploy]
+
+- name: Acceptance — sandbox blocks write under ProtectSystem=strict
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --user
+      - --wait
+      - --pipe
+      - --property=ProtectSystem=strict
+      - --property=ProtectHome=read-only
+      - --property=ReadWritePaths=/tmp
+      - --
+      - /bin/touch
+      - /etc/threlium-cli-sandbox-probe
+  become: true
+  become_user: "{{ threlium_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+  register: threlium_cli_sandbox_touch
+  changed_when: false
+  failed_when: threlium_cli_sandbox_touch.rc == 0
+  tags: [deploy]
+
+- name: Acceptance — sandbox blocks network (PrivateNetwork)
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --user
+      - --wait
+      - --pipe
+      - --property=ProtectSystem=strict
+      - --property=ProtectHome=read-only
+      - --property=ReadWritePaths=/tmp
+      - --property=PrivateNetwork=yes
+      - --
+      - /usr/bin/curl
+      - -fsS
+      - --max-time
+      - "3"
+      - http://127.0.0.1/
+  become: true
+  become_user: "{{ threlium_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ threlium_user_uid }}"
+  register: threlium_cli_sandbox_curl
+  changed_when: false
+  failed_when: threlium_cli_sandbox_curl.rc == 0
+  tags: [deploy]

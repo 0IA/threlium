@@ -170,6 +170,10 @@
       when: threlium_polkit_agent_systemd_enabled | default(false) | bool
       tags: [deploy]
 
+    - name: CLI sandbox acceptance (user scope ProtectSystem=strict)
+      ansible.builtin.import_tasks: tasks/cli_sandbox_acceptance.yml
+      tags: [deploy]
+
     # Cockpit (и любой PAM-login) использует системного пользователя threlium_user + пароль из shadow.
     - name: Set agent UNIX password for PAM login (Cockpit; optional)
       ansible.builtin.user:
