@@ -1,30 +1,8 @@
 """E2E цепочки task-ledger (anti-drift) на **живом** стеке.
 
-Сценарий (один пользовательский ход, durable план задач):
-
-1. ``enrich`` сеет 2 подзадачи через ``enrich_task_plan`` (стаб 081 → ``[A, B]``);
-2. reasoning #1 → ``tasks_upsert``: add подзадачи ``C`` (pending) + ``A`` → ``in_progress``;
-3. reasoning #2 → ``response_finalize`` — **жёсткий gate** в Python видит открытую работу
-   (``A`` in_progress, ``B`` / ``C`` pending) и **отбивает** в ``ingress`` (``task_incomplete``);
-4. полный re-enrich (``ingress → enrich → reasoning``) — ledger переживает re-seed
-   (ensure-exists: ``A`` остаётся ``in_progress``, статусы не сбрасываются);
-5. reasoning #3 → ``tasks_upsert``: batch ``A`` / ``B`` → ``done``, ``C`` → ``cancelled``;
-6. reasoning #4 → ``response_finalize`` — gate проходит (есть ``done``, всё терминальное) →
-   ``egress_router`` → внешний ответ.
-
-Покрытие:
-- content-addressed identity (``content_id`` подзадач в стабах = ``hash(normalize(text))``);
-- add новых подзадач + batch смена статусов в одном ``tasks_upsert``;
-- монотонная решётка + ensure-exists при re-enrich (нет регресса ``done``/``in_progress``);
-- жёсткий gate ``response_finalize`` (pending/in_progress блокируют отправку);
-- ``cancelled`` при наличии ``done`` не мешает финализации.
-
-Фазовый автомат WireMock State Extension (контекст ``stub-task-ledger-chain-01::<root>``):
-``active`` → ``phase_upsert_start_done`` → ``phase_finalize_blocked_done`` →
-``phase_upsert_close_done``.
-
-**Подготовка (вне модуля):** shared compose + baked SUT. Синхронизация кода/шаблонов —
-``pytest -n0 tests/e2e/wipe_sync.py`` (тег ``refresh``).
+.. deprecated::
+   Сценарии перенесены в :mod:`tests.e2e.test_task_ledger_e2e` (parametrize).
+   Этот модуль сохраняет chain-only asserts (enrich subtasks in LightRAG query).
 """
 from __future__ import annotations
 
@@ -33,47 +11,61 @@ from pathlib import Path
 import pytest
 
 from tests.e2e.log import clip_log_body, log
-from threlium.types import FsmStage
 
 from .helpers import (
-    MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
+    discover_runtime,
     dump_failure_artifacts,
     mailflow_inject_and_wait,
     REPO_ROOT,
 )
+from .test_task_ledger_e2e import TASK_LEDGER_SPECS
+from .wiremock_client import (
+    find_wiremock_requests_by_body_contains,
+    wiremock_public_base,
+)
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_TASK_LEDGER_BODY_MARKER = "E2E-TASK-LEDGER-CHAIN-BODY"
+E2E_TASK_LEDGER_SEED_SUBTASK = "Locate the task ledger handler in states"
 
-TASK_LEDGER_CHAIN_SPEC = MailflowScenarioSpec(
-    label="task_ledger_chain",
-    raw_id_prefix="e2e-task-ledger-chain-",
-    stub_dir=_WIREMOCK_STUBS_ROOT / "test_task_ledger_chain_e2e",
-    stub_tag="stub-task-ledger-chain-01",
-    body_head=f"{E2E_TASK_LEDGER_BODY_MARKER}\ne2e task ledger chain anti-drift test body",
-    min_chat_completion_posts=4,
-    min_embedding_posts=1,
-    min_rerank_posts=0,
-    expect_notmuch_stage_folders=(
-        FsmStage.INGRESS.value,
-        FsmStage.ENRICH.value,
-        FsmStage.REASONING.value,
-        FsmStage.TASKS_UPSERT.value,
-        FsmStage.ENRICH_FAST.value,
-        FsmStage.RESPONSE_FINALIZE.value,
-        FsmStage.EGRESS_ROUTER.value,
-        FsmStage.EGRESS_EMAIL.value,
-        FsmStage.ARCHIVE.value,
-    ),
-    reply_body_needle="e2e-task-ledger-verified",
-)
+TASK_LEDGER_CHAIN_SPEC = next(s for s in TASK_LEDGER_SPECS if s.label == "task_ledger_chain")
+TASK_LEDGER_BYPASS_SPEC = next(s for s in TASK_LEDGER_SPECS if s.label == "task_ledger_bypass")
+
+
+def _assert_enrich_aquery_includes_seed_subtasks(project: str, stub_tag: str) -> None:
+    """Enrich LightRAG aquery must include seeded subtask texts from enrich_task_plan."""
+    rt = discover_runtime(project, repo_root=REPO_ROOT)
+    wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+    matches = find_wiremock_requests_by_body_contains(
+        wm_base, E2E_TASK_LEDGER_SEED_SUBTASK, stub_tag=stub_tag
+    )
+    embed_or_chat = [
+        e
+        for e in matches
+        if any(
+            tok in (e.get("request", {}).get("url") or "")
+            for tok in ("/embeddings", "/chat/completions")
+        )
+    ]
+    assert embed_or_chat, (
+        f"expected enrich aquery round-trip to include seed subtask "
+        f"{E2E_TASK_LEDGER_SEED_SUBTASK!r} in WireMock journal"
+    )
+    log.info("task_ledger_enrich_subtasks_in_query_verified", hits=len(embed_or_chat))
 
 
 @pytest.fixture()
 def task_ledger_chain_processed_stack(live_e2e_stack_ready: str) -> object:
     """WireMock (task_ledger_chain) -> inject -> \\Seen -> FSM activity (live stack)."""
     with mailflow_inject_and_wait(TASK_LEDGER_CHAIN_SPEC, live_e2e_stack_ready) as ids:
+        yield ids
+
+
+@pytest.fixture()
+def task_ledger_bypass_processed_stack(live_e2e_stack_ready: str) -> object:
+    """WireMock (task_ledger_bypass) -> inject -> \\Seen -> FSM activity (live stack)."""
+    with mailflow_inject_and_wait(TASK_LEDGER_BYPASS_SPEC, live_e2e_stack_ready) as ids:
         yield ids
 
 
@@ -90,6 +82,34 @@ def test_task_ledger_chain_full_pipeline(
     try:
         assert_full_mailflow_pipeline(
             TASK_LEDGER_CHAIN_SPEC,
+            project=project,
+            raw_id=raw_id,
+            nm_inner=nm_inner,
+            stub_tag=stub_tag,
+            correlation_key=correlation_key,
+        )
+        _assert_enrich_aquery_includes_seed_subtasks(project, stub_tag)
+    except Exception:
+        log.debug(
+            "failure_artifacts",
+            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+        )
+        raise
+
+
+@pytest.mark.e2e
+@pytest.mark.e2e_live
+@pytest.mark.mailflow
+def test_task_ledger_bypass_blocker_full_pipeline(
+    task_ledger_bypass_processed_stack: tuple[str, str, str, str, str, str],
+) -> None:
+    """Gate bypass: open subtask B + blockers + allow_finalize_with_blocker → egress."""
+    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
+        task_ledger_bypass_processed_stack
+    )
+    try:
+        assert_full_mailflow_pipeline(
+            TASK_LEDGER_BYPASS_SPEC,
             project=project,
             raw_id=raw_id,
             nm_inner=nm_inner,

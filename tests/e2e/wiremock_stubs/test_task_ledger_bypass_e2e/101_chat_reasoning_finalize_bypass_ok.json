@@ -1,0 +1,67 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Call-Site": {
+        "equalTo": "fsm"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "<envelope>"
+      },
+      {
+        "contains": "\"tools\""
+      },
+      {
+        "contains": "E2E-TASK-LEDGER-BYPASS-BODY"
+      },
+      {
+        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
+      }
+    ],
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-task-ledger-bypass-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasProperty": "phase_bypass_upsert_done"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-e2e-task-ledger-bypass-finalize",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_e2e_finalize_bypass_ok",
+                "type": "function",
+                "function": {
+                  "name": "response_finalize",
+                  "arguments": "{\"reasoning\": \"e2e: finalize with open B allowed via allow_finalize_with_blocker\", \"subject\": \"Re: e2e reply\", \"verification_summary\": \"e2e: bypass gate — A done, B blocked but finalize permitted\", \"content\": \"e2e-task-ledger-bypass-verified\"}"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
