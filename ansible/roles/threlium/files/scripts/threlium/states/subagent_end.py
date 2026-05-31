@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """subagent_end@localhost → ingress@localhost: маркер завершения субагента.
 
-Копирует hop/cap 1-в-1 с предка перед соответствующим subagent_intent
+Копирует hop 1-в-1 с предка перед соответствующим subagent_intent
 (обычно enrich/ingress родителя до делегирования). Стоимость работы субагента
 не вычитается: у субагента был изолированный бюджет, родитель «на паузе».
 """
@@ -14,7 +14,7 @@ from threlium.fsm_emit import (
 )
 from threlium.irt_subagent_classifier import (
     find_matching_subagent_intent_ancestor,
-    hop_cap_from_intent_parent,
+    hop_from_intent_parent,
 )
 from threlium.logutil import logger
 from threlium.types import (
@@ -38,17 +38,14 @@ def main(
         )
 
     ancestor = find_matching_subagent_intent_ancestor(inner)
-    hop, cap = hop_cap_from_intent_parent(ancestor)
+    hop = hop_from_intent_parent(ancestor)
 
     irt = irt_wire_from_incoming_message_id(msg)
-    patch: dict[MailHeaderName, object] = {
-        MailHeaderName.HOP_BUDGET: hop,
-        MailHeaderName.CAPABILITIES: cap,
-    }
+    patch: dict[MailHeaderName, object] = {MailHeaderName.HOP_BUDGET: hop}
     if irt is not None and irt.value.strip():
         patch[MailHeaderName.IN_REPLY_TO] = irt
 
-    log.info("transition_to_ingress", hop=hop.value, cap=cap.value, message_id=mid_w.value if mid_w else None)
+    log.info("transition_to_ingress", hop=hop.value, message_id=mid_w.value if mid_w else None)
 
     return emit_transition_preserving_payload(
         msg,

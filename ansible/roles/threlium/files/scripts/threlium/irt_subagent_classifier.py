@@ -15,7 +15,6 @@ from threlium.types import (
     MailHeaderName,
     NotmuchMessageIdInner,
     RfcMessageIdWire,
-    ThreliumCapabilitiesBudgetLine,
 )
 
 
@@ -54,14 +53,9 @@ def classify_subagent_depth_from_email(msg: EmailMessage) -> SubagentDepthResult
 
 @dataclass(frozen=True)
 class SubagentIntentAncestorHeaders:
-    """Hop/Cap предка ``subagent_intent``, снятые и распарсенные внутри DB-сеанса.
-
-    Не хранит ``notmuch2.Message``: объект недействителен после выхода из
-    :func:`threlium.nm.notmuch_database`.
-    """
+    """Hop предка ``subagent_intent``, снятый и распарсенный внутри DB-сеанса."""
 
     hop: HopBudgetLine
-    cap: ThreliumCapabilitiesBudgetLine
 
 
 def find_matching_subagent_intent_ancestor(
@@ -69,7 +63,7 @@ def find_matching_subagent_intent_ancestor(
 ) -> SubagentIntentAncestorHeaders:
     """Найти ближайший незакрытый ``subagent_intent`` по IRT от ``start_inner``.
 
-    Возвращает hop/cap с предка непосредственно перед intent в цепочке
+    Возвращает hop с предка непосредственно перед intent в цепочке
     (обычно enrich/ingress родителя до делегирования), уже как VO.
     """
     depth = 0
@@ -85,22 +79,20 @@ def find_matching_subagent_intent_ancestor(
                     raise RuntimeError(
                         "FSM-инвариант: subagent_intent без In-Reply-To предка"
                     )
-                return _parent_hop_cap_headers(parent_inner)
+                return _parent_hop_headers(parent_inner)
     raise RuntimeError(
         "FSM-инвариант: не найден незакрытый subagent_intent "
         f"в IRT-цепочке от {start_inner.as_angle_bracket_header()}"
     )
 
 
-def hop_cap_from_intent_parent(
-    ancestor: SubagentIntentAncestorHeaders,
-) -> tuple[HopBudgetLine, ThreliumCapabilitiesBudgetLine]:
-    """Hop/Cap 1-в-1 с предка перед subagent_intent (§3 плана)."""
-    return ancestor.hop, ancestor.cap
+def hop_from_intent_parent(ancestor: SubagentIntentAncestorHeaders) -> HopBudgetLine:
+    """Hop 1-в-1 с предка перед subagent_intent."""
+    return ancestor.hop
 
 
-def _parent_hop_cap_headers(inner: NotmuchMessageIdInner) -> SubagentIntentAncestorHeaders:
-    """Снять hop/cap с письма ``inner`` под отдельным read-сеансом (без утечки Message)."""
+def _parent_hop_headers(inner: NotmuchMessageIdInner) -> SubagentIntentAncestorHeaders:
+    """Снять hop с письма ``inner`` под отдельным read-сеансом."""
     with nm.notmuch_database(write=False) as db:
         msg = nm.first_notmuch_message_for_inner_id(db, inner)
         if msg is None:
@@ -109,7 +101,4 @@ def _parent_hop_cap_headers(inner: NotmuchMessageIdInner) -> SubagentIntentAnces
                 f"(Message-ID={inner.as_angle_bracket_header()})"
             )
         hop = HopBudgetLine.parse(nm.header_field_optional(msg, MailHeaderName.HOP_BUDGET))
-        cap = ThreliumCapabilitiesBudgetLine.parse(
-            nm.header_field_optional(msg, MailHeaderName.CAPABILITIES)
-        )
-        return SubagentIntentAncestorHeaders(hop=hop, cap=cap)
+        return SubagentIntentAncestorHeaders(hop=hop)

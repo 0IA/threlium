@@ -706,36 +706,21 @@ class CliSettings(BaseModel):
         description="CPUQuota для песочницы. Пример: 50%, 100%, infinity.",
     )
     exec_tasks_max: int = Field(default=16, ge=1, description="Максимум параллельных cli-задач.")
-    allowlist: str = Field(
-        default="ls,cat,pwd,echo,true,head,tail,wc,find,rg,grep,git,python3,test",
-        min_length=1,
-        description="Regex по имени бинаря (без пути), через запятую; fullmatch. Пример: ls|cat или .*",
+    privileged_hitl_enabled: bool = Field(
+        default=True,
+        description=(
+            "HITL для cli_intent с privileged: true (cli_hitl_out → cli_resume). "
+            "false — сразу cli_exec в system scope."
+        ),
     )
-    deny_patterns: str = Field(
-        default="",
-        description="Подстроки argv через запятую для запрета (дополнительная политика).",
+    sandbox_private_network: bool = Field(
+        default=True,
+        description="PrivateNetwork=yes в user-scope sandbox (блокирует сеть в sandbox).",
     )
-    system_scope_enabled: bool = Field(
-        default=False,
-        description="Использовать system systemd-run (--wait --pipe --uid=0) при совпадении cap.",
+    sandbox_read_write_paths: str = Field(
+        default="/tmp",
+        description="ReadWritePaths для sandbox (через запятую).",
     )
-    system_scope_cap_names: str = Field(
-        default="privileged",
-        description="Вершины X-Threlium-Capabilities (через запятую) для system scope.",
-    )
-
-    @field_validator("allowlist", mode="after")
-    @classmethod
-    def _allowlist_regexes_compile(cls, v: str) -> str:
-        for part in v.split(","):
-            part = part.strip()
-            if not part:
-                continue
-            try:
-                re.compile(part)
-            except re.error as e:
-                raise ValueError(f"cli.allowlist: невалидный regex {part!r}: {e}") from e
-        return v
 
     @field_validator("exec_memory_max", mode="after")
     @classmethod
@@ -788,16 +773,6 @@ class HopSettings(BaseModel):
 
     budget_root: int = Field(default=256, ge=1, description="Максимум hop FSM для root-агента.")
     budget_sub: int = Field(default=256, ge=1, description="Максимум hop для subagent-веток.")
-
-
-class CapSettings(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    root: str = Field(
-        default="",
-        description="Необязательная capability-метка root (заголовок X-Threlium-Capabilities); пусто — не задана.",
-    )
-    sub: str = Field(default="", description="Capability-метка для subagent; пусто — не задана.")
 
 
 class EgressSettings(BaseModel):
@@ -887,7 +862,6 @@ class ThreliumSettings(BaseSettings):
     knowledge: KnowledgeSettings = Field(default_factory=KnowledgeSettings)
     cli: CliSettings = Field(default_factory=CliSettings)
     hop: HopSettings = Field(default_factory=HopSettings)
-    cap: CapSettings = Field(default_factory=CapSettings)
     egress: EgressSettings = Field(default_factory=EgressSettings)
     e2e: E2eSettings = Field(default_factory=E2eSettings)
     msmtp: MsmtpSettings = Field(default_factory=MsmtpSettings)
@@ -914,7 +888,6 @@ class ThreliumSettings(BaseSettings):
         "knowledge",
         "cli",
         "hop",
-        "cap",
         "egress",
         "e2e",
         "msmtp",
@@ -922,7 +895,7 @@ class ThreliumSettings(BaseSettings):
     )
     @classmethod
     def _top_nested_section_not_null(cls, v: Any) -> Any:
-        """Секция YAML вида ``cap:`` без полей парсится как ``null`` — подставляем пустой mapping."""
+        """Секция YAML без полей парсится как ``null`` — подставляем пустой mapping."""
         return {} if v is None else v
 
     @classmethod

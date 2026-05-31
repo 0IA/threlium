@@ -189,7 +189,10 @@ threlium_required_prompts:
   - cli_hitl_out/unparsable.j2
   - cli_hitl_out/subject.j2
   - cli_exec/observation.j2
-  - formal_reason/observation.j2
+  - formal_reason/observation_passed.j2
+  - formal_reason/observation_fatal.j2
+  - formal_reason/observation_supplemental_error.j2
+  - formal_reason/observation_shacl_negative.j2
   - memory_query/observation.j2
   - egress/self_archive_subject.j2
   - egress/self_archive_body.j2
@@ -198,6 +201,7 @@ threlium_required_prompts:
   - reasoning/system.j2
   - reasoning/user.j2
   - reasoning/budget_exhausted.j2
+  - reasoning/formal_reason_gate.j2
   - reasoning/egress_router/tool_spec.j2
   - reasoning/egress_router/email_body.j2
   - reasoning/egress_router/email_subject.j2

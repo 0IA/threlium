@@ -21,7 +21,6 @@ from threlium.types import (
 
 _SHELL_OP_TOKENS = frozenset({"&&", "||", ";", "|"})
 _SHELL_BINARIES = frozenset({"sh", "bash"})
-_CHAIN_SPLIT_RE = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
 
 
 def parse_json_loose(text: str) -> object:
@@ -33,7 +32,7 @@ def parse_json_loose(text: str) -> object:
 
 
 def parse_cli_intent_payload(text: str) -> CliIntentPayload | None:
-    """Ожидается {\"cli\": {\"argv\": [str, ...], \"cwd\": str?}}."""
+    """Ожидается {\"cli\": {\"argv\": [str, ...], \"cwd\"?, \"privileged\"?}}."""
     obj = parse_json_loose(text)
     if not isinstance(obj, dict):
         return None
@@ -54,9 +53,14 @@ def parse_cli_intent_payload(text: str) -> CliIntentPayload | None:
         cwd_norm = t if t else None
     else:
         return None
+    priv_raw = cli.get("privileged", False)
+    if isinstance(priv_raw, bool):
+        privileged = priv_raw
+    else:
+        return None
     try:
         return msgspec.convert(
-            {"argv": argv, "cwd": cwd_norm},
+            {"argv": argv, "cwd": cwd_norm, "privileged": privileged},
             type=CliIntentPayload,
         )
     except msgspec.ValidationError:
@@ -64,7 +68,7 @@ def parse_cli_intent_payload(text: str) -> CliIntentPayload | None:
 
 
 def cli_payload_as_json(cli: CliIntentPayload) -> str:
-    inner: dict[str, object] = {"argv": cli.argv}
+    inner: dict[str, object] = {"argv": cli.argv, "privileged": cli.privileged}
     if cli.cwd:
         inner["cwd"] = cli.cwd
     return json.dumps({"cli": inner}, ensure_ascii=False)
@@ -115,133 +119,36 @@ def resolve_cli_exec_argv(argv: list[str]) -> list[str]:
     return list(argv)
 
 
-def _deny_substrings(settings: ThreliumSettings) -> tuple[str, ...]:
-    """Подстроки, запрещённые в командной строке (subshell / command substitution).
+def cli_argv_route_collision(argv: list[str]) -> FsmStage | None:
+    """Имя FSM-маршрута в позиции ``argv[0]`` → коллизия (не ``sh -c`` / цепочка).
 
-    Цепочки ``&&``, ``;``, ``|`` разрешены; блокируются ``$(``, backticks и переводы строк.
-    Дополнительные паттерны — ``settings.cli.deny_patterns`` (через запятую).
+    Reasoning-маршруты — tools, не CLI-бинари. ``rg memory_query …`` не ловится.
     """
-    raw = settings.cli.deny_patterns.strip()
-    if raw:
-        return tuple(s.strip() for s in raw.split(",") if s.strip())
-    return ("`", "$(", "${", "\n", "\r")
-
-
-_ALLOWLIST_BROAD_PROBE = "threlium-cli-allowlist-broad-probe"
-
-
-def _allowlist_patterns(settings: ThreliumSettings) -> tuple[re.Pattern[str], ...]:
-    """Сегменты ``cli.allowlist`` через запятую — regex (``fullmatch`` по basename бинаря)."""
-    out: list[re.Pattern[str]] = []
-    for part in settings.cli.allowlist.split(","):
-        part = part.strip()
-        if part:
-            out.append(re.compile(part, re.IGNORECASE))
-    return tuple(out)
-
-
-def _basename_allowed(basename: str, settings: ThreliumSettings) -> bool:
-    name = os.path.basename(basename.strip() or " ").lower()
-    if not name:
-        return False
-    return any(p.fullmatch(name) for p in _allowlist_patterns(settings))
-
-
-def _allowlist_is_broad(settings: ThreliumSettings) -> bool:
-    """Широкий allowlist (напр. ``.*``) — разрешает любой бинарь; route-collision для FSM-имён."""
-    return _basename_allowed(_ALLOWLIST_BROAD_PROBE, settings)
-
-
-def _binaries_in_shell_line(line: str) -> list[str]:
-    """Имена бинарников в каждом сегменте shell-цепочки."""
-    out: list[str] = []
-    for part in _CHAIN_SPLIT_RE.split(line.strip()):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            tokens = shlex.split(part)
-        except ValueError:
-            return []
-        if tokens:
-            out.append(os.path.basename(tokens[0]).lower())
-    return out
-
-
-def _policy_for_shell_line(line: str, settings: ThreliumSettings) -> CliIntentPolicy:
-    for sub in _deny_substrings(settings):
-        if sub in line:
-            return CliIntentPolicy.DENY
-    bins = _binaries_in_shell_line(line)
-    if not bins:
-        return CliIntentPolicy.HITL
-    if all(_basename_allowed(b, settings) for b in bins):
-        return CliIntentPolicy.ALLOW
-    return CliIntentPolicy.HITL
-
-
-def cli_argv_route_collision(
-    argv: list[str], settings: ThreliumSettings
-) -> FsmStage | None:
-    """Имя FSM-маршрута в позиции бинаря (а не аргумента) → коллизия.
-
-    Имена reasoning-маршрутов (``memory_query``, ``reflect``, …) — это tools,
-    а не CLI-бинари. Если ``argv[0]`` (или первый бинарь сегмента цепочки)
-    совпадает с именем маршрута и НЕ входит в allowlist (явное разрешение
-    оператора имеет приоритет), возвращаем эту стадию. ``rg memory_query …``
-    не ловится: имя стоит в позиции аргумента, не бинаря.
-    """
-    route_by_name = {s.value: s for s in REASONING_TARGET_STAGES}
     if argv_is_sh_c_wrapper(argv) or argv_uses_shell_chaining(argv):
-        bins = _binaries_in_shell_line(shell_command_line_for_argv(argv))
-    else:
-        bins = [os.path.basename(argv[0].strip() or " ").lower()]
-    for b in bins:
-        if b not in route_by_name:
-            continue
-        if _allowlist_is_broad(settings):
-            return route_by_name[b]
-        if not _basename_allowed(b, settings):
-            return route_by_name[b]
-    return None
+        return None
+    route_by_name = {s.value: s for s in REASONING_TARGET_STAGES}
+    base = os.path.basename(argv[0].strip() or " ").lower()
+    return route_by_name.get(base)
 
 
-def classify_cli_intent(
-    cli: CliIntentPayload, settings: ThreliumSettings
-) -> CliIntentDecision:
+def classify_cli_intent(cli: CliIntentPayload) -> CliIntentDecision:
     """Единая граница-фабрика решения роутера ``cli_intent``.
 
-    Сперва — коллизия имени маршрута (семантический misroute), иначе —
-    обычная политика исполнения allow / deny / hitl.
+    Сперва — коллизия имени маршрута (семантический misroute), иначе sandbox/privileged.
     """
-    collision = cli_argv_route_collision(cli.argv, settings)
+    collision = cli_argv_route_collision(cli.argv)
     if collision is not None:
         return CliRouteCollision(
             route=collision, cmd=shell_command_line_for_argv(cli.argv)
         )
-    return CliExecDecision(policy=classify_cli_policy(cli, settings))
+    return CliExecDecision(policy=classify_cli_policy(cli))
 
 
-def classify_cli_policy(cli: CliIntentPayload, settings: ThreliumSettings) -> CliIntentPolicy:
-    """Политика исполнения CLI: ``allow`` | ``deny`` | ``hitl``.
-
-    Одиночная команда: basename ``argv[0]`` совпадает с regex из allowlist → ``allow``, иначе ``hitl``.
-    Allowlist — сегменты через запятую, каждый regex (``fullmatch`` по имени бинаря), напр. ``.*`` или ``ls|cat``.
-    Цепочка (``&&``, ``;``, ``|`` в argv или ``sh -c``): все сегменты в allowlist → ``allow``.
-    Subshell / ``$(`` / backticks → ``deny``.
-    """
-    argv = cli.argv
-    if argv_is_sh_c_wrapper(argv) or argv_uses_shell_chaining(argv):
-        return _policy_for_shell_line(shell_command_line_for_argv(argv), settings)
-
-    joined = " ".join(argv)
-    for sub in _deny_substrings(settings):
-        if sub in joined:
-            return CliIntentPolicy.DENY
-    base = os.path.basename(argv[0].strip() or " ").lower()
-    if _basename_allowed(base, settings):
-        return CliIntentPolicy.ALLOW
-    return CliIntentPolicy.HITL
+def classify_cli_policy(cli: CliIntentPayload) -> CliIntentPolicy:
+    """``privileged`` в payload → system scope; иначе sandbox (user scope + ProtectSystem)."""
+    if cli.privileged:
+        return CliIntentPolicy.PRIVILEGED
+    return CliIntentPolicy.SANDBOX
 
 
 def parse_yes_no(text: str) -> bool | None:

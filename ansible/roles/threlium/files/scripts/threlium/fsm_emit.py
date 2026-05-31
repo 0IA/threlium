@@ -25,7 +25,6 @@ from threlium.types import (
     NotmuchMessageIdInner,
     RfcInReplyToWire,
     RfcMessageIdWire,
-    ThreliumCapabilitiesBudgetLine,
     ThreliumContentScoreWire,
     MailHeaderName,
 )
@@ -45,7 +44,6 @@ class StateHandler(Protocol):
 
 HDR_ROUTE = MailHeaderName.ROUTE.value
 HDR_HOP_BUDGET = MailHeaderName.HOP_BUDGET.value
-HDR_CAPABILITIES = MailHeaderName.CAPABILITIES.value
 HDR_FROM = MailHeaderName.FROM.value
 HDR_TO = MailHeaderName.TO.value
 HDR_SUBJECT = MailHeaderName.SUBJECT.value
@@ -55,9 +53,7 @@ HDR_IN_REPLY_TO = MailHeaderName.IN_REPLY_TO.value
 HDR_IRT_HASH = MailHeaderName.IRT_HASH.value
 
 
-ManagedFsmHeaderValue: TypeAlias = (
-    RfcInReplyToWire | HopBudgetLine | ThreliumCapabilitiesBudgetLine
-)
+ManagedFsmHeaderValue: TypeAlias = RfcInReplyToWire | HopBudgetLine
 ManagedFsmHeaderPatch: TypeAlias = Mapping[MailHeaderName, ManagedFsmHeaderValue]
 
 
@@ -67,14 +63,6 @@ def _default_root_hop_max(settings: ThreliumSettings) -> int:
 
 def _default_sub_hop_max(settings: ThreliumSettings) -> int:
     return settings.hop.budget_sub
-
-
-def _default_root_capability(settings: ThreliumSettings) -> str:
-    return settings.cap.root or "root"
-
-
-def _default_sub_capability(settings: ThreliumSettings) -> str:
-    return settings.cap.sub or "L1"
 
 
 def advance_hop_budget_for_simple_step(line: HopBudgetLine, settings: ThreliumSettings) -> HopBudgetLine:
@@ -92,15 +80,6 @@ def push_subagent_hop_budget(line: HopBudgetLine, settings: ThreliumSettings) ->
         return None
     parts[-1] = str(new_tail)
     return HopBudgetLine.parse(" ".join(parts + [str(_default_sub_hop_max(settings))]))
-
-
-def push_subagent_capability(line: HopBudgetLine, settings: ThreliumSettings) -> ThreliumCapabilitiesBudgetLine:
-    r = line.value
-    sub = _default_sub_capability(settings)
-    root = _default_root_capability(settings)
-    if not r:
-        return ThreliumCapabilitiesBudgetLine.parse(f"{root} {sub}")
-    return ThreliumCapabilitiesBudgetLine.parse(f"{r} {sub}")
 
 
 def hop_budget_remaining(line: HopBudgetLine, settings: ThreliumSettings) -> int:
@@ -161,14 +140,6 @@ def _apply_managed_headers(
                 )
             if vo.value.strip():
                 out[HDR_HOP_BUDGET] = vo.value
-        elif name == MailHeaderName.CAPABILITIES:
-            if not isinstance(vo, ThreliumCapabilitiesBudgetLine):
-                raise TypeError(
-                    f"{MailHeaderName.CAPABILITIES} expects ThreliumCapabilitiesBudgetLine, "
-                    f"got {type(vo).__name__}"
-                )
-            if vo.value.strip():
-                out[HDR_CAPABILITIES] = vo.value
         else:
             raise ValueError(f"unsupported managed header key: {name!r}")
 
@@ -295,10 +266,6 @@ def build_fsm_plain_to_stage(
     system_body = body.value.strip()
     out.attach(_make_inline_text_part(EnrichContentId.from_system_body(system_body), system_body))
 
-    v = incoming.get(HDR_CAPABILITIES)
-    if v:
-        out[HDR_CAPABILITIES] = v
-
     out[HDR_HOP_BUDGET] = advance_hop_budget_for_simple_step(
         HopBudgetLine.parse(incoming.get(HDR_HOP_BUDGET)), settings
     ).value
@@ -348,10 +315,6 @@ def build_fsm_multipart_to_stage(
         else:
             content_id = EnrichContentId.from_part_id(part_id)
         out.attach(_make_inline_text_part(content_id, text))
-
-    v = incoming.get(HDR_CAPABILITIES)
-    if v:
-        out[HDR_CAPABILITIES] = v
 
     out[HDR_HOP_BUDGET] = advance_hop_budget_for_simple_step(
         HopBudgetLine.parse(incoming.get(HDR_HOP_BUDGET)), settings
@@ -446,10 +409,6 @@ def build_fsm_step_to_stage(
         out.attach(
             _make_inline_text_part(EnrichContentId.from_system_body(system), system)
         )
-
-    v = incoming.get(HDR_CAPABILITIES)
-    if v:
-        out[HDR_CAPABILITIES] = v
 
     out[HDR_HOP_BUDGET] = advance_hop_budget_for_simple_step(
         HopBudgetLine.parse(incoming.get(HDR_HOP_BUDGET)), settings

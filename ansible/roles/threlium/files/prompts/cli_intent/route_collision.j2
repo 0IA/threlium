@@ -4,5 +4,4 @@
     route instead of an OS binary. Params: route (FSM route name), cmd (rendered argv). -#}
 cli_intent rejected: the command '{{ cmd }}' tries to run '{{ route }}' as a shell binary.
 ---
-'{{ route }}' is an FSM reasoning route exposed as a separate tool, not an OS binary, so cli_intent cannot execute it. cli_intent runs only allowlisted OS binaries (ls, cat, rg, find, head, git, python3, …).
-Call the '{{ route }}' tool directly with its own arguments instead of wrapping it in cli_intent{% if route == 'memory_query' %} (memory_query takes a query field with your question){% endif %}. If you actually needed a shell command, reissue cli_intent with a real OS binary in argv[0].
+'{{ route }}' is an FSM reasoning route exposed as a separate tool, not an OS binary, so cli_intent cannot execute it. Call the '{{ route }}' tool directly with its own arguments instead of wrapping it in cli_intent{% if route == 'memory_query' %} (memory_query takes a query field with your question){% endif %}. If you actually needed a shell command, reissue cli_intent with a real OS binary in argv[0].

@@ -59,10 +59,7 @@ from .fsm_strings import (
     ReasoningToolRouteEmailSubject,
     ReflectJinjaSubjectContext,
 )
-from .hop_cap import (
-    HopBudgetLine,
-    ThreliumCapabilitiesBudgetLine,
-)
+from .hop_cap import HopBudgetLine
 from .identity import (
     EmailIngressRoute,
     EmailNativeId,
@@ -217,7 +214,9 @@ from .knowledge_stage import (
     FormalReasonFatalErrorText,
     FormalReasonQueryErrorText,
     FormalReasonQueryResultText,
+    FormalReasonOutcome,
     FormalReasonReportText,
+    FormalReasonResultPayload,
     FormalReasonStagePayload,
     MemoryQueryStagePayload,
 )
@@ -364,7 +363,9 @@ __all__ = [
     "FormalReasonFatalErrorText",
     "FormalReasonQueryErrorText",
     "FormalReasonQueryResultText",
+    "FormalReasonOutcome",
     "FormalReasonReportText",
+    "FormalReasonResultPayload",
     "FormalReasonStagePayload",
     "FormalReasonToolArgs",
     "SystemdStatusBody",
@@ -374,7 +375,6 @@ __all__ = [
     "TelegramPtbOutboundReplyBody",
     "TelegramSpaceV1",
     "telegram_space_from_ingress_route",
-    "ThreliumCapabilitiesBudgetLine",
     "ThreliumSpace",
     "ThreliumSpaceB62Wire",
     "ThreliumSpaceHashWire",

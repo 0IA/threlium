@@ -13,10 +13,11 @@ _HDR = MailHeaderName
 
 
 class CliIntentPayload(msgspec.Struct, frozen=True):
-    """Нормализованный JSON ``{"cli": {"argv": [...], "cwd"?}}`` после границы парсинга."""
+    """Нормализованный JSON ``{"cli": {"argv": [...], "cwd"?, "privileged"?}}`` после границы парсинга."""
 
     argv: list[str]
     cwd: str | None = None
+    privileged: bool = False
 
 
 class CliResumeMessageIdHeader(msgspec.Struct, frozen=True, kw_only=True):

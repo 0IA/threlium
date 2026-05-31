@@ -5,7 +5,7 @@
   "type": "function",
   "function": {
     "name": "cli_intent",
-    "description": "Maze move — EXPLORE the file/system part of the labyrinth. Request shell execution via CLI pipeline (allow/deny/HITL). Use for external effects, live system state, or read-only discovery on the agent host. Discovery (read-only): before creating or editing files, inventory existing code with rg, find, cat, head, ls; git read-only only (git grep, git log, git show) — never git commit/push/reset without explicit user request. Shell chains allowed: use &&, ;, or | in argv (e.g. [\"rg\", \"-l\", \"Foo\", \"path\", \"|\", \"head\", \"-n\", \"20\"]) or [\"sh\", \"-c\", \"rg -l Foo path | head -n 20\"] — every segment must use allowlisted binaries; $( and backticks are denied. Safety: non-interactive flags; limit output; no destructive commands without explicit user request; no secrets in argv.\n\nWhen NOT to use: a fact retrievable from the knowledge graph → memory_query first; broad multi-step repo survey → subagent_intent with an inventory-only task. Cost/latency: chained allowlisted commands auto-run; unknown binaries in a chain may require HITL.\n\nargv[0] is an OS binary from the allowlist (ls, cat, rg, find, head, git, python3, …), NEVER the name of an FSM route. Routes — memory_query, reflect, formal_reason, response_append, response_edit, response_observe, response_finalize, thread_memory, global_memory, subagent_intent, tasks_upsert — are separate tools you call directly, not shell commands. To query the knowledge/memory graph call the memory_query tool (not cli_intent ['memory_query', …]). A cli_intent whose command is a route name is bounced back as an observation telling you to call the real tool, wasting a hop.\n\nDiscovery examples: [\"rg\", \"-l\", \"EmailBridge\", \"ansible/roles/threlium/files/scripts/threlium/bridges\"], [\"rg\", \"-n\", \"pattern\", \"path\", \"|\", \"head\", \"-n\", \"30\"], [\"find\", \"path\", \"-name\", \"*bridge*\"]. Implementation example: [\"pip\", \"install\", \"--no-input\", \"ruff\"].",
+    "description": "Maze move — EXPLORE the file/system part of the labyrinth. Request shell execution on the agent host. Default: sandbox (read-only OS, user scope). Set privileged: true for system-scope commands (writes outside sandbox, package install, systemctl as root); on most hosts that triggers HITL confirmation (unless disabled in threlium.yaml). Shell chains allowed: use &&, ;, or | in argv or [\"sh\", \"-c\", \"…\"]. Safety: non-interactive flags; limit output; no secrets in argv.\n\nWhen NOT to use: a fact retrievable from the knowledge graph → memory_query first; broad multi-step repo survey → subagent_intent with an inventory-only task.\n\nargv[0] is an OS binary (ls, cat, rg, find, head, git, python3, …), NEVER the name of an FSM route. Routes — memory_query, reflect, formal_reason, response_append, response_edit, response_observe, response_finalize, thread_memory, global_memory, subagent_intent, tasks_upsert — are separate tools. A cli_intent whose argv[0] is a route name is bounced back as an observation; call the real tool instead.\n\nDiscovery examples: [\"rg\", \"-l\", \"EmailBridge\", \"path\"], [\"sh\", \"-c\", \"rg -l Foo path | head -n 20\"]. Privileged example: [\"apt-get\", \"install\", \"-y\", \"pkg\"] with privileged: true.",
     "parameters": {
       "type": "object",
       "properties": {
@@ -20,6 +20,10 @@
           "type": "string",
           "maxLength": 4000,
           "description": "Working directory for execution (optional)."
+        },
+        "privileged": {
+          "type": "boolean",
+          "description": "If true, run in system scope (uid=0) after HITL when enabled on this host. Default false = sandbox."
         },
         "reasoning": {
           "type": "string",

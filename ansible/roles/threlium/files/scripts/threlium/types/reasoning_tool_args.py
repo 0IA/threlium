@@ -24,6 +24,7 @@ class CliIntentToolArgs(msgspec.Struct, frozen=True):
     argv: list[str]
     reasoning: str
     cwd: str | None = None
+    privileged: bool = False
 
 
 class ThreadMemoryToolArgs(msgspec.Struct, frozen=True):

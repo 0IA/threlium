@@ -36,7 +36,6 @@ class MailHeaderName(StrEnum):
     # --- Threlium extension (только реальные заголовки FSM-писем) ---
     ROUTE = "X-Threlium-Route"
     HOP_BUDGET = "X-Threlium-Hop-Budget"
-    CAPABILITIES = "X-Threlium-Capabilities"
     SPACE_HASH = "X-Threlium-Space-Hash"
     IRT_HASH = "X-Threlium-Irt-Hash"
     # Part-level (на отдельных <history>-MIME-частях, не на конверте письма):

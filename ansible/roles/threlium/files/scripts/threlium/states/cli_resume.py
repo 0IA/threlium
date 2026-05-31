@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""cli_resume@localhost: ответ после HITL → cli_exec или ingress@ (ARCHITECTURE §6.2, §4.3)."""
+"""cli_resume@localhost: ответ после HITL → cli_exec или enrich_fast@ (ARCHITECTURE §6.2, §4.3)."""
 import email as _email_mod
 from email import policy as _email_policy
 from email.message import EmailMessage
@@ -37,7 +37,7 @@ def main(
     if intent_path is None:
         return build_fsm_plain_to_stage(
             msg,
-            to_addr=FsmStage.INGRESS,
+            to_addr=FsmStage.ENRICH_FAST,
             from_stage=stage,
             body=FsmTransitionPlainBody.parse(
                 "Threlium cli_resume: could not find a CLI intent message along In-Reply-To ancestors "
@@ -52,7 +52,7 @@ def main(
     if not payload:
         return build_fsm_plain_to_stage(
             msg,
-            to_addr=FsmStage.INGRESS,
+            to_addr=FsmStage.ENRICH_FAST,
             from_stage=stage,
             body=FsmTransitionPlainBody.parse(
                 "Threlium cli_resume: could not parse stored CLI intent JSON in thread."
@@ -69,7 +69,7 @@ def main(
         )
     return build_fsm_plain_to_stage(
         msg,
-        to_addr=FsmStage.INGRESS,
+        to_addr=FsmStage.ENRICH_FAST,
         from_stage=stage,
         body=FsmTransitionPlainBody.parse(
             "Threlium cli_resume: user did not confirm the CLI command (no or ambiguous reply)."

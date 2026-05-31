@@ -1,9 +1,8 @@
 {#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
     This Jinja comment is stripped and never sent to the model.
     cli_intent body: canonical JSON for cli_fsm.parse_cli_intent_payload. -#}
+{%- set _cli = {'argv': argv, 'privileged': privileged | default(false)} -%}
 {%- if cwd is defined and cwd -%}
-{%-   set _cli = {'argv': argv, 'cwd': cwd} -%}
-{%- else -%}
-{%-   set _cli = {'argv': argv} -%}
+{%-   set _cli = _cli | combine({'cwd': cwd}) -%}
 {%- endif -%}
 {{ {'cli': _cli} | tojson }}

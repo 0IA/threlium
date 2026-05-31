@@ -54,31 +54,25 @@ threlium_bridges:
     imap_ensure_processed_folder: false
 
 # =============================================================================
-# cli — песочница systemd-run для cli_exec.
+# cli — песочница systemd-run для cli_exec (sandbox / privileged).
 # Структура 1:1 с секцией cli в config/threlium.yaml.
-# allowlist: regex (fullmatch basename), comma-separated; default — read-only discovery.
-# Shell chains (&&, |, ;) when every segment matches; $(` denied via deny_patterns.
 # =============================================================================
 threlium_cli:
   exec_timeout: 30
   exec_memory_max: "256M"
   exec_cpu_quota: "100%"
   exec_tasks_max: 16
-  allowlist: "ls|cat|pwd|echo|true|head|tail|wc|find|rg|grep|git|python3|test"
-  # system_scope_*: privileged CLI via system systemd-run (needs threlium_polkit_agent_systemd_enabled).
-  system_scope_enabled: false
-  system_scope_cap_names: "privileged"
+  privileged_hitl_enabled: true
+  sandbox_private_network: true
+  sandbox_read_write_paths: "/tmp"
 
 # =============================================================================
-# hop / cap — бюджеты FSM и capability-строки.
-# Структура 1:1 с секциями hop, cap в config/threlium.yaml.
+# hop — бюджеты FSM.
+# Структура 1:1 с секцией hop в config/threlium.yaml.
 # =============================================================================
 threlium_hop:
   budget_root: 256
   budget_sub: 256
-threlium_cap:
-  root: ""
-  sub: ""
 
 # =============================================================================
 # egress — исходящая почта агента.

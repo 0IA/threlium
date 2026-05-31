@@ -1,4 +1,4 @@
-"""Политика стадии ``cli_intent`` (allow / deny / hitl) и union-решение роутера."""
+"""Политика стадии ``cli_intent`` (sandbox / privileged) и union-решение роутера."""
 from __future__ import annotations
 
 from enum import StrEnum
@@ -9,9 +9,8 @@ from .fsm_stage import FsmStage
 
 
 class CliIntentPolicy(StrEnum):
-    ALLOW = "allow"
-    DENY = "deny"
-    HITL = "hitl"
+    SANDBOX = "sandbox"
+    PRIVILEGED = "privileged"
 
 
 class CliRouteCollision(msgspec.Struct, frozen=True):
@@ -26,7 +25,7 @@ class CliRouteCollision(msgspec.Struct, frozen=True):
 
 
 class CliExecDecision(msgspec.Struct, frozen=True):
-    """Обычное решение об исполнении команды по политике allow / deny / hitl."""
+    """Решение об исполнении команды: sandbox (user scope) или privileged (system scope)."""
 
     policy: CliIntentPolicy
 
