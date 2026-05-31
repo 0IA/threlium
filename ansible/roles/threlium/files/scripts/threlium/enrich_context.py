@@ -123,17 +123,14 @@ def build_unified_email_messages(
     # ``enrich_fast → reasoning`` (копии уже собранных оригиналов) схлопывается — все его CID
     # уже видены, письмо отбрасывается, а каноничные оригиналы (с корректным From: origin)
     # остаются. Старые-первыми ⇒ предпочитаем оригинал его более поздней relay-копии.
-    #
-    # Лист (``leaf_inner``) — текущий ход enrich; его ``<history>`` дублирует <user-message>,
-    # поэтому пропускаем ровно его. Прошлые ходы (старшие ingress→enrich с history) остаются.
+    # Лист (текущий ingress→enrich) включаем: distill-метаданные в unified с первого хода;
+    # ``user_query`` может кратко дублировать ``<user-message>`` (последняя history).
     _summarized_tag = NotmuchTag.CONTEXT_SUMMARIZED.value
     seen_cids: set[str] = set()
     seen_mids: set[str] = set()
     kept: list[EmailMessage] = []
     for snap in reversed(tail_snaps):
         if _summarized_tag in snap.tags:
-            continue
-        if snap.message_id_inner.value == leaf_inner.value:
             continue
         if str(snap.path.resolve()) in memory_path_keys:
             continue

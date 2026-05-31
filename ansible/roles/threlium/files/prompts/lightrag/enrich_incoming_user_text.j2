@@ -2,16 +2,11 @@
     This Jinja comment is stripped and never sent to the model.
 -#}
 
-{#- Canonical incoming mail text for ``--- user message ---``, ``original_question``, and plan LLM.
-    Variables: ``incoming`` — stdlib ``EmailMessage``. No References; plain/html body via ``get_body``.
-    Operator-editable; fields extracted here, not in Python. -#}
+{#- Canonical incoming = last <history> on ingress→enrich letter (distill user_query). -#}
 From: {{ incoming.get('From', '') }}
 To: {{ incoming.get('To', '') }}
 Subject: {{ incoming.get('Subject', '') }}
 Message-ID: {{ incoming.get('Message-ID', '') }}
 In-Reply-To: {{ incoming.get('In-Reply-To', '') }}
 
-{% set part = incoming.get_body(preferencelist=('plain', 'html')) %}
-{% if part %}
-{{ part.get_content() }}
-{% endif %}
+{{ incoming | last_history_text }}

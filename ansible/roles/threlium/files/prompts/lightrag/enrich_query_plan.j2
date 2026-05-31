@@ -11,6 +11,10 @@ Formulate a question that fills information gaps in the recent conversation and
 may surface related entities and their relations from the graph.
 Be concise; no markdown fences; no role-play.
 
+The incoming message block is the last ingress distill history part (## User intent / user_query only); other distill fields are separate history parts in the thread timeline, not in this block.
+Do not restate the whole brief as the graph query — extract entities, relations, and verification questions.
+The graph query stays in English.
+
 The graph sample this query returns is one lit corridor, not the whole graph, so make the
 query pull what the next reasoning step needs to verify, not a restatement of the request:
 - If the conversation rests on an unverified assumption, name the entities and the

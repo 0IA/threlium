@@ -18,6 +18,7 @@ from threlium.litellm_tool_spec import (
     tool_spec_parameters,
     validate_tool_args_json,
 )
+from threlium.prompts import render_prompt
 from threlium.types import (
     FsmStage,
     REASONING_EMAIL_BODY_BY_STAGE,
