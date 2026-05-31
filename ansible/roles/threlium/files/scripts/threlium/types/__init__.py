@@ -114,6 +114,7 @@ from .lightrag import (
     LightragWorkerBatchThreadIdKey,
 )
 from .litellm_completion_kwargs import (
+    LITELLM_ACOMPLETION_PAYLOAD_KEYS,
     LiteLlmAcompletionKwargs,
     LiteLlmAembeddingKwargs,
     LiteLlmArerankKwargs,
@@ -122,9 +123,26 @@ from .litellm_completion_kwargs import (
     lite_llm_aembedding_to_dict,
     lite_llm_arerank_to_dict,
 )
+from .litellm_tool_call import LiteLlmToolCallArgumentsWire
 from .lightrag_prompt_library_key import LightragPromptLibraryKey
 from .lightrag_document_header import LightragDocumentHeader
 from .lightrag_drain import LightragDrainSkipReason
+from .lightrag_tool_function import LightragToolBridgeError, LightragToolFunctionName
+from .lightrag_tool_phase import (
+    LightragToolPhaseSpec,
+    detect_lightrag_call_site_wire,
+    lightrag_tool_phase_for_call_site,
+)
+from .lightrag_tool_wire import (
+    LightragCompletionDelimiterWire,
+    LightragEntitySummaryText,
+    LightragExtractionDelimiterText,
+    LightragKeywordsJsonText,
+    LightragRagAnswerText,
+    LightragTupleDelimiterWire,
+)
+from .cli_hitl_tool_args import ConfirmCliHitlToolArgs
+from .cli_hitl_tool_function import CliHitlBridgeError, CliHitlToolFunctionName
 from .litellm_call_site import LitellmCallSite
 from .litellm_correlation_header import LitellmCorrelationHeader
 from .litellm_routing_site import LitellmRoutingSite
@@ -155,7 +173,6 @@ if TYPE_CHECKING:
         ReasoningResponseStateText,
         ReasoningRouteDecision,
         ReasoningTaskStateText,
-        ReasoningToolCallArgumentsWire,
         ReasoningToolFunctionName,
         ReasoningUserMessageText,
         reasoning_assistant_message,
@@ -232,6 +249,9 @@ __all__ = [
     "CliRouteCollision",
     "CliIntentPayload",
     "CliIntentToolArgs",
+    "CliHitlBridgeError",
+    "CliHitlToolFunctionName",
+    "ConfirmCliHitlToolArgs",
     "EmailStruct",
     "EmailIngressRoute",
     "EmailNativeId",
@@ -262,6 +282,17 @@ __all__ = [
     "LightragDrainSkipReason",
     "LightragLiteLlmCompletionBody",
     "LightragPromptLibraryKey",
+    "LightragToolBridgeError",
+    "LightragToolFunctionName",
+    "LightragToolPhaseSpec",
+    "LightragCompletionDelimiterWire",
+    "LightragEntitySummaryText",
+    "LightragExtractionDelimiterText",
+    "LightragKeywordsJsonText",
+    "LightragRagAnswerText",
+    "LightragTupleDelimiterWire",
+    "detect_lightrag_call_site_wire",
+    "lightrag_tool_phase_for_call_site",
     "LightragWorkerBatchThreadIdKey",
     "LitellmCallSite",
     "LitellmCorrelationHeader",
@@ -270,6 +301,7 @@ __all__ = [
     "LiteLlmAembeddingKwargs",
     "LiteLlmArerankKwargs",
     "LiteLlmChatMessage",
+    "LITELLM_ACOMPLETION_PAYLOAD_KEYS",
     "lite_llm_acompletion_to_dict",
     "lite_llm_aembedding_to_dict",
     "lite_llm_arerank_to_dict",
@@ -322,7 +354,7 @@ __all__ = [
     "ReasoningResponseStateText",
     "ReasoningRouteDecision",
     "ReasoningTaskStateText",
-    "ReasoningToolCallArgumentsWire",
+    "LiteLlmToolCallArgumentsWire",
     "ReasoningToolFunctionName",
     "ReasoningToolRouteArgs",
     "ReasoningToolRouteEmailBody",
@@ -400,7 +432,6 @@ _LAZY_REASONING = frozenset(
         "ReasoningResponseStateText",
         "ReasoningRouteDecision",
         "ReasoningTaskStateText",
-        "ReasoningToolCallArgumentsWire",
         "ReasoningToolFunctionName",
         "ReasoningUserMessageText",
         "reasoning_assistant_message",

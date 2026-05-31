@@ -10,7 +10,8 @@ from __future__ import annotations
 from email.message import EmailMessage
 
 from threlium.formal_reason_gate import formal_reason_gate_active
-from threlium.litellm_client import litellm_completion_sync
+from threlium.litellm_tool_completion import completion_required_tool_sync
+from threlium.litellm_tool_response import require_tool_calls_response
 from litellm.types.utils import Message
 
 from threlium.fsm_emit import HDR_HOP_BUDGET, build_fsm_step_to_stage, hop_budget_remaining
@@ -21,7 +22,6 @@ from threlium.states.reasoning_tool_spec import (
     load_tools_for_routes,
     route_decision_from_tool_call,
 )
-from threlium.litellm_wire import require_chat_model_response
 from threlium.settings import ThreliumSettings, resolve_llm_endpoint
 from threlium.types import (
     FsmStage,
@@ -36,10 +36,9 @@ from threlium.types import (
     ReasoningIncomingEnvelope,
     ReasoningEnrichContext,
     ReasoningRouteDecision,
-    ReasoningToolCallArgumentsWire,
+    LiteLlmToolCallArgumentsWire,
     ReasoningToolFunctionName,
     RfcMessageIdWire,
-    lite_llm_acompletion_to_dict,
     MailHeaderName,
     reasoning_assistant_message,
     reasoning_assistant_plain_text,
@@ -103,7 +102,7 @@ def _route_from_assistant(
             "LLM returned plain text without tool_call (tool-only policy)"
         )
     tool_name = ReasoningToolFunctionName.parse_tool_call(tc)
-    wire = ReasoningToolCallArgumentsWire.from_tool_call(tc)
+    wire = LiteLlmToolCallArgumentsWire.from_tool_call(tc)
     log.info(
         "tool_call_args",
         route=tool_name.value,
@@ -204,14 +203,13 @@ def _decide(
             api_base=ep.api_base,
             max_tokens=ep.max_tokens,
             thinking_token_budget=ep.thinking_token_budget,
-            tools=tools,
-            tool_choice="required",
             chat_template_kwargs=ep.chat_template_kwargs or None,
         )
-        kwargs = lite_llm_acompletion_to_dict(call)
 
-        resp = require_chat_model_response(
-            litellm_completion_sync(settings=config, **kwargs, stream=False)
+        resp = completion_required_tool_sync(
+            settings=config,
+            call=call,
+            tools=tools,
         )
         finish = reasoning_finish_reason(resp)
         if finish == "length":
@@ -229,6 +227,9 @@ def _decide(
                 LiteLlmChatMessage(role="system", content=length_recovery_system)
             )
             continue
+
+        if remaining >= 1:
+            require_tool_calls_response(resp, context="reasoning")
 
         assistant = reasoning_assistant_message(resp)
         tc = reasoning_first_tool_call(assistant)

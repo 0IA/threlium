@@ -9,14 +9,15 @@
 """
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable
-from typing import cast
 
-import jsonschema
 import msgspec
 
-from threlium.prompts import render_prompt
+from threlium.litellm_tool_spec import (
+    load_tool_spec,
+    tool_spec_parameters,
+    validate_tool_args_json,
+)
 from threlium.types import (
     FsmStage,
     REASONING_EMAIL_BODY_BY_STAGE,
@@ -28,10 +29,8 @@ from threlium.types import (
     ReasoningToolRouteEmailSubject,
     reasoning_tool_struct_for_route,
 )
-from threlium.types.reasoning import (
-    ReasoningToolCallArgumentsWire,
-    ReasoningToolFunctionName,
-)
+from threlium.types import LiteLlmToolCallArgumentsWire
+from threlium.types.reasoning import ReasoningToolFunctionName
 
 
 def load_tools_for_routes(
@@ -42,41 +41,30 @@ def load_tools_for_routes(
     schemas: dict[FsmStage, dict[str, object]] = {}
     for route in routes:
         spec_path = REASONING_TOOL_SPEC_BY_STAGE[route]
-        rendered = render_prompt(spec_path)
-        raw = json.loads(rendered)
-        if not isinstance(raw, dict):
-            raise RuntimeError(f"{spec_path}: tool spec JSON must be an object")
-        spec = cast(dict[str, object], raw)
+        spec = load_tool_spec(spec_path)
         func = spec["function"]
         if not isinstance(func, dict):
             raise RuntimeError(f"{spec_path}: function must be an object")
-        fn = cast(dict[str, object], func)
-        name_o = fn.get("name")
-        params_o = fn.get("parameters")
+        name_o = func.get("name")
         if not isinstance(name_o, str):
             raise RuntimeError(f"{spec_path}: function.name must be a string")
-        if not isinstance(params_o, dict):
-            raise RuntimeError(f"{spec_path}: function.parameters must be an object")
-        params = cast(dict[str, object], params_o)
         if name_o != route.value:
             raise RuntimeError(
                 f"{spec_path}: function.name={name_o!r}; "
                 "имя инструмента должно совпадать с FsmStage.value целевой стадии"
             )
         tools.append(spec)
-        schemas[route] = params
+        schemas[route] = tool_spec_parameters(spec)
     return tools, schemas
 
 
 def validate_tool_args(
     route: FsmStage,
     schema: dict[str, object],
-    wire: ReasoningToolCallArgumentsWire,
+    wire: LiteLlmToolCallArgumentsWire,
 ) -> ReasoningToolRouteArgs:
     """Распарсить wire JSON, провалидировать schema, привести к Struct маршрута."""
-    raw_args = wire.value
-    args = json.loads(raw_args)
-    jsonschema.validate(instance=args, schema=schema)
+    args = validate_tool_args_json(schema, wire)
     struct_t = reasoning_tool_struct_for_route(route)
     return msgspec.convert(args, type=struct_t)
 
@@ -97,7 +85,7 @@ def render_route_decision(
 
 def route_decision_from_tool_call(
     tool_name: ReasoningToolFunctionName,
-    wire: ReasoningToolCallArgumentsWire,
+    wire: LiteLlmToolCallArgumentsWire,
     schemas: dict[FsmStage, dict[str, object]],
 ) -> ReasoningRouteDecision:
     """Полный путь tool_call → :class:`ReasoningRouteDecision`."""

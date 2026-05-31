@@ -2,7 +2,7 @@
 
 Границы:
 * входящее письмо → :class:`ReasoningIncomingEnvelope` / :class:`ReasoningEnrichContext`;
-* ответ LiteLLM tool_call → :class:`ReasoningToolFunctionName`, :class:`ReasoningToolCallArgumentsWire`;
+* ответ LiteLLM tool_call → :class:`ReasoningToolFunctionName`, :class:`~threlium.types.litellm_tool_call.LiteLlmToolCallArgumentsWire`;
 * решение → :class:`ReasoningRouteDecision` (целевая :class:`~threlium.types.fsm_stage.FsmStage` + email VO).
 """
 from __future__ import annotations
@@ -71,20 +71,6 @@ class ReasoningToolFunctionName(_RequiredNonEmpty):
         if func is None or not func.name:
             raise RuntimeError("reasoning: tool_call without function.name")
         return cls.require(name="function.name", raw=func.name)
-
-
-class ReasoningToolCallArgumentsWire(_OptionalStripEmpty):
-    """Сырой JSON аргументов tool_call (wire до jsonschema / msgspec)."""
-
-    @classmethod
-    def from_tool_call(cls, tc: ChatCompletionMessageToolCall) -> Self:
-        func = tc.function
-        if func is None:
-            raise RuntimeError("reasoning: tool_call without function")
-        raw = func.arguments
-        if isinstance(raw, bytes):
-            return cls.parse(raw.decode("utf-8", errors="replace"))
-        return cls.parse(raw if isinstance(raw, str) else "")
 
 
 class ReasoningIncomingEnvelope(msgspec.Struct, frozen=True, kw_only=True):
@@ -220,20 +206,15 @@ def reasoning_assistant_message(resp: ModelResponse) -> Message:
 
 
 def reasoning_finish_reason(resp: ModelResponse) -> str | None:
-    choices = resp.choices or []
-    if not choices:
-        return None
-    fr = choices[0].finish_reason
-    if fr is None:
-        return None
-    return str(fr)
+    from threlium.litellm_tool_response import litellm_choice_finish_reason
+
+    return litellm_choice_finish_reason(resp)
 
 
 def reasoning_first_tool_call(msg: Message) -> ChatCompletionMessageToolCall | None:
-    tcs = msg.tool_calls
-    if not tcs:
-        return None
-    return tcs[0]
+    from threlium.litellm_tool_spec import first_tool_call
+
+    return first_tool_call(msg)
 
 
 def reasoning_assistant_plain_text(msg: Message) -> ReasoningAssistantMessageText:
@@ -250,7 +231,6 @@ __all__ = [
     "ReasoningResponseStateText",
     "ReasoningRouteDecision",
     "ReasoningTaskStateText",
-    "ReasoningToolCallArgumentsWire",
     "ReasoningToolFunctionName",
     "ReasoningUserMessageText",
     "reasoning_assistant_message",
