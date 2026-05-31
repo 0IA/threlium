@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """cli_resume@localhost: ответ после HITL → cli_exec или enrich_fast@ (ARCHITECTURE §6.2, §4.3)."""
 import email as _email_mod
-import shlex
 from email import policy as _email_policy
 from email.message import EmailMessage
 
-from threlium.cli_fsm import cli_payload_as_json, parse_cli_intent_payload
-from threlium.cli_hitl_tool_bridge import parse_confirm_cli_hitl
+import jsonschema
+
+from threlium.cli_fsm import (
+    cli_command_line_for_intent,
+    cli_payload_as_json,
+    parse_cli_intent_payload,
+)
+from threlium.cli_hitl_tool_bridge import parse_confirm_cli_hitl_assistant
 from threlium.fsm_emit import build_fsm_plain_to_stage, build_fsm_step_to_stage
 from threlium.ingress_hitl_resolve import find_cli_intent_maildir_path_from_in_reply_to_ancestors
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers
@@ -17,12 +22,14 @@ from threlium.litellm_tool_response import (
     require_tool_calls_response,
 )
 from threlium.litellm_tool_spec import load_tool_spec
+from threlium.logutil import clip_log_text, logger
 from threlium.mime_reform import extract_plain_body, system_part_text
 from threlium.nm import require_inner_message_id_from_fsm_email
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings, resolve_llm_endpoint
 from threlium.types import (
     CliHitlBridgeError,
+    ConfirmCliHitlToolArgs,
     FsmStage,
     FsmTransitionPlainBody,
     FsmTransitionPlainSubjectLine,
@@ -34,19 +41,16 @@ from threlium.types import (
 )
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
+log = logger.bind(stage="cli_resume")
+
+_MAX_CLI_HITL_CLASSIFY_RETRIES = 2
+
 
 def _extract_decoded_body_from_maildir_file(path) -> str:
     """Read a Maildir file and properly decode its body (handles QP, base64, etc.)."""
     raw_bytes = path.read_bytes()
     intent_msg = _email_mod.message_from_bytes(raw_bytes, policy=_email_policy.default)
     return extract_plain_body(intent_msg)
-
-
-def _command_line_from_payload(payload) -> str:
-    line = " ".join(shlex.quote(a) for a in payload.argv)
-    if payload.cwd:
-        line = f"(cwd={shlex.quote(payload.cwd)}) {line}"
-    return line
 
 
 def _e2e_litellm_correlation(
@@ -67,14 +71,36 @@ def _e2e_litellm_correlation(
     return corr
 
 
+def _emit_user_not_confirmed(
+    msg: EmailMessage,
+    stage: FsmStage,
+    *,
+    config: ThreliumSettings,
+    interpretation: str | None = None,
+) -> EmailMessage:
+    note = render_prompt(
+        PromptPath.CLI_RESUME_NOT_CONFIRMED,
+        interpretation=interpretation or "",
+    ).strip()
+    return build_fsm_step_to_stage(
+        msg,
+        to_addr=FsmStage.ENRICH_FAST,
+        from_stage=stage,
+        history=note,
+        system=note,
+        subject_line=FsmTransitionPlainSubjectLine.parse("CLI command not confirmed"),
+        settings=config,
+    )
+
+
 def _classify_hitl_reply(
     msg: EmailMessage,
     *,
     command_line: str,
     user_reply: str,
     config: ThreliumSettings,
-) -> bool:
-    """LLM classifier (score 0); fail-closed → False on any bridge/LLM error."""
+) -> ConfirmCliHitlToolArgs:
+    """LLM classifier (score 0); retry на bridge/tool_response; затем raise."""
     ep = resolve_llm_endpoint(config.litellm, LitellmRoutingSite.CLI_HITL_RESUME)
     mr = ep.max_retries if ep.max_retries is not None else config.litellm.max_retries
     system = render_prompt(PromptPath.CLI_RESUME_CLASSIFY_SYSTEM).strip()
@@ -97,18 +123,42 @@ def _classify_hitl_reply(
         max_tokens=ep.max_tokens,
         chat_template_kwargs=ep.chat_template_kwargs or None,
     )
-    try:
-        resp = completion_required_tool_sync(
-            settings=config,
-            call=call,
-            tools=[tool_spec],
-            correlation_override=_e2e_litellm_correlation(msg, config),
-        )
-        assistant = require_tool_calls_response(resp, context="cli_hitl_resume")
-        args = parse_confirm_cli_hitl(assistant)
-        return args.confirmed is True
-    except (CliHitlBridgeError, LiteLlmToolResponseError, RuntimeError, ValueError, TypeError):
-        return False
+    correlation = _e2e_litellm_correlation(msg, config)
+
+    last_error: BaseException | None = None
+    for attempt in range(_MAX_CLI_HITL_CLASSIFY_RETRIES + 1):
+        try:
+            resp = completion_required_tool_sync(
+                settings=config,
+                call=call,
+                tools=[tool_spec],
+                correlation_override=correlation,
+            )
+            assistant = require_tool_calls_response(resp, context="cli_hitl_resume")
+            args = parse_confirm_cli_hitl_assistant(assistant)
+            log.info(
+                "cli_hitl_classify_ok",
+                confirmed=args.confirmed,
+                user_reply_len=len(user_reply),
+                command_line=clip_log_text(command_line),
+            )
+            return args
+        except (
+            CliHitlBridgeError,
+            LiteLlmToolResponseError,
+            jsonschema.ValidationError,
+        ) as exc:
+            last_error = exc
+            if attempt >= _MAX_CLI_HITL_CLASSIFY_RETRIES:
+                raise
+            log.warning(
+                "cli_hitl_classify_retry",
+                attempt=attempt + 1,
+                error=str(exc),
+            )
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("cli_hitl_resume: unreachable classify retry loop exit")
 
 
 def main(
@@ -117,6 +167,10 @@ def main(
     # FSM-стадии не индексируют (docs/INDEX.md §8): fdm/notmuch insert уже сделали
     # терминирующий `notmuch insert` при доставке этого письма.
     user_reply = system_part_text(msg).strip()
+
+    if not user_reply:
+        log.info("cli_hitl_empty_reply")
+        return _emit_user_not_confirmed(msg, stage, config=config)
 
     intent_path = find_cli_intent_maildir_path_from_in_reply_to_ancestors(
         require_inner_message_id_from_fsm_email(msg)
@@ -151,23 +205,25 @@ def main(
         )
 
     canon = cli_payload_as_json(payload)
-    command_line = _command_line_from_payload(payload)
-    if _classify_hitl_reply(
+    command_line = cli_command_line_for_intent(payload)
+    args = _classify_hitl_reply(
         msg, command_line=command_line, user_reply=user_reply, config=config
-    ):
+    )
+    if args.confirmed:
         return build_fsm_plain_to_stage(
-            msg, to_addr=FsmStage.CLI_EXEC, from_stage=stage, body=FsmTransitionPlainBody.parse(canon),
+            msg,
+            to_addr=FsmStage.CLI_EXEC,
+            from_stage=stage,
+            body=FsmTransitionPlainBody.parse(canon),
             settings=config,
         )
-    note = (
-        "Threlium cli_resume: user did not confirm the CLI command (no or ambiguous reply)."
+    log.info(
+        "cli_hitl_user_declined",
+        interpretation=clip_log_text(args.interpretation or ""),
     )
-    return build_fsm_step_to_stage(
+    return _emit_user_not_confirmed(
         msg,
-        to_addr=FsmStage.ENRICH_FAST,
-        from_stage=stage,
-        history=note,
-        system=note,
-        subject_line=FsmTransitionPlainSubjectLine.parse("CLI command not confirmed"),
-        settings=config,
+        stage,
+        config=config,
+        interpretation=args.interpretation,
     )

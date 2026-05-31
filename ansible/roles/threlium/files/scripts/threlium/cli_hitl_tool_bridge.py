@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import jsonschema
 import msgspec
 from litellm.types.utils import Message
 
@@ -31,22 +32,36 @@ def parse_confirm_cli_hitl_from_wire(
     """jsonschema + msgspec по wire args tool ``confirm_cli_hitl``."""
     spec = load_tool_spec(PromptPath.CLI_RESUME_CONFIRM_CLI_HITL_TOOL_SPEC)
     schema = tool_spec_parameters(spec)
-    args_dict = validate_tool_args_json(schema, wire)
-    return msgspec.convert(args_dict, type=ConfirmCliHitlToolArgs)
-
-
-def parse_confirm_cli_hitl(msg: Message) -> ConfirmCliHitlToolArgs:
-    """Распарсить обязательный tool_call ``confirm_cli_hitl`` из ответа LLM."""
-    tc = require_single_tool_call(msg, context=_CONTEXT)
-    name = CliHitlToolFunctionName.parse_tool_call(tc)
-    name.assert_matches(CliHitlToolFunctionName.CONFIRM_CLI_HITL)
-    wire = LiteLlmToolCallArgumentsWire.from_tool_call(tc)
     try:
-        return parse_confirm_cli_hitl_from_wire(wire)
+        args_dict = validate_tool_args_json(schema, wire)
+    except jsonschema.ValidationError as exc:
+        raise CliHitlBridgeError(
+            f"{_CONTEXT}: confirm_cli_hitl arguments failed jsonschema"
+        ) from exc
+    try:
+        return msgspec.convert(args_dict, type=ConfirmCliHitlToolArgs)
     except (RuntimeError, ValueError, msgspec.ValidationError) as exc:
         raise CliHitlBridgeError(
             f"{_CONTEXT}: invalid confirm_cli_hitl arguments"
         ) from exc
 
 
-__all__ = ["parse_confirm_cli_hitl", "parse_confirm_cli_hitl_from_wire"]
+def parse_confirm_cli_hitl_assistant(assistant: Message) -> ConfirmCliHitlToolArgs:
+    """Распарсить assistant message после ``require_tool_calls_response``."""
+    tc = require_single_tool_call(assistant, context=_CONTEXT)
+    name = CliHitlToolFunctionName.parse_tool_call(tc)
+    name.assert_matches(CliHitlToolFunctionName.CONFIRM_CLI_HITL)
+    wire = LiteLlmToolCallArgumentsWire.from_tool_call(tc)
+    return parse_confirm_cli_hitl_from_wire(wire)
+
+
+def parse_confirm_cli_hitl(msg: Message) -> ConfirmCliHitlToolArgs:
+    """Alias: полный parse от assistant message (включая require_single_tool_call)."""
+    return parse_confirm_cli_hitl_assistant(msg)
+
+
+__all__ = [
+    "parse_confirm_cli_hitl",
+    "parse_confirm_cli_hitl_assistant",
+    "parse_confirm_cli_hitl_from_wire",
+]

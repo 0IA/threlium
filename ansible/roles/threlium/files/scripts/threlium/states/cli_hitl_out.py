@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """cli_hitl_out → egress_router@localhost: запрос подтверждения команды (ARCHITECTURE §6.2, §7)."""
-import shlex
 from email.message import EmailMessage
 
-from threlium.cli_fsm import parse_cli_intent_payload
+from threlium.cli_fsm import cli_command_line_for_intent, parse_cli_intent_payload
 from threlium.fsm_emit import build_fsm_step_to_stage
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
@@ -21,10 +20,10 @@ def main(
     body = system_part_text(msg).strip()
     cli = parse_cli_intent_payload(body)
     if cli:
-        line = " ".join(shlex.quote(a) for a in cli.argv)
-        if cli.cwd:
-            line = f"(cwd={shlex.quote(cli.cwd)}) {line}"
-        user_body = render_prompt(PromptPath.CLI_HITL_OUT_CONFIRM, command_line=line)
+        user_body = render_prompt(
+            PromptPath.CLI_HITL_OUT_CONFIRM,
+            command_line=cli_command_line_for_intent(cli),
+        )
     else:
         user_body = render_prompt(PromptPath.CLI_HITL_OUT_UNPARSABLE)
     # Вопрос пользователю: <system> — тело для внешней отправки (egress_router пробрасывает,

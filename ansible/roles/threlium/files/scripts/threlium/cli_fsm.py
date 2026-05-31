@@ -73,6 +73,14 @@ def cli_payload_as_json(cli: CliIntentPayload) -> str:
     return json.dumps({"cli": inner}, ensure_ascii=False)
 
 
+def cli_command_line_for_intent(cli: CliIntentPayload) -> str:
+    """Строка команды для HITL-вопроса и classify (shlex-quoted argv, optional cwd)."""
+    line = " ".join(shlex.quote(a) for a in cli.argv)
+    if cli.cwd:
+        line = f"(cwd={shlex.quote(cli.cwd)}) {line}"
+    return line
+
+
 def argv_to_shell_line(argv: list[str]) -> str:
     """Склейка argv в строку для ``sh -c`` (операторы без кавычек)."""
     parts: list[str] = []
