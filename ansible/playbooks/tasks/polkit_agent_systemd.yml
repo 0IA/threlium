@@ -1,0 +1,89 @@
+---
+# Polkit: allow threlium_user system systemd-run / daemon-reload without password.
+# Opt-in: threlium_polkit_agent_systemd_enabled (import_tasks in site.yml).
+
+- name: Install policykit-1 for agent systemd-run authorization
+  ansible.builtin.apt:
+    name: policykit-1
+    state: present
+    update_cache: true
+  become: true
+  tags: [deploy]
+
+- name: Ensure polkit rules directory exists
+  ansible.builtin.file:
+    path: /etc/polkit-1/rules.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  tags: [deploy]
+
+- name: Deploy polkit rules for agent system systemd-run
+  ansible.builtin.template:
+    src: "{{ threlium_role_templates }}/polkit/99-threlium-agent-systemd-run.rules.j2"
+    dest: /etc/polkit-1/rules.d/99-threlium-agent-systemd-run.rules
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  notify: restart polkit
+  tags: [deploy]
+
+- name: Assert polkit service is active after rules deploy
+  ansible.builtin.systemd:
+    name: polkit
+    state: started
+  become: true
+  tags: [deploy]
+
+- name: Acceptance — agent may run transient system unit without polkit prompt
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --wait
+      - --pipe
+      - --
+      - /bin/true
+  become: true
+  become_user: "{{ threlium_user }}"
+  register: threlium_polkit_acceptance_true
+  changed_when: false
+  failed_when: threlium_polkit_acceptance_true.rc != 0
+  tags: [deploy]
+
+- name: Acceptance — agent may run systemctl daemon-reload as root via systemd-run
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --wait
+      - --pipe
+      - --uid=0
+      - --
+      - systemctl
+      - daemon-reload
+  become: true
+  become_user: "{{ threlium_user }}"
+  register: threlium_polkit_acceptance_daemon_reload
+  changed_when: false
+  failed_when: threlium_polkit_acceptance_daemon_reload.rc != 0
+  tags: [deploy]
+
+- name: Acceptance — cgroup properties on system transient unit
+  ansible.builtin.command:
+    argv:
+      - systemd-run
+      - --wait
+      - --pipe
+      - "--property=MemoryMax={{ threlium_cli.exec_memory_max | default('256M') }}"
+      - "--property=CPUQuota={{ threlium_cli.exec_cpu_quota | default('100%') }}"
+      - "--property=TasksMax={{ threlium_cli.exec_tasks_max | default(16) }}"
+      - --
+      - /bin/true
+  become: true
+  become_user: "{{ threlium_user }}"
+  register: threlium_polkit_acceptance_properties
+  changed_when: false
+  failed_when: threlium_polkit_acceptance_properties.rc != 0
+  tags: [deploy]

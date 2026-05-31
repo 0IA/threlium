@@ -165,6 +165,11 @@
       changed_when: false
       tags: [deploy]
 
+    - name: Polkit — system systemd-run for agent (opt-in)
+      ansible.builtin.import_tasks: tasks/polkit_agent_systemd.yml
+      when: threlium_polkit_agent_systemd_enabled | default(false) | bool
+      tags: [deploy]
+
     # Cockpit (и любой PAM-login) использует системного пользователя threlium_user + пароль из shadow.
     - name: Set agent UNIX password for PAM login (Cockpit; optional)
       ansible.builtin.user:
@@ -1180,5 +1185,11 @@
     - name: restart openssh server
       ansible.builtin.service:
         name: ssh
+        state: restarted
+      become: true
+
+    - name: restart polkit
+      ansible.builtin.systemd:
+        name: polkit
         state: restarted
       become: true

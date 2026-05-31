@@ -45,6 +45,12 @@ threlium_msmtp:
 threlium_egress:
   email_from: "agent@gmail.com"
 
+# Polkit + privileged cli_exec (system systemd-run as root; opt-in):
+# threlium_polkit_agent_systemd_enabled: true
+# threlium_cli:
+#   system_scope_enabled: true
+#   system_scope_cap_names: "privileged"
+
 # SSH hardening (по умолчанию выкл.)
 # threlium_ssh_hardening_enabled: true
 # threlium_ssh_pubkey_file: "~/.ssh/id_ed25519.pub"

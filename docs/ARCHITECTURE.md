@@ -314,6 +314,8 @@ Threlium — **IRT-tree FSM** без глобального координато
 
 **Лимиты ресурсов на конкретный CLI-запуск** — `timeout` + `systemd-run --scope` с transient cgroup'ом (`MemoryMax=…`, `CPUQuota=…`, `TasksMax=…`) задаются в модуле `threlium.states.cli_exec` параметрами, вытягиваемыми из `X-Threlium-Capabilities` текущего фрейма ([SUBAGENT_TABLE.md](SUBAGENT_TABLE.md), секция «Заголовки `X-Threlium-`\*»). Общесистемный лимит параллелизма воркеров — slice `threlium-work.slice` ([ORCHESTRATION.md §5](ORCHESTRATION.md#5-гонки-восстановление-лимит-параллелизма)); он касается FSM-стадий, а не транзиентных CLI-scope'ов, которые живут в собственной иерархии cgroup'ов.
 
+**Два режима `cli_exec`.** По умолчанию — **user scope**: `systemd-run --user --scope --quiet` (user manager, Polkit не нужен). При `cli.system_scope_enabled` и совпадении вершины `X-Threlium-Capabilities` с `cli.system_scope_cap_names` — **system scope**: `systemd-run --wait --pipe --uid=0` с теми же cgroup-свойствами; на хосте должен быть настроен Polkit для `threlium_user` (`threlium_polkit_agent_systemd_enabled` в плейбуке, см. [`PLAYBOOK.md` §4.2.13a](PLAYBOOK.md#42-порядок-задач-в-siteyml)). Polkit разрешает system `systemd-run` без пароля; allowlist/HITL в `cli_intent` остаются отдельным слоем.
+
 ---
 
 ## 7. Служебные заголовки FSM

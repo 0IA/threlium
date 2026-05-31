@@ -1,0 +1,16 @@
+/* Managed by Ansible — system systemd-run for {{ threlium_user }} without password */
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units") {
+        if (subject.user == "{{ threlium_user }}") {
+            return polkit.Result.YES;
+        }
+    }
+});
+
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.reload-daemon") {
+        if (subject.user == "{{ threlium_user }}") {
+            return polkit.Result.YES;
+        }
+    }
+});
