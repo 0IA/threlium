@@ -9,6 +9,10 @@ import os
 import shlex
 
 E2E_THRELIUM_USER = os.environ.get("THRELIUM_E2E_THRELIUM_USER", "threlium")
+E2E_REMOTE_THRELIUM_HOME = os.environ.get(
+    "THRELIUM_E2E_REMOTE_THRELIUM_HOME",
+    f"/home/{E2E_THRELIUM_USER}/threlium/data",
+)
 
 # ``journalctl --user-unit=…`` из ``docker exec`` (root) смотрит user-session **root**;
 # сервисы threlium — в user journal UID ``E2E_THRELIUM_USER``.
@@ -102,6 +106,34 @@ runuser -u {u} -- env XDG_RUNTIME_DIR=/run/user/$uid journalctl --user --vacuum-
 rc_v=$?
 echo "[e2e] SUT user journal (UID $uid): journalctl --user --rotate rc=$rc_r --vacuum-time=1s rc=$rc_v"
 exit 0
+"""
+
+
+def e2e_patch_hop_budget_in_threlium_yaml_bash(*, budget_root: int, budget_sub: int) -> str:
+    """Патч ``hop.budget_*`` в ``config/threlium.yaml`` на SUT (без ansible)."""
+    cfg = shlex.quote(f"{E2E_REMOTE_THRELIUM_HOME}/config/threlium.yaml")
+    return f"""set -eu
+cfg={cfg}
+test -f "$cfg"
+sed -i 's/^  budget_root: .*/  budget_root: {int(budget_root)}/' "$cfg"
+sed -i 's/^  budget_sub: .*/  budget_sub: {int(budget_sub)}/' "$cfg"
+grep -A3 '^hop:' "$cfg" | head -4
+"""
+
+
+def e2e_restart_threlium_engine_bash() -> str:
+    """Перезапуск только ``threlium-engine`` (user systemd), bridges не трогаем."""
+    u = E2E_THRELIUM_USER
+    return f"""set -eu
+uid=$(id -u {u})
+export XDG_RUNTIME_DIR=/run/user/$uid
+runuser -u {u} -- systemctl --user stop threlium-engine.service 2>/dev/null || true
+runuser -u {u} -- systemctl --user reset-failed threlium-engine.service 2>/dev/null || true
+runuser -u {u} -- systemctl --user start threlium-engine.service
+sleep 1
+st=$(runuser -u {u} -- systemctl --user is-active threlium-engine.service || true)
+echo "[e2e] threlium-engine.service is-active: ${{st}}"
+test "$st" = active
 """
 
 

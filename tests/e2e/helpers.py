@@ -64,6 +64,8 @@ from .sut_user_systemd import (
     e2e_sut_threlium_user_journal_rotate_vacuum_bash,
     e2e_sut_threlium_user_workers_idle_probe_bash,
     e2e_sut_threlium_user_workers_stall_diag_bash,
+    e2e_patch_hop_budget_in_threlium_yaml_bash,
+    e2e_restart_threlium_engine_bash,
     e2e_start_threlium_user_pipeline_bash,
     e2e_stop_threlium_user_pipeline_bash,
     e2e_threlium_user_unit_journalctl_bash,
@@ -2113,22 +2115,68 @@ _E2E_LEAVE_STACK_RUNNING_ENV = "THRELIUM_E2E_LEAVE_STACK_RUNNING"
 _E2E_DEFAULT_HOP_BUDGET = {"budget_root": 256, "budget_sub": 256}
 
 
+def _e2e_apply_hop_budget_on_sut(
+    project_name: str,
+    *,
+    budget_root: int,
+    budget_sub: int,
+    repo_root: Path | None = None,
+) -> None:
+    """Патч ``hop`` в ``threlium.yaml`` на SUT и перезапуск ``threlium-engine`` (без ansible)."""
+    root = repo_root or REPO_ROOT
+    patch = service_exec(
+        project_name,
+        "sut",
+        [
+            "bash",
+            "-lc",
+            e2e_patch_hop_budget_in_threlium_yaml_bash(
+                budget_root=budget_root,
+                budget_sub=budget_sub,
+            ),
+        ],
+        repo_root=root,
+        timeout=int(TIMEOUT_POLL_SHORT),
+    )
+    if patch.returncode != 0:
+        raise RuntimeError(
+            "e2e: failed to patch hop budget in threlium.yaml on SUT; "
+            f"rc={patch.returncode} stdout={(patch.stdout or '')[-800:]!r}"
+        )
+    restart = service_exec(
+        project_name,
+        "sut",
+        ["bash", "-lc", e2e_restart_threlium_engine_bash()],
+        repo_root=root,
+        timeout=int(TIMEOUT_POLL_SHORT),
+    )
+    if restart.returncode != 0:
+        raise RuntimeError(
+            "e2e: failed to restart threlium-engine after hop budget patch; "
+            f"rc={restart.returncode} stdout={(restart.stdout or '')[-800:]!r}"
+        )
+    log.info(
+        "sut_hop_budget_applied",
+        budget_root=budget_root,
+        budget_sub=budget_sub,
+        patch_tail=(patch.stdout or "").strip()[-200:],
+    )
+
+
 def e2e_refresh_hop_budget_sub(
     project_name: str,
     *,
     budget_sub: int,
     repo_root: Path | None = None,
 ) -> None:
-    """Redeploy ``threlium.yaml`` ``hop.budget_sub`` via ansible ``refresh`` (restarts engine)."""
-    os.environ[_E2E_LEAVE_STACK_RUNNING_ENV] = "1"
+    """Установить ``hop.budget_sub`` на SUT и перезапустить engine (e2e live budget tests)."""
     hop = dict(_E2E_DEFAULT_HOP_BUDGET)
     hop["budget_sub"] = budget_sub
-    run_e2e_site_playbook(
+    _e2e_apply_hop_budget_on_sut(
         project_name,
-        checkout="/unused",
-        repo_root=repo_root or REPO_ROOT,
-        ansible_tags="refresh",
-        ansible_extra_vars={"threlium_hop": hop},
+        budget_root=int(hop["budget_root"]),
+        budget_sub=int(hop["budget_sub"]),
+        repo_root=repo_root,
     )
 
 
@@ -2137,13 +2185,12 @@ def e2e_refresh_hop_budget_default(
     *,
     repo_root: Path | None = None,
 ) -> None:
-    """Restore e2e inventory ``hop`` defaults (``budget_sub=256``) after a scoped override."""
-    os.environ[_E2E_LEAVE_STACK_RUNNING_ENV] = "1"
-    run_e2e_site_playbook(
+    """Вернуть e2e-дефолты ``hop`` (``budget_root/sub=256``) на SUT и перезапустить engine."""
+    _e2e_apply_hop_budget_on_sut(
         project_name,
-        checkout="/unused",
-        repo_root=repo_root or REPO_ROOT,
-        ansible_tags="refresh",
+        budget_root=int(_E2E_DEFAULT_HOP_BUDGET["budget_root"]),
+        budget_sub=int(_E2E_DEFAULT_HOP_BUDGET["budget_sub"]),
+        repo_root=repo_root,
     )
 
 
