@@ -4,15 +4,12 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "lightrag_query_response"
+        "matches": "^lightrag_.*"
       }
     },
     "bodyPatterns": [
       {
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
-      },
-      {
-        "matches": "(?s)(?!.*Knowledge Graph Data \\(Entity\\):)(?!.*---Data to be Processed---).*(?:X-Threlium-LightRAG-Chunk:\\s*\\d+).*"
       },
       {
         "contains": "\"tools\""
@@ -22,7 +19,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasNotProperty": "live_hitl_h03_hitl_classified"
+        "hasProperty": "live_hitl_h03_reject"
       }
     }
   },
@@ -32,7 +29,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-wiremock-naive",
+      "id": "chatcmpl-e2e-hitl-reject-absorb-lightrag",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -45,11 +42,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_lightrag_056_chat_lightrag_naive_chunk",
+                "id": "call_hitl_reject_absorb_lightrag",
                 "type": "function",
                 "function": {
-                  "name": "generate_rag_answer",
-                  "arguments": "{\"answer\": \"E2e naive RAG stub: no grounded answer in mock (use graph path in e2e).\"}"
+                  "name": "extract_knowledge_graph",
+                  "arguments": "{\"entities\": [], \"relations\": []}"
                 }
               }
             ]

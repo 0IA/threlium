@@ -4,24 +4,20 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "lightrag_index_entity"
+        "equalTo": "ingress_distill"
       }
     },
     "bodyPatterns": [
       {
-        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+        "matches": "(?s).*(openai/threlium_e2e_l1|threlium_e2e_l1).*"
       },
       {
         "contains": "\"tools\""
+      },
+      {
+        "contains": "ingress_distill"
       }
-    ],
-    "customMatcher": {
-      "name": "state-matcher",
-      "parameters": {
-        "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasNotProperty": "live_hitl_h03_hitl_classified"
-      }
-    }
+    ]
   },
   "response": {
     "status": 200,
@@ -29,7 +25,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-wiremock-entity-extraction",
+      "id": "chatcmpl-e2e-ingress-distill",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -42,11 +38,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_lightrag_085_chat_lightrag_entity_extraction",
+                "id": "call_ingress_distill_e2e",
                 "type": "function",
                 "function": {
-                  "name": "extract_knowledge_graph",
-                  "arguments": "{\"entities\": [{\"name\": \"E2e Stub Entity\", \"type\": \"concept\", \"description\": \"Synthetic entity for deterministic e2e mock.\"}], \"relations\": []}"
+                  "name": "ingress_distill",
+                  "arguments": "{\"user_query\":\"The user asks to solve the alchemist river crossing logic puzzle: move all listed entities across a river under given safety constraints and produce a valid crossing sequence.\",\"user_reply_language\":\"Russian\",\"open_gaps\":[],\"step_back_notes\":[\"Deliver puzzle solution; standalone new thread.\"]}"
                 }
               }
             ]

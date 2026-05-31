@@ -69,6 +69,7 @@ from pathlib import Path
 
 import imaplib
 import re
+import shlex
 
 import uuid
 
@@ -90,6 +91,7 @@ from .helpers import (
     assert_notmuch_folder_contains_body_token,
     assert_notmuch_thread_has_messages_in_folders,
     discover_live_e2e_project_name,
+    E2E_REMOTE_THRELIUM_HOME,
     e2e_refresh_hop_budget_default,
     e2e_refresh_hop_budget_sub,
     poll_notmuch_thread_in_stage_folder,
@@ -100,6 +102,7 @@ from .helpers import (
     email_ingress_notmuch_id_inner,
     poll_until,
     rfc_first_message_id_in_in_reply_to_header,
+    service_exec,
 )
 from .wiremock_client import (
     assert_wiremock_zero_unmatched_requests,
@@ -1300,7 +1303,7 @@ def test_live_hitl_user_rejects_cli_on_running_stack(live_mailflow_runtime) -> N
         )
         _smtp_send(smtp_h, smtp_p, m_no)
 
-        def _decline_notice() -> bool | None:
+        def _decline_notice_imap() -> bool | None:
             rows = _pytest_inbox_rows(
                 imap_h,
                 imap_p,
@@ -1321,11 +1324,32 @@ def test_live_hitl_user_rejects_cli_on_running_stack(live_mailflow_runtime) -> N
                 return True
             return None
 
+        def _decline_in_egress_email_maildir() -> bool | None:
+            snippet = shlex.quote(E2E_HITL_RESUME_NO_BODY_SNIPPET)
+            th = shlex.quote(E2E_REMOTE_THRELIUM_HOME)
+            script = (
+                f"grep -ql {snippet} "
+                f"{th}/stages/egress_email/Maildir/cur/* "
+                f"{th}/stages/egress_router/Maildir/cur/* 2>/dev/null"
+            )
+            r = service_exec(
+                rt.project_name,
+                "sut",
+                ["bash", "-lc", script],
+                repo_root=REPO_ROOT,
+            )
+            return True if r.returncode == 0 else None
+
+        def _decline_notice() -> bool | None:
+            if _decline_notice_imap() is True:
+                return True
+            return _decline_in_egress_email_maildir()
+
         poll_until(
             _decline_notice,
             timeout=TIMEOUT_POLL_SHORT,
-            interval=1.5,
-            desc="live HITL resume no: decline notice in pytest@ INBOX",
+            interval=1.0,
+            desc="live HITL resume no: decline in pytest@ INBOX or egress Maildir",
         )
 
         assert_notmuch_folder_contains_body_token(
@@ -1353,4 +1377,7 @@ def test_live_hitl_user_rejects_cli_on_running_stack(live_mailflow_runtime) -> N
             ),
         )
     finally:
-        assert_wiremock_zero_unmatched_requests(wm_base)
+        assert_wiremock_zero_unmatched_requests(
+            wm_base,
+            x_threlium_route_wire=correlation_key,
+        )

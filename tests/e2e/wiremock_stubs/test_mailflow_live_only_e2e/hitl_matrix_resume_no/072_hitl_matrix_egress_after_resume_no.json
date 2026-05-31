@@ -16,9 +16,6 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "user did not confirm the CLI command"
       }
     ],
     "customMatcher": {

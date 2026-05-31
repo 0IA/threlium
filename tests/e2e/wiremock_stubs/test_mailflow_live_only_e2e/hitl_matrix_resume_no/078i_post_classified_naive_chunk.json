@@ -22,7 +22,8 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasNotProperty": "live_hitl_h03_hitl_classified"
+        "hasProperty": "live_hitl_h03_hitl_classified",
+        "hasNotProperty": "live_hitl_h03_reject"
       }
     }
   },
@@ -49,7 +50,7 @@
                 "type": "function",
                 "function": {
                   "name": "generate_rag_answer",
-                  "arguments": "{\"answer\": \"E2e naive RAG stub: no grounded answer in mock (use graph path in e2e).\"}"
+                  "arguments": "{\"answer\": \"e2e hitl reject fast path\"}"
                 }
               }
             ]
