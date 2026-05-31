@@ -56,15 +56,18 @@ threlium_bridges:
 # =============================================================================
 # cli — песочница systemd-run для cli_exec.
 # Структура 1:1 с секцией cli в config/threlium.yaml.
-# allowlist: read-only discovery (rg, find, git grep/log/show) + basic read helpers.
-# Shell chains (&&, |, ;) run via sh -c when every segment binary is on allowlist; $(` denied.
+# allowlist: regex (fullmatch basename), comma-separated; default — read-only discovery.
+# Shell chains (&&, |, ;) when every segment matches; $(` denied via deny_patterns.
 # =============================================================================
 threlium_cli:
   exec_timeout: 30
   exec_memory_max: "256M"
   exec_cpu_quota: "100%"
   exec_tasks_max: 16
-  allowlist: "ls,cat,pwd,echo,true,head,tail,wc,find,rg,grep,git,python3,test"
+  allowlist: "ls|cat|pwd|echo|true|head|tail|wc|find|rg|grep|git|python3|test"
+  # system_scope_*: privileged CLI via system systemd-run (needs threlium_polkit_agent_systemd_enabled).
+  system_scope_enabled: false
+  system_scope_cap_names: "privileged"
 
 # =============================================================================
 # hop / cap — бюджеты FSM и capability-строки.
@@ -113,6 +116,9 @@ threlium_path_unit_names: []
 # Пароль для интерактивного входа под threlium_user (PAM): Cockpit, SSH с паролем и т.п.
 # Пусто — учётная запись без пароля (только ключи/сессии без пароля). Задаётся в inventory (напр. e2e).
 threlium_agent_login_password: ""
+
+# Polkit: passwordless system systemd-run / daemon-reload for threlium_user (opt-in).
+threlium_polkit_agent_systemd_enabled: false
 
 # SSH hardening: authorized_keys + drop-in sshd_config.d + lineinfile.
 # Ключ определяется автоматически (find на ~/.ssh/*.pub с приоритетом ed25519 > ecdsa > rsa).

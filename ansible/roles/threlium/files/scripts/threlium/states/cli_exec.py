@@ -4,6 +4,10 @@
 Capability-профиль = хвост ``X-Threlium-Capabilities`` на входящем письме.
 Ресурсные лимиты (``MemoryMax``, ``CPUQuota``, ``TasksMax``) из ``Config``
 (env: ``THRELIUM_CLI_EXEC_*``). ``cli_exec`` только читает capabilities.
+
+При ``cli.system_scope_enabled`` и совпадении cap с ``system_scope_cap_names``
+— system manager: ``systemd-run --wait --pipe --uid=0`` (Polkit на хосте).
+Иначе — user scope: ``systemd-run --user --scope --quiet``.
 """
 import subprocess
 from email.message import EmailMessage
@@ -38,6 +42,51 @@ def _peek_cap_top(
     return parts[-1] if parts else None
 
 
+def _system_scope_cap_names(settings: ThreliumSettings) -> set[str]:
+    raw = settings.cli.system_scope_cap_names
+    return {x.strip() for x in raw.split(",") if x.strip()}
+
+
+def _use_system_scope(cap_name: str | None, config: ThreliumSettings) -> bool:
+    if not config.cli.system_scope_enabled:
+        return False
+    if not cap_name:
+        return False
+    return cap_name in _system_scope_cap_names(config)
+
+
+def _build_scope_cmd(
+    exec_argv: list[str],
+    config: ThreliumSettings,
+    *,
+    system_scope: bool,
+) -> list[str]:
+    props = [
+        f"--property=MemoryMax={config.cli.exec_memory_max}",
+        f"--property=CPUQuota={config.cli.exec_cpu_quota}",
+        f"--property=TasksMax={config.cli.exec_tasks_max}",
+    ]
+    if system_scope:
+        return [
+            "systemd-run",
+            "--wait",
+            "--pipe",
+            "--uid=0",
+            *props,
+            "--",
+            *exec_argv,
+        ]
+    return [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--quiet",
+        *props,
+        "--",
+        *exec_argv,
+    ]
+
+
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
@@ -59,20 +108,18 @@ def main(
         msg.get(MailHeaderName.CAPABILITIES.value)
     )
     cap_name = _peek_cap_top(cap_line) or "default"
+    system_scope = _use_system_scope(cap_name, config)
 
     exec_argv = resolve_cli_exec_argv(cli.argv)
     cmd_line = " ".join(exec_argv)
-    log.info("executing", cap=cap_name, cmd_line=cmd_line)
+    log.info(
+        "executing",
+        cap=cap_name,
+        cmd_line=cmd_line,
+        system_scope=system_scope,
+    )
 
-    # Build systemd-run --scope command with resource limits from Config
-    scope_cmd = [
-        "systemd-run", "--user", "--scope", "--quiet",
-        f"--property=MemoryMax={config.cli.exec_memory_max}",
-        f"--property=CPUQuota={config.cli.exec_cpu_quota}",
-        f"--property=TasksMax={config.cli.exec_tasks_max}",
-        "--",
-        *exec_argv,
-    ]
+    scope_cmd = _build_scope_cmd(exec_argv, config, system_scope=system_scope)
 
     try:
         result = subprocess.run(

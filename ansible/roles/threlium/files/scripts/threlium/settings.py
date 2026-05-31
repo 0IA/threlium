@@ -709,12 +709,33 @@ class CliSettings(BaseModel):
     allowlist: str = Field(
         default="ls,cat,pwd,echo,true,head,tail,wc,find,rg,grep,git,python3,test",
         min_length=1,
-        description="Список разрешённых имён бинарников через запятую (без путей).",
+        description="Regex по имени бинаря (без пути), через запятую; fullmatch. Пример: ls|cat или .*",
     )
     deny_patterns: str = Field(
         default="",
         description="Подстроки argv через запятую для запрета (дополнительная политика).",
     )
+    system_scope_enabled: bool = Field(
+        default=False,
+        description="Использовать system systemd-run (--wait --pipe --uid=0) при совпадении cap.",
+    )
+    system_scope_cap_names: str = Field(
+        default="privileged",
+        description="Вершины X-Threlium-Capabilities (через запятую) для system scope.",
+    )
+
+    @field_validator("allowlist", mode="after")
+    @classmethod
+    def _allowlist_regexes_compile(cls, v: str) -> str:
+        for part in v.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                re.compile(part)
+            except re.error as e:
+                raise ValueError(f"cli.allowlist: невалидный regex {part!r}: {e}") from e
+        return v
 
     @field_validator("exec_memory_max", mode="after")
     @classmethod

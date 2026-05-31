@@ -127,9 +127,29 @@ def _deny_substrings(settings: ThreliumSettings) -> tuple[str, ...]:
     return ("`", "$(", "${", "\n", "\r")
 
 
-def _allowlist_basenames(settings: ThreliumSettings) -> set[str]:
-    raw = settings.cli.allowlist
-    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+_ALLOWLIST_BROAD_PROBE = "threlium-cli-allowlist-broad-probe"
+
+
+def _allowlist_patterns(settings: ThreliumSettings) -> tuple[re.Pattern[str], ...]:
+    """Сегменты ``cli.allowlist`` через запятую — regex (``fullmatch`` по basename бинаря)."""
+    out: list[re.Pattern[str]] = []
+    for part in settings.cli.allowlist.split(","):
+        part = part.strip()
+        if part:
+            out.append(re.compile(part, re.IGNORECASE))
+    return tuple(out)
+
+
+def _basename_allowed(basename: str, settings: ThreliumSettings) -> bool:
+    name = os.path.basename(basename.strip() or " ").lower()
+    if not name:
+        return False
+    return any(p.fullmatch(name) for p in _allowlist_patterns(settings))
+
+
+def _allowlist_is_broad(settings: ThreliumSettings) -> bool:
+    """Широкий allowlist (напр. ``.*``) — разрешает любой бинарь; route-collision для FSM-имён."""
+    return _basename_allowed(_ALLOWLIST_BROAD_PROBE, settings)
 
 
 def _binaries_in_shell_line(line: str) -> list[str]:
@@ -155,8 +175,7 @@ def _policy_for_shell_line(line: str, settings: ThreliumSettings) -> CliIntentPo
     bins = _binaries_in_shell_line(line)
     if not bins:
         return CliIntentPolicy.HITL
-    allow = _allowlist_basenames(settings)
-    if all(b in allow for b in bins):
+    if all(_basename_allowed(b, settings) for b in bins):
         return CliIntentPolicy.ALLOW
     return CliIntentPolicy.HITL
 
@@ -173,13 +192,16 @@ def cli_argv_route_collision(
     не ловится: имя стоит в позиции аргумента, не бинаря.
     """
     route_by_name = {s.value: s for s in REASONING_TARGET_STAGES}
-    allow = _allowlist_basenames(settings)
     if argv_is_sh_c_wrapper(argv) or argv_uses_shell_chaining(argv):
         bins = _binaries_in_shell_line(shell_command_line_for_argv(argv))
     else:
         bins = [os.path.basename(argv[0].strip() or " ").lower()]
     for b in bins:
-        if b in route_by_name and b not in allow:
+        if b not in route_by_name:
+            continue
+        if _allowlist_is_broad(settings):
+            return route_by_name[b]
+        if not _basename_allowed(b, settings):
             return route_by_name[b]
     return None
 
@@ -203,7 +225,8 @@ def classify_cli_intent(
 def classify_cli_policy(cli: CliIntentPayload, settings: ThreliumSettings) -> CliIntentPolicy:
     """Политика исполнения CLI: ``allow`` | ``deny`` | ``hitl``.
 
-    Одиночная команда: ``argv[0]`` в allowlist → ``allow``, иначе ``hitl``.
+    Одиночная команда: basename ``argv[0]`` совпадает с regex из allowlist → ``allow``, иначе ``hitl``.
+    Allowlist — сегменты через запятую, каждый regex (``fullmatch`` по имени бинаря), напр. ``.*`` или ``ls|cat``.
     Цепочка (``&&``, ``;``, ``|`` в argv или ``sh -c``): все сегменты в allowlist → ``allow``.
     Subshell / ``$(`` / backticks → ``deny``.
     """
@@ -216,7 +239,7 @@ def classify_cli_policy(cli: CliIntentPayload, settings: ThreliumSettings) -> Cl
         if sub in joined:
             return CliIntentPolicy.DENY
     base = os.path.basename(argv[0].strip() or " ").lower()
-    if base in _allowlist_basenames(settings):
+    if _basename_allowed(base, settings):
         return CliIntentPolicy.ALLOW
     return CliIntentPolicy.HITL
 
