@@ -8,8 +8,6 @@ from typing import Self, cast
 import base62
 import msgspec
 
-from threlium.mime_reform import parse_rfc822
-
 from ._core import _OptionalStripEmpty
 from threlium.mail_header_names import MailHeaderName
 from .identity import (
@@ -22,6 +20,13 @@ from .identity import (
 from .rfc import RfcInReplyToWire, RfcReferencesWire
 
 _HDR = MailHeaderName
+
+
+def _parse_rfc822_bytes(data: bytes) -> EmailMessage:
+    """Ленивый разбор RFC822 — без импорта ``mime_reform`` на уровне модуля (цикл с ``types``)."""
+    from threlium.mime_reform import parse_rfc822
+
+    return parse_rfc822(data)
 
 
 def ingress_route_from_json_str(raw: str) -> IngressRoute:
@@ -93,7 +98,7 @@ class EmailStruct:
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
         """``parse_rfc822`` → ``from_message``."""
-        return cls.from_message(parse_rfc822(data))
+        return cls.from_message(_parse_rfc822_bytes(data))
 
     @classmethod
     def from_file(cls, path: Path | str) -> Self:
@@ -118,7 +123,7 @@ class IngressRouterChildMsg(msgspec.Struct, frozen=True, kw_only=True):
 
     @classmethod
     def from_bytes(cls, data: bytes) -> Self:
-        return cls.from_email(parse_rfc822(data))
+        return cls.from_email(_parse_rfc822_bytes(data))
 
     @classmethod
     def from_file(cls, path: Path | str) -> Self:

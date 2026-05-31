@@ -48,24 +48,14 @@ def _plain_text_tojson(value: object, indent: int | None = None) -> str:
 
 
 def _history_text(msg: object) -> str:
-    """Jinja-фильтр: содержательное тело письма = конкатенация его ``<history>``-частей.
-
-    После унификации тело контекста живёт в ``<history>``-частях (а не в первом попавшемся
-    text/plain, которым может оказаться ``<system>``-payload). Граница чтения — VO-хелперы
-    ``mime_reform``; импорт ленивый, чтобы не тянуть MIME-слой в низкоуровневый рендерер.
-    """
+    """Jinja-фильтр: содержательное тело письма = конкатенация его ``<history>``-частей."""
     from email.message import EmailMessage
 
-    from threlium.mime_reform import history_part_text, iter_history_parts
+    from threlium.mime_reform import concat_history_parts_text
 
     if not isinstance(msg, EmailMessage):
         return ""
-    chunks = [
-        text
-        for _cid, part in iter_history_parts(msg)
-        if (text := history_part_text(part).strip())
-    ]
-    return "\n\n---\n\n".join(chunks)
+    return concat_history_parts_text(msg)
 
 
 def _last_history_text(msg: object) -> str:

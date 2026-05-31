@@ -437,6 +437,19 @@ def iter_history_parts(msg: EmailMessage) -> list[tuple[EnrichContentId, EmailMe
     ]
 
 
+def concat_history_parts_text(msg: EmailMessage) -> str:
+    """Конкатенация всех непустых ``<history>``-частей (§5/§7 CONTEXT_CONTRACT).
+
+    Agent-facing текст письма с history — не ``get_body`` / первый text/plain.
+  """
+    chunks = [
+        text
+        for _cid, part in iter_history_parts(msg)
+        if (text := history_part_text(part).strip())
+    ]
+    return "\n\n---\n\n".join(chunks)
+
+
 def last_history_part_text(msg: EmailMessage) -> str:
     """Текст последней непустой ``<history>``-части (canonical user turn для enrich)."""
     parts = iter_history_parts(msg)
