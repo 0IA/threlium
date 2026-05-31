@@ -972,6 +972,7 @@ python -c "import lightrag; from importlib.metadata import version; print(versio
 
 - [`FSM.md`](FSM.md) — граф состояний и стадий FSM, контракты переходов, инвариант «стадия не индексирует архив».
 - [`CONTEXT_CONTRACT.md`](CONTEXT_CONTRACT.md) — **источник истины** по наполнению контекста: CID `<hash@history>` / `<hash@system>`, score/origin, дедуп, сбор `enrich`/`enrich_fast`, презентация reasoning, LightRAG-индексация, модель «callee владеет историей».
+- [`FORMAL_REASON_GATE.md`](FORMAL_REASON_GATE.md) — цикл `formal_reason`, relay `<system>` / CID, `FormalReasonResultPayload`, strict gate и ограничение tools.
 - [`MESSAGES.md`](MESSAGES.md) — wire-формат писем, заголовки `X-Threlium-*`, тегирование как state-маркер индексации.
 - [`ORCHESTRATION.md`](ORCHESTRATION.md) — systemd-обвязка, оркестрация stage worker'ов и долгоживущего `threlium-engine` (включая RAG-loop).
 - [`SUBAGENT_TABLE.md`](SUBAGENT_TABLE.md) — матрица делегирования и роутинг ingress, контракт HITL и маркеры `subagent_intent` / `subagent_end`.

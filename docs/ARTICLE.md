@@ -45,7 +45,7 @@
 
 ## Конечный автомат на Maildir'ах
 
-Threlium — IRT-tree FSM. Расшифрую: конечный автомат, у которого состояния — очереди Maildir, а граф переходов определяется In-Reply-To цепочками писем. Глобального координатора нет. Состояние фрейма (бюджет шагов, права) живёт прямо в заголовках письма — `X-Threlium-Hop-Budget`, `X-Threlium-Capabilities`.
+Threlium — IRT-tree FSM. Расшифрую: конечный автомат, у которого состояния — очереди Maildir, а граф переходов определяется In-Reply-To цепочками писем. Глобального координатора нет. Состояние фрейма (бюджет шагов) живёт в заголовке `X-Threlium-Hop-Budget`; CLI-исполнение — sandbox/privileged через `cli_intent` (`CliSettings` в `threlium.yaml`), без отдельного capability-заголовка.
 
 ### Стадии FSM
 
@@ -390,7 +390,7 @@ CE -> I : observation (результат)
 
 ![HITL-прерывание](https://www.plantuml.com/plantuml/png/RLBDQjj04BxlKmm-nL2Jkmzfm2XO4328-6msyYOHI5gpMYVDhN5faqEWK7flxxsu8S8XJcJm4yo-GfuadoGxmQqFqh3wVkQRMUrdLXexJc8nGet2Q2HJImsZPARJA3rjaCmes0J3E1f4gLMfhT2E_pzy5jbueCSreTlR9AXJex9iO80hKp6yGCZGQaCD_iK5pzqjpr3lUEecd9VdYjRVz46yqgY2jcG0DavK7N7B1EgJ2clG4oAWrXu6eJPPhMCAPHotoIJKCYUqQvFHxb1QAK1Oqy9OPbbqSjacVkQS-8uWqHSVtev3bLwk1DqU15t_wB1DxeeNxZCNg0zkucw95rld_IuWWjGB80NdmLs1yyG57E0Exjgcu2VXLV7xe2x_y6-UyWnWxcvMFVwTu-DoBlgbmgyLFtcwdDCEx2Qmpjs4t3KAB7X6_0Y_Ppppfl3N8ZyuQg7pN_SLxtjw-VQ33enEohMyttrDxmHKVwwlGtJgLNkhh-Kjq0vwlOVEqQve2b1MtVHnfiovj95EAofYkI_bqf0N2skAVPKEyGk_0W==)
 
-`cli_exec` запускает команду через `systemd-run --scope` с лимитами из `X-Threlium-Capabilities` текущего фрейма: `MemoryMax`, `CPUQuota`, `TasksMax`, `timeout`.
+`cli_exec` запускает команду через `systemd-run --scope`: по умолчанию user-scope sandbox (`ProtectSystem=strict`, `PrivateNetwork`, `ReadWritePaths` из `threlium_cli`); при `privileged: true` в payload — `--uid=0` (system scope). HITL для privileged настраивается `privileged_hitl_enabled`.
 
 ---
 
@@ -398,10 +398,10 @@ CE -> I : observation (результат)
 
 Threlium поддерживает вложенные вызовы агентов (L0 → L1 → L2). Реализация — маркеры `subagent_intent` / `subagent_end` в IRT-дереве:
 
-- `reasoning` на L0 вызывает tool `subagent_intent` → маркер в IRT-цепочке с изолированным hop/cap.
+- `reasoning` на L0 вызывает tool `subagent_intent` → маркер в IRT-цепочке с изолированным hop-budget.
 - Субагент на L1 не знает, кто его вызвал. Работает как обычный агент.
 - По завершении `egress_router` по depth > 0 маршрутизирует результат не наружу, а в `subagent_end`.
-- `subagent_end` находит соответствующий `subagent_intent` по IRT, копирует hop/cap родителя и возвращает письмо в `ingress`.
+- `subagent_end` находит соответствующий `subagent_intent` по IRT, копирует hop-budget родителя и возвращает письмо в `ingress`.
 
 <details>
 <summary>PlantUML-исходник: Субагенты L0/L1</summary>
@@ -412,7 +412,7 @@ top to bottom direction
 
 package "L0 — основной диалог" {
   rectangle "reasoning L0" as R0
-  rectangle "subagent_intent\n(маркер + изолированный hop/cap)" as SI
+  rectangle "subagent_intent\n(маркер + изолированный hop-budget)" as SI
   rectangle "ingress" as ING1
   R0 --> SI : "tool: subagent_intent"
   SI --> ING1
@@ -427,7 +427,7 @@ package "L1 — субагент" {
   R1 --> EGR1 : "tool: egress_router"
 }
 
-rectangle "subagent_end\nIRT-обход → subagent_intent\nкопия hop/cap родителя" as SE
+rectangle "subagent_end\nIRT-обход → subagent_intent\nкопия hop-budget родителя" as SE
 rectangle "ingress L0" as ING0
 rectangle "enrich L0" as ENR0
 rectangle "reasoning L0\n(с результатом субагента)" as R0_2

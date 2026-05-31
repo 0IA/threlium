@@ -4,7 +4,8 @@
 > reasoning*. Итог двух рефакторингов: унификация `history`/`system` и модель «callee
 > владеет историей». Остальные документы ([`FSM.md`](FSM.md), [`RESPONSE_TABLE.md`](RESPONSE_TABLE.md),
 > [`MEMORY_TABLE.md`](MEMORY_TABLE.md), [`SUBAGENT_TABLE.md`](SUBAGENT_TABLE.md)) ссылаются
-> сюда, а не дублируют. Термины — [`INDEX.md` §глоссарий](INDEX.md). Типы/VO — [`TYPES.md`](TYPES.md).
+> сюда, а не дублируют. Цикл `formal_reason` и FSM gate — [`FORMAL_REASON_GATE.md`](FORMAL_REASON_GATE.md)
+> (не дублировать здесь). Термины — [`INDEX.md` §глоссарий](INDEX.md). Типы/VO — [`TYPES.md`](TYPES.md).
 
 Все имена/функции в этом документе соответствуют коду
 `ansible/roles/threlium/files/scripts/threlium/` (не «по памяти»).
@@ -105,7 +106,7 @@ flowchart LR
 |---|---|:--:|:--:|:--:|---|
 | `ingress` | `enrich` (или `cli_resume`) | — | да¹ | да | Единая точка входа. Ход пользователя → `<history>` + `<system>`; HITL-ответ → `cli_resume` только `<system>` (yes/no — управляющий сигнал, ¹без history). |
 | `enrich` | `reasoning` / `summarize_context` | — | — | да² | → `reasoning`: **`<system>` НЕТ** (reasoning не читает payload, см. ниже) — собирает core-CID §4 + `<unified-mail-context>` из `<history>`-частей треда; своих `<history>` не создаёт. ²Только → `summarize_context` есть `<system>`. |
-| `enrich_fast` | `reasoning` | — | — | **нет** | Relay-сборщик дельты: пробрасывает чужие `<history>` (штампует `origin`), replace `<response-state>`/`<task-state>`. Своих частей и `<system>` не создаёт (симметрично `enrich` → reasoning). |
+| `enrich_fast` | `reasoning` | — | — | **релей** | Relay-сборщик дельты: `<history>` + `<system>` из окна (штампует `origin`); replace `<response-state>`/`<task-state>`. Старые `@system` из `E_prev` не копируются — только свежие из дельты. `reasoning` не кладёт их в LLM-промпт, но читает для FSM gate (`formal_reason`). |
 | `reasoning` | tool | **нет** | **нет** | да | Чистый `<system>`-эмиттер tool-call (команда адресату). История — забота callee. На ВХОДЕ сам `<system>` не читает. |
 
 > **`<system>` на входе `reasoning` не нужен.** `reasoning` собирает контекст из core-CID частей
@@ -119,7 +120,7 @@ flowchart LR
 
 | Стадия | To: | echo | resp | sys | Роль |
 |---|---|:--:|:--:|:--:|---|
-| `formal_reason` | `enrich_fast` | **да** (payload) | да | — | Формулировка задачи (echo, origin=reasoning) + результат проверки (observation, origin=formal_reason). |
+| `formal_reason` | `enrich_fast` | **да** (payload) | да | **да** | Echo + observation (`<history>`) + `FormalReasonResultPayload` в `<system>` (origin на relay — `enrich_fast`; gate — [`FORMAL_REASON_GATE.md`](FORMAL_REASON_GATE.md)). |
 | `memory_query` | `enrich_fast` | **да** (query) | да | — | Запрос (echo, origin=reasoning) + RAG-ответ (observation, origin=memory_query). |
 | `thread_memory` / `global_memory` | `enrich_fast` | **да** (note) | нет | — | Для памяти ценен запрос: note = что агент решил запомнить; origin=reasoning; «recorded»-ответа нет. |
 | `response_observe` | `enrich_fast` | нет | да | — | Нарратив-обзор буфера + task-ledger. |
@@ -128,14 +129,14 @@ flowchart LR
 | `tasks_upsert` | `enrich_fast` / `ingress` | нет | нет | релей / да | Мутатор ledger (`<task-state>`); ошибка → `ingress`. |
 | `response_finalize` | `egress_router` / `ingress` | нет | да | да | Итоговый ответ (`<history>`+`<system>`); task-gate/ошибка → `ingress` (`<system>`). |
 | `reflect` | `ingress` | нет | **нет** | да | Анти-раздувание (`MEMORY_TABLE.md §3`): рефреш-промпт только `<system>`. |
-| `cli_intent` | `enrich_fast` / `ingress` / `cli_exec` / `cli_hitl_out` | нет | да³ | да | Роутер CLI. ³route-collision → `enrich_fast` (`<history>`-note с командой); deny/invalid → `ingress`, note **включает команду/payload** (→ history через ingress: агент помнит и попытку, и отказ); allow→`cli_exec`, hitl→`cli_hitl_out` несут команду downstream. |
+| `cli_intent` | `enrich_fast` / `cli_exec` / `cli_hitl_out` | нет | да³ | да | Роутер CLI. ³route-collision / invalid → `enrich_fast` (`<history>`-note); sandbox→`cli_exec`; privileged (+ HITL если включён)→`cli_hitl_out`→`cli_resume`→`cli_exec`. `cli_exec` / `cli_resume` (reject) → `enrich_fast`. |
 | `subagent_intent` | `ingress` | **да** (task) | нет | релей | Делегирование субагенту. Фильтр фрейма (`iter_irt_ancestors_filtered`) изолирует внутренние письма субагента — родителю видны лишь границы intent/end. Задача жила в `<system>` и терялась из истории родителя → request-echo (origin=reasoning) кладёт её в `<history>`. |
 
 **CLI / HITL цепочка.**
 
 | Стадия | To: | echo | resp | sys | Роль |
 |---|---|:--:|:--:|:--:|---|
-| `cli_exec` | `ingress` | —⁴ | да | да | Результат команды (observation: cmd_line+stdout/stderr/exit) → `<history>` (origin=cli_exec) + `<system>`. ⁴cmd_line уже в observation, отдельный echo избыточен. |
+| `cli_exec` | `enrich_fast` | —⁴ | да | да | Результат команды (observation: cmd_line+stdout/stderr/exit) → `<history>` (origin=cli_exec) + `<system>`. ⁴cmd_line уже в observation, отдельный echo избыточен. |
 | `cli_hitl_out` | `egress_router` | — | да | да | Вопрос пользователю: `<system>` = тело отправки, `<history>` = копия вопроса. |
 | `cli_resume` | `ingress` / `cli_exec` | — | нет | да | Возобновление после HITL-ответа; только `<system>`. |
 
@@ -219,13 +220,10 @@ load-time. Тело графа — конкатенация `<history>`-част
 → `ingress`. `ingress._emit_to_enrich`: `<history>` (ход в память, origin=ingress) +
 `<system>` (тело-команда для enrich) → `enrich`.
 
-**Tool-цикл (reasoning → formal_reason → enrich_fast → reasoning).**
-`reasoning` → `formal_reason`: `<system>` = команда (RDF/SHACL payload), **без** history.
-`formal_reason` → `enrich_fast`: ДВЕ `<history>`-части — request-echo (исходный payload,
-предштамп `origin=reasoning`) + observation (conforms/violations/derived/query, `origin`
-проставит enrich_fast = `formal_reason`). enrich_fast доклеивает обе в `E_prev`, возвращает в
-`reasoning`. Так и формулировка задачи, и результат проверки видны в истории
-(`memory_query` — аналогично: query-echo + RAG-ответ).
+**Tool-цикл (reasoning → formal_reason → enrich_fast → reasoning).** Каноническое описание
+(gate, `FormalReasonResultPayload`, relay `<system>`) — [`FORMAL_REASON_GATE.md`](FORMAL_REASON_GATE.md).
+Кратко: `reasoning → formal_reason` — только `<system>`-команда; callee — echo + observation +
+result JSON; `enrich_fast` релеит дельту (§5); prose в `<conversation_delta>`, gate по `<system>`.
 
 **Буфер ответа (append×N + observe + finalize).** `reasoning → response_append`: `<system>` =
 чанк. `response_append → enrich_fast`: preserving payload, **без** history (чанк не в памяти).
