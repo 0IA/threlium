@@ -211,6 +211,8 @@ def _e2e_hay_matches_enrich_plan_contract(hay: str) -> bool:
     return (
         ("formulate a retrieval question" in low or "knowledge graph" in low)
         and "indexed email" in low
+        and "distilled history" in low
+        and "incoming message (canonical)" in low
     )
 
 
@@ -1829,6 +1831,8 @@ def _e2e_openai_llm_coverage_missing(data: dict[str, Any], test_id: str) -> list
         missing.append(
             "lightrag entity extraction (X-Threlium-Call-Site: lightrag_index_entity)"
         )
+    if not any(_entry_has_call_site(e, "ingress_distill") for e in chat_entries):
+        missing.append("ingress_distill (X-Threlium-Call-Site: ingress_distill)")
 
     # kg_query (060_chat_lightrag_kg_query_llm.json) не проверяется: в однопроходном
     # тесте KG пуст к моменту aquery — LightRAG._build_query_context возвращает None

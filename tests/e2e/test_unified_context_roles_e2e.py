@@ -166,6 +166,9 @@ def test_unified_context_roles_two_turn(deployed_stack: str) -> None:
             assert E2E_OBSERVED_CHUNK in merged, "observe chunk missing from reasoning context"
             mail_ctx = _conversation_history_from_reasoning_journal(merged)
             assert mail_ctx, "no <conversation_history> in reasoning WireMock journal"
+            assert "## User intent" in mail_ctx, (
+                "conversation_history must carry ingress distill headings from <history> parts"
+            )
             assert _SERVICE_STAGE_ADDR_LEAK not in mail_ctx.lower(), (
                 "enrich_fast relay blob must collapse by content-CID dedup (and To: line is "
                 "not rendered): only canonical origins appear in conversation_history"

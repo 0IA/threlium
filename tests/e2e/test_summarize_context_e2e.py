@@ -10,6 +10,7 @@ from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage, NotmuchTag
 
 from .helpers import (
+    E2E_SUM_ORIG_HEAD_MARKER,
     E2E_SUM_ORIG_PAD_MARKER,
     E2E_SUMMARY_MARKER,
     E2E_SUMMARIZE_LLM_NEEDLE,
@@ -36,6 +37,7 @@ from .wiremock_client import (
     wiremock_public_base,
     _journal_chat_completion_user_content,
     _journal_request_anchor_haystack,
+    _wiremock_headers_get_ci,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -73,6 +75,38 @@ def _count_summarize_llm_posts(wm_base: str, *, stub_tag: str) -> int:
             stub_tag=stub_tag,
         )
     )
+
+
+def _summarize_context_user_content_merged(
+    wm_base: str,
+    *,
+    stub_tag: str,
+) -> str:
+    """Merged user content from summarize_context LLM POSTs (WireMock journal)."""
+    parts: list[str] = []
+    for entry in journal_entries_for_stub_tag(wm_base, stub_tag=stub_tag):
+        if not isinstance(entry, dict):
+            continue
+        req = entry.get("request")
+        if not isinstance(req, dict):
+            continue
+        if str(req.get("method") or "").upper() != "POST":
+            continue
+        url = str(req.get("url") or "")
+        if "/chat/completions" not in url and not url.rstrip("/").endswith(
+            "chat/completions"
+        ):
+            continue
+        call_site = _wiremock_headers_get_ci(
+            req.get("headers"), "X-Threlium-Call-Site"
+        )
+        hay = _journal_request_anchor_haystack(entry)
+        if call_site != "summarize_context" and E2E_SUMMARIZE_LLM_NEEDLE not in hay:
+            continue
+        body = _journal_chat_completion_user_content(entry)
+        if body:
+            parts.append(body)
+    return "\n".join(parts)
 
 
 def _reasoning_user_bodies_for_correlation(
@@ -136,6 +170,17 @@ def _assert_summarize_pipeline_artifacts(
     assert E2E_SUMMARY_MARKER in merged, "reasoning context should include durable summary marker"
     assert E2E_SUM_ORIG_PAD_MARKER not in merged, (
         "summarized originals (pad block) must not appear in reasoning user content"
+    )
+    merged_summarize = _summarize_context_user_content_merged(wm_base, stub_tag=stub_tag)
+    assert merged_summarize, "no summarize_context LLM user content in WireMock journal"
+    assert "## User intent" in merged_summarize, (
+        "summarize overflow bodies must use concat_history_parts_text (distill headings)"
+    )
+    assert E2E_SUM_ORIG_HEAD_MARKER in merged_summarize, (
+        "summarize input must include HEAD from inject (via distill), not drop overflow bodies"
+    )
+    assert E2E_SUM_ORIG_PAD_MARKER not in merged_summarize, (
+        "summarize input must not include raw PAD block (get_body regression)"
     )
     return n_summarize
 
