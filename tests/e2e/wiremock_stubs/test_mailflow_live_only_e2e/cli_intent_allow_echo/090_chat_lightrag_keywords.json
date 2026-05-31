@@ -10,6 +10,9 @@
     "bodyPatterns": [
       {
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -35,10 +38,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "{\"high_level_keywords\": [\"e2e_{{randomValue length=8 type='ALPHANUMERIC'}}\"], \"low_level_keywords\": [\"stub_{{randomValue length=8 type='ALPHANUMERIC'}}\"]}"
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_090_chat_lightrag_keywords",
+                "type": "function",
+                "function": {
+                  "name": "extract_query_keywords",
+                  "arguments": "{\"high_level_keywords\": [\"e2e_{{randomValue length=8 type='ALPHANUMERIC'}}\"], \"low_level_keywords\": [\"stub_{{randomValue length=8 type='ALPHANUMERIC'}}\"]}"
+                }
+              }
+            ]
           }
         }
       ]

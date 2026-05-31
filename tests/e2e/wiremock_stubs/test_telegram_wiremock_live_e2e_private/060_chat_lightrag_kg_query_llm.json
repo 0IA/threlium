@@ -16,6 +16,9 @@
       },
       {
         "contains": "Knowledge Graph Data (Entity):"
+      },
+      {
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -38,10 +41,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "(no graph context)"
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_060_chat_lightrag_kg_query_llm",
+                "type": "function",
+                "function": {
+                  "name": "generate_rag_answer",
+                  "arguments": "{\"answer\": \"(no graph context)\"}"
+                }
+              }
+            ]
           }
         }
       ]

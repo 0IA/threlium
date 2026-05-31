@@ -10,6 +10,9 @@
     "bodyPatterns": [
       {
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -32,10 +35,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "E2e merged stub summary for formal_reason chain test entity."
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_095_chat_lightrag_summarize",
+                "type": "function",
+                "function": {
+                  "name": "summarize_descriptions",
+                  "arguments": "{\"summary\": \"E2e merged stub summary for formal_reason chain test entity.\"}"
+                }
+              }
+            ]
           }
         }
       ]

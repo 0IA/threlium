@@ -10,7 +10,12 @@
       "X-Threlium-Call-Site": {
         "matches": "lightrag_index_entity|lightrag_index_gleaning|lightrag_index_summarize"
       }
-    }
+    },
+    "bodyPatterns": [
+      {
+        "contains": "\"tools\""
+      }
+    ]
   },
   "response": {
     "status": 200,
@@ -25,10 +30,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "entity<|#|>E2e Bootstrap Entity<|#|>concept<|#|>Synthetic entity from knowledge bootstrap indexing.<|COMPLETE|>"
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_008_chat_completions_bootstrap_knowledge",
+                "type": "function",
+                "function": {
+                  "name": "extract_knowledge_graph",
+                  "arguments": "{\"entities\": [{\"name\": \"E2e Bootstrap Entity\", \"type\": \"concept\", \"description\": \"Synthetic entity from knowledge bootstrap indexing.\"}], \"relations\": []}"
+                }
+              }
+            ]
           }
         }
       ]

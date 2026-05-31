@@ -4,7 +4,7 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "lightrag_index_gleaning"
+        "equalTo": "cli_hitl_resume"
       }
     },
     "bodyPatterns": [
@@ -13,12 +13,17 @@
       },
       {
         "contains": "\"tools\""
+      },
+      {
+        "contains": "confirm_cli_hitl"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-subagent-frame-iso-01::{{request.headers.[x-threlium-thread-root]}}"
+        "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasProperty": "live_hitl_h03_open",
+        "hasNotProperty": "live_hitl_h03_hitl_classified"
       }
     }
   },
@@ -28,7 +33,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-wiremock-gleaning",
+      "id": "chatcmpl-e2e-hitl-cli-hitl-resume-no",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -41,11 +46,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_lightrag_097_chat_lightrag_gleaning",
+                "id": "call_hitl_cli_hitl_resume_no",
                 "type": "function",
                 "function": {
-                  "name": "extract_knowledge_graph",
-                  "arguments": "{\"entities\": [], \"relations\": []}"
+                  "name": "confirm_cli_hitl",
+                  "arguments": "{\"confirmed\": false, \"interpretation\": \"e2e: user declined privileged CLI.\"}"
                 }
               }
             ]
@@ -53,5 +58,16 @@
         }
       ]
     }
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
+        "state": {
+          "live_hitl_h03_hitl_classified": "1"
+        }
+      }
+    }
+  ]
 }

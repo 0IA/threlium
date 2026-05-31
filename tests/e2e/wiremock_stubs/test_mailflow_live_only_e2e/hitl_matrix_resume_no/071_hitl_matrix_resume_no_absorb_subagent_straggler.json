@@ -26,7 +26,8 @@
       "parameters": {
         "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
         "hasProperty": "live_hitl_h03_open",
-        "hasNotProperty": "live_hitl_h03_straggler_absorbed"
+        "hasNotProperty": "live_hitl_h03_straggler_absorbed",
+        "hasNotProperty": "live_hitl_h03_hitl_classified"
       }
     }
   },

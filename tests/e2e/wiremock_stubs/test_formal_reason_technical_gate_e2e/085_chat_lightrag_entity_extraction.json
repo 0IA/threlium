@@ -10,6 +10,9 @@
     "bodyPatterns": [
       {
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -32,10 +35,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "entity<|#|>E2e Knowledge Update Entity<|#|>concept<|#|>Synthetic entity for knowledge update query e2e.<|COMPLETE|>"
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_085_chat_lightrag_entity_extraction",
+                "type": "function",
+                "function": {
+                  "name": "extract_knowledge_graph",
+                  "arguments": "{\"entities\": [{\"name\": \"E2e Knowledge Update Entity\", \"type\": \"concept\", \"description\": \"Synthetic entity for knowledge update query e2e.\"}], \"relations\": []}"
+                }
+              }
+            ]
           }
         }
       ]

@@ -10,6 +10,9 @@
     "bodyPatterns": [
       {
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -35,10 +38,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "E2e RAG response for formal_reason chain test (nonce {{randomValue length=16 type='ALPHANUMERIC'}}). No relevant data."
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_082_chat_enrich_rag_response",
+                "type": "function",
+                "function": {
+                  "name": "generate_rag_answer",
+                  "arguments": "{\"answer\": \"E2e RAG response for formal_reason chain test (nonce {{randomValue length=16 type='ALPHANUMERIC'}}). No relevant data.\"}"
+                }
+              }
+            ]
           }
         }
       ]
