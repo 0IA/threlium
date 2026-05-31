@@ -73,10 +73,7 @@ pythonpath = [".", "ansible/roles/threlium/files/scripts"]
 # testpaths: e2e (полный контур) + unit в `tests/unit` (быстрые проверки границ).
 # Полный bake и site.yml на живом sut — явные модули tests/e2e/wipe_bake.py и wipe_sync.py
 # (имена вне test_*.py, не входят в дефолтную коллекцию). Не задавать python_files = *.py.
-# Отдельный маркер `mailflow` сохраняется как логический тег (тест сам вызывает site.yml), но
-# НЕ фильтрует выборку по умолчанию.
+# Маркер `e2e` навешивается collection hook'ом на все `tests/e2e/test_*.py`.
 markers = [
     "e2e: Docker/Testcontainers harness (Linux + Docker)",
-    "mailflow: полный контур site.yml + IMAP bridge + notmuch (логический тег; выборку не фильтрует)",
-    "e2e_live: проверки только на уже поднятом compose-стеке (автообнаружение healthy threlium_e2e_*; без Ansible в этих тестах; в т.ч. test_matrix_wiremock_live_e2e)",
 ]
