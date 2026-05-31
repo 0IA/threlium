@@ -44,6 +44,7 @@ from threlium.mime_reform import (
     EnrichContentId,
     EnrichPartId,
     build_enriched_multipart,
+    concat_history_parts_text,
     email_message_from_path,
 )
 from threlium.litellm_client import litellm_site_completion_text
@@ -643,10 +644,25 @@ def _emit_summarize_overflow(
         inner = NotmuchMessageIdInner.from_optional_wire(w)
         if inner is None:
             continue
-        part = m.get_body(preferencelist=("plain", "html"))
-        body_text = part.get_content() if part else ""
+        body_text = concat_history_parts_text(m)
+        if not body_text.strip():
+            log.warning(
+                "summarize_overflow_skip_no_history",
+                message_id=inner.value,
+            )
+            continue
         mids.append(inner.value)
         bodies.append(body_text)
+
+    if not mids:
+        log.error(
+            "summarize_overflow_empty_batch",
+            candidate_count=len(candidates),
+            mckp_capacity=mckp_capacity,
+        )
+        raise RuntimeError(
+            "overflow summarize: no messages with non-empty <history> in batch"
+        )
 
     payload = json.dumps({"summarize": {"mids": mids, "bodies": bodies}}, ensure_ascii=False)
     log.info(

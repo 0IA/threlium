@@ -12,7 +12,12 @@ from email.message import EmailMessage
 
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.logutil import logger
-from threlium.mime_reform import email_message_from_path, extract_plain_body
+from threlium.mime_reform import (
+    concat_history_parts_text,
+    email_message_from_path,
+    extract_plain_body,
+    message_has_history,
+)
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.settings import ThreliumSettings
 from threlium.types import (
@@ -34,6 +39,8 @@ def _find_enrich_trigger_body(inner: NotmuchMessageIdInner) -> str:
     for snap in iter_irt_ancestors_filtered(inner):
         if snap.is_addressed_to_fsm_stage(FsmStage.ENRICH):
             ancestor = email_message_from_path(snap.path)
+            if message_has_history(ancestor):
+                return concat_history_parts_text(ancestor).strip()
             return extract_plain_body(ancestor).strip()
     return ""
 
