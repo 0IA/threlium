@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     discover_runtime,
@@ -51,38 +53,34 @@ REASONING_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def reasoning_litellm_processed_stack(deployed_stack: str) -> object:
-    """WireMock (reasoning_litellm) → inject → \\Seen → активность FSM."""
-    with mailflow_inject_and_wait(REASONING_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_reasoning_litellm_mailflow_hits_wiremock_full_pipeline(
-    reasoning_litellm_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """Живой стек → почтовый вход → notmuch → WireMock (reasoning_litellm) → ответ пользователю."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        reasoning_litellm_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            REASONING_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(REASONING_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                REASONING_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
 E2E_LENGTH_RECOVERY_MARKER = "finish_reason=length"
@@ -105,29 +103,31 @@ def _assert_length_recovery_retry_in_journal(project: str, stub_tag: str) -> Non
     log.info("length_recovery_retry_verified", hits=len(chat))
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_reasoning_length_recovery_then_tasks_ledger(
-    reasoning_litellm_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """``finish_reason=length`` on first completion → recovery hint → successful tool call."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        reasoning_litellm_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            REASONING_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        _assert_length_recovery_retry_in_journal(project, stub_tag)
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(REASONING_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                REASONING_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            _assert_length_recovery_retry_in_journal(project, stub_tag)
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

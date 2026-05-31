@@ -4,12 +4,14 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage, NotmuchTag
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     E2E_SUM_ORIG_HEAD_MARKER,
     E2E_SUM_ORIG_PAD_MARKER,
     E2E_SUMMARY_MARKER,
@@ -185,51 +187,45 @@ def _assert_summarize_pipeline_artifacts(
     return n_summarize
 
 
-@pytest.fixture()
-def summarize_context_processed_stack(deployed_stack: str) -> object:
-    with mailflow_inject_and_wait(SUMMARIZE_CONTEXT_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_summarize_overflow_full_pipeline(
-    summarize_context_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """Переполнение unified → summarize FSM → тег context_summarized → reasoning с маркером summary."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        summarize_context_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            SUMMARIZE_CONTEXT_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        _assert_summarize_pipeline_artifacts(
-            project=project,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(SUMMARIZE_CONTEXT_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                SUMMARIZE_CONTEXT_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            _assert_summarize_pipeline_artifacts(
+                project=project,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_summarize_idempotent_second_enrich(deployed_stack: str) -> None:
+def test_summarize_idempotent_second_enrich(e2e_runtime: E2EComposeRuntime) -> None:
     """Второе письмо в том же треде не вызывает повторный summarize LLM."""
-    with mailflow_inject_and_wait(SUMMARIZE_CONTEXT_SPEC, deployed_stack) as (
+    with mailflow_inject_and_wait(SUMMARIZE_CONTEXT_SPEC, e2e_runtime.project_name) as (
         project,
         raw_id,
         _canonical_id,

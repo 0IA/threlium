@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     REPO_ROOT,
     assert_full_mailflow_pipeline,
@@ -135,12 +136,9 @@ def _assert_l1_finalize_prompt_excludes_l0_buffer(
     log.info("subagent_response_frame_iso_l1_prompt_verified", stub_tag=stub_tag)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_subagent_response_buffer_frame_isolation(deployed_stack: str) -> None:
+def test_subagent_response_buffer_frame_isolation(e2e_runtime: E2EComposeRuntime) -> None:
     """L0 append chunk must not appear in L1 finalize LLM prompt."""
-    project = deployed_stack
+    project = e2e_runtime.project_name
     try:
         with mailflow_inject_and_wait(RESPONSE_ISO_SPEC, project) as (
             _p,
@@ -169,12 +167,9 @@ def test_subagent_response_buffer_frame_isolation(deployed_stack: str) -> None:
         raise
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_subagent_task_ledger_frame_isolation(deployed_stack: str) -> None:
+def test_subagent_task_ledger_frame_isolation(e2e_runtime: E2EComposeRuntime) -> None:
     """L0 open subtask must not block L1 finalize (isolated per-frame ledger)."""
-    project = deployed_stack
+    project = e2e_runtime.project_name
     try:
         with mailflow_inject_and_wait(LEDGER_ISO_SPEC, project) as (
             _p,

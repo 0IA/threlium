@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     E2E_CTX_TRIM_HEAD_MARKER,
     E2E_CTX_TRIM_JOURNAL_SLACK_CHARS,
     E2E_CTX_TRIM_TAIL_MARKER,
@@ -55,45 +57,42 @@ REASONING_CTX_TRIM_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def reasoning_ctx_trim_processed_stack(deployed_stack: str) -> object:
-    with mailflow_inject_and_wait(REASONING_CTX_TRIM_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_reasoning_litellm_context_trim_mailflow(
-    reasoning_ctx_trim_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """Длинное тело → overflow → summarize_context; reasoning LiteLLM в журнале WireMock содержит TAIL, не HEAD."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        reasoning_ctx_trim_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            REASONING_CTX_TRIM_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        rt = discover_runtime(project, repo_root=REPO_ROOT)
-        wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-        assert_wiremock_reasoning_journal_preserves_context_tail(
-            wm_base,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-            tail_marker=E2E_CTX_TRIM_TAIL_MARKER,
-            head_marker=E2E_CTX_TRIM_HEAD_MARKER,
-            max_body_chars=E2E_CONTEXT_MAX_CHARS,
-            journal_slack_chars=E2E_CTX_TRIM_JOURNAL_SLACK_CHARS,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(REASONING_CTX_TRIM_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                REASONING_CTX_TRIM_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            rt = discover_runtime(project, repo_root=REPO_ROOT)
+            wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+            assert_wiremock_reasoning_journal_preserves_context_tail(
+                wm_base,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+                tail_marker=E2E_CTX_TRIM_TAIL_MARKER,
+                head_marker=E2E_CTX_TRIM_HEAD_MARKER,
+                max_body_chars=E2E_CONTEXT_MAX_CHARS,
+                journal_slack_chars=E2E_CTX_TRIM_JOURNAL_SLACK_CHARS,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

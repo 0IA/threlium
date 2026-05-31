@@ -31,8 +31,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
@@ -43,6 +41,7 @@ from .formal_reason_assertions import (
     tool_names_from_chat_body,
 )
 from .helpers import (
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     REPO_ROOT,
     assert_full_mailflow_pipeline,
@@ -118,61 +117,56 @@ def _assert_unified_delta_in_reasoning_journal(project: str, stub_tag: str) -> N
     log.info("formal_reason_chain_unified_delta_journal_verified", stub_tag=stub_tag)
 
 
-@pytest.fixture()
-def formal_reason_chain_processed_stack(live_e2e_stack_ready: str) -> object:
-    """WireMock (formal_reason_chain) -> inject -> \\Seen -> FSM activity (live stack)."""
-    with mailflow_inject_and_wait(FORMAL_REASON_CHAIN_SPEC, live_e2e_stack_ready) as ids:
-        yield ids
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_formal_reason_chain_full_pipeline(
-    formal_reason_chain_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """Knowledge system: formal_reason(conforms) -> memory_query -> response_finalize."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        formal_reason_chain_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            FORMAL_REASON_CHAIN_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        _assert_unified_delta_in_reasoning_journal(project, stub_tag)
-        rt = discover_runtime(project, repo_root=REPO_ROOT)
-        wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-        assert_all_reasoning_gate_absent(wm_base, stub_tag)
-        mq_matches = find_wiremock_requests_by_body_contains(
-            wm_base, E2E_MEMORY_QUERY_REASONING_MARKER, stub_tag=stub_tag
-        )
-        mq_chat = [
-            e
-            for e in mq_matches
-            if "/chat/completions" in (e.get("request", {}).get("url") or "")
-        ]
-        assert mq_chat, "expected memory_query reasoning journal entry"
-        mq_body = mq_chat[0].get("request", {}).get("body") or ""
-        mq_tools = frozenset(tool_names_from_chat_body(str(mq_body)))
-        assert mq_tools != GATE_TOOL_NAMES
-        assert FsmStage.MEMORY_QUERY.value in mq_tools
-        assert FsmStage.RESPONSE_FINALIZE.value in mq_tools
-        assert mq_tools <= FULL_TOOL_NAMES
-        assert_notmuch_folder_contains_body_token(
-            project,
-            stage_folder_id=FsmStage.REASONING.value,
-            body_token=E2E_UNIFIED_DELTA_NOTMUCH_TOKEN,
-            min_count=1,
-            repo_root=REPO_ROOT,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(FORMAL_REASON_CHAIN_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                FORMAL_REASON_CHAIN_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            _assert_unified_delta_in_reasoning_journal(project, stub_tag)
+            rt = discover_runtime(project, repo_root=REPO_ROOT)
+            wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+            assert_all_reasoning_gate_absent(wm_base, stub_tag)
+            mq_matches = find_wiremock_requests_by_body_contains(
+                wm_base, E2E_MEMORY_QUERY_REASONING_MARKER, stub_tag=stub_tag
+            )
+            mq_chat = [
+                e
+                for e in mq_matches
+                if "/chat/completions" in (e.get("request", {}).get("url") or "")
+            ]
+            assert mq_chat, "expected memory_query reasoning journal entry"
+            mq_body = mq_chat[0].get("request", {}).get("body") or ""
+            mq_tools = frozenset(tool_names_from_chat_body(str(mq_body)))
+            assert mq_tools != GATE_TOOL_NAMES
+            assert FsmStage.MEMORY_QUERY.value in mq_tools
+            assert FsmStage.RESPONSE_FINALIZE.value in mq_tools
+            assert mq_tools <= FULL_TOOL_NAMES
+            assert_notmuch_folder_contains_body_token(
+                project,
+                stage_folder_id=FsmStage.REASONING.value,
+                body_token=E2E_UNIFIED_DELTA_NOTMUCH_TOKEN,
+                min_count=1,
+                repo_root=REPO_ROOT,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

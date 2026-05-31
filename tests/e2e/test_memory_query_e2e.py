@@ -16,12 +16,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     discover_runtime,
@@ -90,36 +90,29 @@ def _assert_embedding_contains_query_marker(project: str, stub_tag: str) -> None
     )
 
 
-@pytest.fixture()
-def memory_query_processed_stack(deployed_stack: str) -> object:
-    """WireMock (memory_query) -> inject -> \\Seen -> FSM activity."""
-    with mailflow_inject_and_wait(MEMORY_QUERY_SPEC, deployed_stack) as ids:
-        yield ids
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_memory_query_full_pipeline(
-    memory_query_processed_stack: tuple[str, str, str, str, str, str],
-) -> None:
+def test_memory_query_full_pipeline(e2e_runtime: E2EComposeRuntime) -> None:
     """Memory system: memory_query(retrieve) -> response_finalize."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        memory_query_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            MEMORY_QUERY_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        _assert_embedding_contains_query_marker(project, stub_tag)
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(MEMORY_QUERY_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                MEMORY_QUERY_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            _assert_embedding_contains_query_marker(project, stub_tag)
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

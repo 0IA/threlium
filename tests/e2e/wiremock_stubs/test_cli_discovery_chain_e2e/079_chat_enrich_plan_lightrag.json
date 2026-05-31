@@ -12,10 +12,7 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "Reply with ONLY the question text to send to the graph."
-      },
-      {
-        "contains": "sat-shallow-01"
+        "contains": "Reply with ONLY the question text to send to the graph (no preamble"
       }
     ],
     "customMatcher": {
@@ -34,7 +31,7 @@
       "response-template"
     ],
     "jsonBody": {
-      "id": "chatcmpl-e2e-wiremock-enrich-plan-lightrag-sat-shallow",
+      "id": "chatcmpl-e2e-cli-disc-enrich-plan-lightrag",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -44,7 +41,7 @@
           "finish_reason": "stop",
           "message": {
             "role": "assistant",
-            "content": "E2e formulated graph query for mailflow planner stub (nonce {{randomValue length=16 type='ALPHANUMERIC'}}).\n{{request.headers.[x-threlium-thread-root]}}"
+            "content": "E2e formulated graph query for cli discovery chain (nonce {{randomValue length=16 type='ALPHANUMERIC'}}).\n{{request.headers.[x-threlium-thread-root]}}"
           }
         }
       ]

@@ -11,13 +11,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .formal_reason_assertions import assert_all_reasoning_gate_absent
 from .helpers import (
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     discover_runtime,
@@ -58,36 +57,32 @@ FORMAL_REASON_INFERENCE_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def formal_reason_inference_processed_stack(live_e2e_stack_ready: str) -> object:
-    with mailflow_inject_and_wait(FORMAL_REASON_INFERENCE_SPEC, live_e2e_stack_ready) as ids:
-        yield ids
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_formal_reason_inference_full_pipeline(
-    formal_reason_inference_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        formal_reason_inference_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            FORMAL_REASON_INFERENCE_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        rt = discover_runtime(project, repo_root=REPO_ROOT)
-        wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-        assert_all_reasoning_gate_absent(wm_base, stub_tag)
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(FORMAL_REASON_INFERENCE_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                FORMAL_REASON_INFERENCE_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            rt = discover_runtime(project, repo_root=REPO_ROOT)
+            wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+            assert_all_reasoning_gate_absent(wm_base, stub_tag)
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

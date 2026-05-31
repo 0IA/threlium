@@ -8,12 +8,12 @@ import shlex
 import uuid
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
     E2E_SUT_NOTMUCH_BASH_EXPORT,
     MailflowScenarioSpec,
     REPO_ROOT,
@@ -163,12 +163,9 @@ def _assert_journal_has_traceback(project: str) -> None:
     assert "Traceback" in text or "Error" in text, "expected traceback in work unit journal"
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_fsm_handler_failure_then_recovery(deployed_stack: str) -> None:
+def test_fsm_handler_failure_then_recovery(e2e_runtime: E2EComposeRuntime) -> None:
     """Act1: 500 on reasoning; act2: recovery mailflow completes."""
-    project = deployed_stack
+    project = e2e_runtime.project_name
     rt = discover_runtime(project, repo_root=REPO_ROOT)
 
     try:

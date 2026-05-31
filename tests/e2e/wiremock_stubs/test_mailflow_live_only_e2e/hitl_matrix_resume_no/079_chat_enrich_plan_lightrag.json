@@ -12,7 +12,7 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "Reply with ONLY the question text to send to the graph."
+        "contains": "Reply with ONLY the question text to send to the graph (no preamble"
       },
       {
         "contains": "hitl-mx-01"

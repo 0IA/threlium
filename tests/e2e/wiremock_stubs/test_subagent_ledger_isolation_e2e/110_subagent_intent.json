@@ -16,9 +16,6 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "E2E-SUBAGENT-FRAME-ISO"
       }
     ],
     "customMatcher": {

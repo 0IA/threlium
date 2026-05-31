@@ -4,12 +4,12 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "ingress_distill"
+        "equalTo": "fsm"
       }
     },
     "bodyPatterns": [
       {
-        "matches": "(?s).*(openai/threlium_e2e_l1|threlium_e2e_l1).*"
+        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
         "contains": "\"tools\""
@@ -17,7 +17,13 @@
       {
         "contains": "ingress_distill"
       }
-    ]
+    ],
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-mailflow-e2e-01::{{request.headers.[x-threlium-thread-root]}}"
+      }
+    }
   },
   "response": {
     "status": 200,

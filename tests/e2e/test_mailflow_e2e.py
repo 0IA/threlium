@@ -8,7 +8,7 @@ LLM через общий сервис WireMock, тред дошёл до ожи
 тестовый почтовый сервер. Happy-path использует **response_finalize Mode 1** (пустой response buffer,
 только ``content`` из tool call → ``egress_email`` без сборки из буфера).
 
-1. **Стек.** Фикстура ``deployed_stack`` зависит от session ``compose_stack`` (autouse в ``conftest.py``):
+1. **Стек.** Session ``compose_stack`` + per-test ``e2e_runtime`` (autouse в ``conftest.py``):
    стек поднимается или переиспользуется как в ``docs/TESTING.md``. Этот модуль **никогда** не вызывает
    ``ansible-playbook`` и bake сам по себе.
 
@@ -33,7 +33,6 @@ LLM через общий сервис WireMock, тред дошёл до ожи
    тестового пользователя на GreenMail появляется ответ, сопоставимый с исходным входящим по внешнему
    идентификатору письма. При сбое перед повторным выбросом ошибки в журнал выводится сводка артефактов для разборки.
 
-Маркер ``mailflow`` — логический тег полного контура; выборку по умолчанию не фильтрует.
 Подготовка образа и ``site.yml`` — вне этого файла (см. ``docs/TESTING.md`` §5,
 ``tests/e2e/wipe_sync.py``, ручной compose).
 """
@@ -41,12 +40,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     REPO_ROOT,
     TIMEOUT_POLL_SHORT,
@@ -146,41 +144,30 @@ def _assert_egress_reply_excludes_internal_mime(project: str, *, raw_id: str) ->
     log.info("egress_email_purity_verified", body_len=len(body))
 
 
-@pytest.fixture()
-def mailflow_processed_stack(deployed_stack: str) -> object:
-    """WireMock upsert → inject → \\Seen → FSM activity.
-
-    Yields ``(project_name, raw_message_id, canonical_message_id, notmuch_id_inner, stub_tag,
-    correlation_key)``.
-    """
-    with mailflow_inject_and_wait(MAILFLOW_SPEC, deployed_stack) as ids:
-        yield ids
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_full_mailflow_deploy_and_pipeline(
-    mailflow_processed_stack: tuple[str, str, str, str, str, str],
-) -> None:
+def test_full_mailflow_deploy_and_pipeline(e2e_runtime: E2EComposeRuntime) -> None:
     """Mode 1 happy-path: SMTP → FSM → WireMock → egress without response buffer."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        mailflow_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            MAILFLOW_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        _assert_egress_reply_excludes_internal_mime(project, raw_id=raw_id)
-        assert FsmStage.RESPONSE_APPEND.value not in MAILFLOW_SPEC.expect_notmuch_stage_folders
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(MAILFLOW_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                MAILFLOW_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            _assert_egress_reply_excludes_internal_mime(project, raw_id=raw_id)
+            assert FsmStage.RESPONSE_APPEND.value not in MAILFLOW_SPEC.expect_notmuch_stage_folders
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

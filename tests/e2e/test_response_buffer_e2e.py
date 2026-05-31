@@ -13,12 +13,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     dump_failure_artifacts,
@@ -53,35 +53,30 @@ RESPONSE_BUFFER_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def response_buffer_processed_stack(deployed_stack: str) -> object:
-    """WireMock (response_buffer) → inject → \\Seen → FSM activity."""
-    with mailflow_inject_and_wait(RESPONSE_BUFFER_SPEC, deployed_stack) as ids:
-        yield ids
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_response_buffer_accumulation_full_pipeline(
-    response_buffer_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """RESPONSE_TABLE: reasoning → 2× response_append (enrich_fast loop) → response_finalize (Mode 2)."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        response_buffer_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            RESPONSE_BUFFER_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(RESPONSE_BUFFER_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                RESPONSE_BUFFER_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

@@ -20,6 +20,8 @@ from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     E2E_FETCHMAIL_PASS,
     E2E_FETCHMAIL_USER,
     E2E_IMAP_PROCESSED_FOLDER,
@@ -129,13 +131,10 @@ def _wait_bridge_duplicate_skip(project: str, *, raw_inner: str) -> None:
     )
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 @pytest.mark.xdist_group(name="bridge_restart")
-def test_imap_checkpoint_resume_and_duplicate_skip(deployed_stack: str) -> None:
+def test_imap_checkpoint_resume_and_duplicate_skip(e2e_runtime: E2EComposeRuntime) -> None:
     """UID MOVE, route checkpoint, restart bridge, duplicate_skip, новое письмо B."""
-    project = deployed_stack
+    project = e2e_runtime.project_name
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     imap_h, imap_p = rt.greenmail_imap_host, rt.greenmail_imap_port
 

@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from threlium.types import FsmStage
 
 from .formal_reason_assertions import (
@@ -22,6 +20,7 @@ from .formal_reason_assertions import (
 )
 from .log import clip_log_body, log
 from .helpers import (
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     discover_runtime,
@@ -62,43 +61,39 @@ FORMAL_REASON_TECH_GATE_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def formal_reason_technical_gate_stack(live_e2e_stack_ready: str) -> object:
-    with mailflow_inject_and_wait(FORMAL_REASON_TECH_GATE_SPEC, live_e2e_stack_ready) as ids:
-        yield ids
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_formal_reason_technical_gate_full_pipeline(
-    formal_reason_technical_gate_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        formal_reason_technical_gate_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            FORMAL_REASON_TECH_GATE_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        rt = discover_runtime(project, repo_root=REPO_ROOT)
-        wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-        assert_first_fsm_reasoning_gate_absent(
-            wm_base, stub_tag, E2E_FORMAL_REASON_TECH_GATE_BODY
-        )
-        assert_gated_reasoning_calls(wm_base, stub_tag)
-        assert_journal_contains(wm_base, stub_tag, "QUERY ERROR")
-        assert_ungated_reasoning_has_finalize(
-            wm_base, stub_tag, needle="query_result:"
-        )
-    except Exception:
-        log.error(
-            "formal_reason_technical_gate_failed",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(FORMAL_REASON_TECH_GATE_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                FORMAL_REASON_TECH_GATE_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            rt = discover_runtime(project, repo_root=REPO_ROOT)
+            wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+            assert_first_fsm_reasoning_gate_absent(
+                wm_base, stub_tag, E2E_FORMAL_REASON_TECH_GATE_BODY
+            )
+            assert_gated_reasoning_calls(wm_base, stub_tag)
+            assert_journal_contains(wm_base, stub_tag, "QUERY ERROR")
+            assert_ungated_reasoning_has_finalize(
+                wm_base, stub_tag, needle="query_result:"
+            )
+        except Exception:
+            log.error(
+                "formal_reason_technical_gate_failed",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

@@ -9,18 +9,18 @@
 ``threlium-bridge@email`` есть ``orphan_skip`` для нашего ``Message-ID``; (3) письмо так и не
 попало в notmuch (в FSM не вошло). LLM не вызывается — WireMock-сценарий не нужен.
 
-Стек — уже поднятый (фикстура ``deployed_stack``), как в ``test_mailflow_e2e``.
+Стек — session ``compose_stack`` + per-test ``e2e_runtime`` (autouse в ``conftest.py``), как в ``test_mailflow_e2e``.
 """
 from __future__ import annotations
 
 import shlex
 import uuid
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 
 from .helpers import (
+    E2EComposeRuntime,
     E2E_SUT_NOTMUCH_BASH_EXPORT,
     REPO_ROOT,
     TIMEOUT_POLL_SHORT,
@@ -74,12 +74,9 @@ def _assert_not_indexed(project: str, *, nm_inner: str) -> None:
     )
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_email_bridge_orphan_skip(deployed_stack: str) -> None:
+def test_email_bridge_orphan_skip(e2e_runtime: E2EComposeRuntime) -> None:
     """Reply на неизвестный родитель → ``orphan_skip``; письмо ушло из INBOX и не вошло в FSM."""
-    project = deployed_stack
+    project = e2e_runtime.project_name
     rt = discover_runtime(project, repo_root=REPO_ROOT)
 
     orphan_parent = f"orphan-parent-{uuid.uuid4().hex}@localhost"

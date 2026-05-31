@@ -22,7 +22,8 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-subagent-ledger-iso-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_tasks_ledger_done"
+        "hasProperty": "phase_tasks_ledger_done",
+        "hasNotProperty": "phase_l0_egress_done"
       }
     }
   },
@@ -57,5 +58,16 @@
         }
       ]
     }
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "stub-subagent-ledger-iso-01::{{request.headers.[x-threlium-thread-root]}}",
+        "state": {
+          "phase_l0_egress_done": "1"
+        }
+      }
+    }
+  ]
 }

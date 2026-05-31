@@ -73,7 +73,6 @@ import shlex
 
 import uuid
 
-import pytest
 import requests
 import smtplib
 
@@ -90,12 +89,10 @@ from .helpers import (
     REPO_ROOT,
     assert_notmuch_folder_contains_body_token,
     assert_notmuch_thread_has_messages_in_folders,
-    discover_live_e2e_project_name,
     E2E_REMOTE_THRELIUM_HOME,
     e2e_refresh_hop_budget_default,
     e2e_refresh_hop_budget_sub,
     poll_notmuch_thread_in_stage_folder,
-    discover_runtime,
     e2e_dense_threlium_ctx_body,
     e2e_greenmail_mailbox_address,
     e2e_thread_root_mid_for_message_id,
@@ -419,25 +416,9 @@ def _debug_greenmail_smtp_payload(label: str, msg: EmailMessage) -> None:
     )
 
 
-@pytest.fixture(scope="module")
-def live_mailflow_runtime():
-    """``E2EComposeRuntime`` для живого стека или skip."""
-    pn = discover_live_e2e_project_name()
-    if not pn:
-        pytest.skip(
-            "No live e2e stack: start compose (pytest tests/e2e / wipe_bake)."
-        )
-    try:
-        return discover_runtime(pn)
-    except Exception as e:
-        pytest.skip(f"live e2e stack not reachable: {e}")
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_mailflow_two_turn_dialog_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_mailflow_two_turn_dialog_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """1) пользователь пишет → 2) ответ агента в pytest@ → 3) ответ пользователя в тред → 4) второй ответ агента с IRT на шаг 3."""
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     # Уникальный MID на прогон (параллельные pytest и повторные запуски).
     user1_mid = f"e2e-live-turn1-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user1_mid)
@@ -552,14 +533,12 @@ def test_live_mailflow_two_turn_dialog_on_running_stack(live_mailflow_runtime) -
 
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_subagent_table_shallow_chain_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_subagent_table_shallow_chain_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """SUBAGENT_TABLE (усечённо): L0 → subagent_intent → L1 → egress_router (POP) → ответ в pytest@.
 
     Маркер Subject = ``E2E_SUBAGENT_TABLE_LIVE_SUBJECT_MARKER`` (тот же wire, что в ``reference_l0/threlium_e2e_l0.py``).
     """
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-sat-live-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
@@ -633,11 +612,9 @@ def test_live_subagent_table_shallow_chain_on_running_stack(live_mailflow_runtim
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_subagent_budget_exhausted_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """L1 ``subagent_intent`` when hop budget exhausted → ingress notice (``budget_exhausted.j2``)."""
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-sat-budget-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
@@ -713,16 +690,14 @@ def test_live_subagent_budget_exhausted_on_running_stack(live_mailflow_runtime) 
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_memory_table_thread_memory_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_memory_table_thread_memory_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """Документ ``MEMORY_TABLE.md`` §1 (локальная память): L0 → ``thread_memory`` → … → ответ пользователю.
 
     Маркер Subject — ``E2E_MEMORY_THREAD_LIVE_SUBJECT_MARKER``; корневой ``Message-ID`` с префиксом
     ``E2E_MEMORY_THREAD_LIVE_MSGID_PREFIX``. WireMock: первый вызов reasoning — ``thread_memory``, второй —
     ``egress_router`` с дефолтным L0 ответом.
     """
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-mem-tm-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
@@ -795,11 +770,9 @@ def test_live_memory_table_thread_memory_on_running_stack(live_mailflow_runtime)
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_memory_table_global_memory_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_memory_table_global_memory_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """MEMORY_TABLE §2 (глобальная память): L0 → ``global_memory`` → … → ответ пользователю."""
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-global-mem-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
@@ -872,11 +845,9 @@ def test_live_memory_table_global_memory_on_running_stack(live_mailflow_runtime)
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_reflect_then_egress_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_reflect_then_egress_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """MEMORY_TABLE §3: первый hop reasoning → ``reflect``, второй → ``egress_router`` → ответ."""
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-reflect-cyc-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
@@ -949,15 +920,13 @@ def test_live_reflect_then_egress_on_running_stack(live_mailflow_runtime) -> Non
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """Полный путь ``docs/SUBAGENT_TABLE.md`` (L0→L1→L2, HITL на L2): WireMock даёт L1→subagent, L2→cli_intent.
 
     Маркер тела ``E2E_SUBAGENT_HITL_MATRIX_BODY_MARKER``, корневой ``Message-ID`` с префиксом
     ``E2E_SUBAGENT_HITL_MATRIX_LIVE_MSGID_PREFIX``. Далее: HITL-письмо в pytest@, ``yes``, финальный e2e reply.
     """
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-hitl-mx-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
@@ -1117,11 +1086,9 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(live_mailflow_run
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_cli_intent_allow_echo_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_cli_intent_allow_echo_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """``cli_intent`` allow (``echo``) → ``cli_exec`` → … → ``egress_email``."""
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-cli-allow-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
@@ -1206,11 +1173,9 @@ def test_live_cli_intent_allow_echo_on_running_stack(live_mailflow_runtime) -> N
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-def test_live_hitl_user_rejects_cli_on_running_stack(live_mailflow_runtime) -> None:
+def test_live_hitl_user_rejects_cli_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
     """HITL до ``cli_intent``; пользователь отвечает ``no`` → без ``cli_exec``; письмо с отказом."""
-    rt = live_mailflow_runtime
+    rt = e2e_runtime
     user_mid = f"e2e-hitl-no-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)

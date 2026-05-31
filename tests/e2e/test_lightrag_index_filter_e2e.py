@@ -25,12 +25,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     REPO_ROOT,
     assert_full_mailflow_pipeline,
@@ -59,41 +61,38 @@ _INDEXED_STAGES: tuple[FsmStage, ...] = (FsmStage.ENRICH,)
 _EXCLUDED_STAGES: tuple[FsmStage, ...] = (FsmStage.INGRESS,)
 
 
-@pytest.fixture()
-def lightrag_filter_stack(deployed_stack: str) -> object:
-    with mailflow_inject_and_wait(LIGHTRAG_FILTER_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_lightrag_selective_indexing(
-    lightrag_filter_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """Drain индексирует письма с <history>-частью и пропускает письма без неё."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        lightrag_filter_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            LIGHTRAG_FILTER_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        assert_notmuch_thread_lightrag_index_filter(
-            project,
-            anchor_message_id=nm_inner,
-            indexed_stages=_INDEXED_STAGES,
-            excluded_stages=_EXCLUDED_STAGES,
-            repo_root=REPO_ROOT,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(LIGHTRAG_FILTER_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                LIGHTRAG_FILTER_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            assert_notmuch_thread_lightrag_index_filter(
+                project,
+                anchor_message_id=nm_inner,
+                indexed_stages=_INDEXED_STAGES,
+                excluded_stages=_EXCLUDED_STAGES,
+                repo_root=REPO_ROOT,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

@@ -12,21 +12,16 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "<envelope>"
-      },
-      {
         "contains": "\"tools\""
       },
       {
-        "contains": "E2E-SUBAGENT-FRAME-ISO"
+        "contains": "ingress_distill"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-subagent-frame-iso-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_l0_open_ledger_done"
+        "hasContext": "stub-reasoning-litellm-ctx-trim-01::{{request.headers.[x-threlium-thread-root]}}"
       }
     }
   },
@@ -36,7 +31,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-iso-l0-open-ledger",
+      "id": "chatcmpl-reasoning_litellm_context_trim-ingress-distill",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -49,11 +44,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_iso_l0_open_ledger",
+                "id": "call_ingress_distill_reasoning_litellm_context_trim",
                 "type": "function",
                 "function": {
-                  "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e L0: leave subtask B open in parent frame before subagent\", \"subtask_updates\": [{\"content_id\": \"e4a7f48a17f1\", \"status\": \"in_progress\"}]}"
+                  "name": "ingress_distill",
+                  "arguments": "{\"user_query\": \"E2E-REASONING-LITELLM-CONTEXT-TRIM-BODY: trigger LiteLLM context trimming.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-reasoning-litellm-ctx-trim-01.\"]}"
                 }
               }
             ]
@@ -61,16 +56,5 @@
         }
       ]
     }
-  },
-  "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "stub-subagent-frame-iso-01::{{request.headers.[x-threlium-thread-root]}}",
-        "state": {
-          "phase_l0_open_ledger_done": "1"
-        }
-      }
-    }
-  ]
+  }
 }

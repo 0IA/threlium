@@ -1,0 +1,60 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Call-Site": {
+        "equalTo": "fsm"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "\"tools\""
+      },
+      {
+        "contains": "ingress_distill"
+      }
+    ],
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-subagent-ledger-iso-01::{{request.headers.[x-threlium-thread-root]}}"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-e2e-ledger-ingress-distill",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_ingress_distill_e2e_ledger",
+                "type": "function",
+                "function": {
+                  "name": "ingress_distill",
+                  "arguments": "{\"user_query\":\"E2E subagent task-ledger frame isolation: L0 open subtask must not block L1 finalize gate.\",\"user_reply_language\":\"English\",\"open_gaps\":[],\"step_back_notes\":[\"Per-frame task ledger isolation smoke.\"]}"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

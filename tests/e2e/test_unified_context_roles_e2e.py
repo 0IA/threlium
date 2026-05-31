@@ -10,12 +10,13 @@ import re
 import uuid
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     REPO_ROOT,
     assert_full_mailflow_pipeline,
@@ -100,12 +101,9 @@ def _reasoning_user_bodies(wm_base: str, *, stub_tag: str, correlation_key: str)
     return "\n".join(parts)
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
-def test_unified_context_roles_two_turn(deployed_stack: str) -> None:
+def test_unified_context_roles_two_turn(e2e_runtime: E2EComposeRuntime) -> None:
     """Turn1 observe cycle; turn2 reasoning context = deduped <history> stream (no relay blob)."""
-    project = deployed_stack
+    project = e2e_runtime.project_name
     try:
         with mailflow_inject_and_wait(UNIFIED_CONTEXT_TURN1_SPEC, project) as (
             _p,

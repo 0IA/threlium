@@ -15,12 +15,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     dump_failure_artifacts,
@@ -60,38 +62,34 @@ FINALIZE_MODE3_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def finalize_mode3_processed(deployed_stack: str) -> object:
-    """WireMock (finalize_mode3) → inject → FSM activity."""
-    with mailflow_inject_and_wait(FINALIZE_MODE3_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_response_finalize_mode3_buffer_plus_content(
-    finalize_mode3_processed: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """RESPONSE_TABLE: response_append → response_finalize(Mode 3: buffer + inline content)."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        finalize_mode3_processed
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            FINALIZE_MODE3_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(FINALIZE_MODE3_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                FINALIZE_MODE3_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -125,38 +123,34 @@ OBSERVE_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def observe_processed(deployed_stack: str) -> object:
-    """WireMock (observe) → inject → FSM activity."""
-    with mailflow_inject_and_wait(OBSERVE_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_response_observe_cycle(
-    observe_processed: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """RESPONSE_TABLE: response_append → response_observe → response_finalize (buffer)."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        observe_processed
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            OBSERVE_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(OBSERVE_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                OBSERVE_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -190,38 +184,34 @@ EDIT_REPLACE_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def edit_replace_processed(deployed_stack: str) -> object:
-    """WireMock (edit_replace) → inject → FSM activity."""
-    with mailflow_inject_and_wait(EDIT_REPLACE_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_response_edit_replace_chunk(
-    edit_replace_processed: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """RESPONSE_TABLE: response_append → response_edit(replace) → response_finalize."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        edit_replace_processed
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            EDIT_REPLACE_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(EDIT_REPLACE_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                EDIT_REPLACE_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -255,38 +245,34 @@ EDIT_DELETE_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def edit_delete_processed(deployed_stack: str) -> object:
-    """WireMock (edit_delete) → inject → FSM activity."""
-    with mailflow_inject_and_wait(EDIT_DELETE_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_response_edit_delete_chunk(
-    edit_delete_processed: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """RESPONSE_TABLE: 2×response_append → response_edit(delete pos=1) → response_finalize."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        edit_delete_processed
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            EDIT_DELETE_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(EDIT_DELETE_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                EDIT_DELETE_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -317,38 +303,34 @@ FINALIZE_MODE4_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def finalize_mode4_processed(deployed_stack: str) -> object:
-    """WireMock (finalize_mode4) → inject → FSM activity."""
-    with mailflow_inject_and_wait(FINALIZE_MODE4_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_response_finalize_mode4_ingress_recovery(
-    finalize_mode4_processed: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """RESPONSE_TABLE: response_finalize(Mode 4: empty) → ingress → recovery finalize."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        finalize_mode4_processed
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            FINALIZE_MODE4_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(FINALIZE_MODE4_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                FINALIZE_MODE4_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -382,35 +364,31 @@ EDIT_INVALID_SPEC = MailflowScenarioSpec(
 )
 
 
-@pytest.fixture()
-def edit_invalid_processed(deployed_stack: str) -> object:
-    """WireMock (edit_invalid_position) → inject → FSM activity."""
-    with mailflow_inject_and_wait(EDIT_INVALID_SPEC, deployed_stack) as ids:
-        yield ids
 
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_response_edit_invalid_position_recovery(
-    edit_invalid_processed: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """RESPONSE_TABLE: response_edit(position=999) → ingress (graceful) → recovery finalize."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        edit_invalid_processed
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            EDIT_INVALID_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(EDIT_INVALID_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                EDIT_INVALID_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise

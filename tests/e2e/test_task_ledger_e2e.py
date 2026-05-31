@@ -14,6 +14,8 @@ from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .helpers import (
+    E2EComposeRuntime,
+    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     dump_failure_artifacts,
@@ -137,17 +139,14 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
 )
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 @pytest.mark.parametrize("spec", TASK_LEDGER_SPECS, ids=[s.label for s in TASK_LEDGER_SPECS])
 def test_task_ledger_variant_full_pipeline(
-    live_e2e_stack_ready: str,
+    e2e_runtime: E2EComposeRuntime,
     spec: MailflowScenarioSpec,
 ) -> None:
     """Parametrized task-ledger gate scenarios (chain / bypass / empty / all-cancel / upsert-error)."""
     try:
-        with mailflow_inject_and_wait(spec, live_e2e_stack_ready) as (
+        with mailflow_inject_and_wait(spec, e2e_runtime.project_name) as (
             project,
             raw_id,
             _canonical_id,
@@ -166,6 +165,8 @@ def test_task_ledger_variant_full_pipeline(
     except Exception:
         log.debug(
             "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(live_e2e_stack_ready, repo_root=REPO_ROOT)),
+            body=clip_log_body(
+                dump_failure_artifacts(e2e_runtime.project_name, repo_root=REPO_ROOT)
+            ),
         )
         raise

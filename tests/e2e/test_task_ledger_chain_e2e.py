@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from tests.e2e.log import clip_log_body, log
 
 from .helpers import (
+    E2EComposeRuntime,
     assert_full_mailflow_pipeline,
     discover_runtime,
     dump_failure_artifacts,
@@ -55,70 +54,60 @@ def _assert_enrich_aquery_includes_seed_subtasks(project: str, stub_tag: str) ->
     log.info("task_ledger_enrich_subtasks_in_query_verified", hits=len(embed_or_chat))
 
 
-@pytest.fixture()
-def task_ledger_chain_processed_stack(live_e2e_stack_ready: str) -> object:
-    """WireMock (task_ledger_chain) -> inject -> \\Seen -> FSM activity (live stack)."""
-    with mailflow_inject_and_wait(TASK_LEDGER_CHAIN_SPEC, live_e2e_stack_ready) as ids:
-        yield ids
-
-
-@pytest.fixture()
-def task_ledger_bypass_processed_stack(live_e2e_stack_ready: str) -> object:
-    """WireMock (task_ledger_bypass) -> inject -> \\Seen -> FSM activity (live stack)."""
-    with mailflow_inject_and_wait(TASK_LEDGER_BYPASS_SPEC, live_e2e_stack_ready) as ids:
-        yield ids
-
-
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_task_ledger_chain_full_pipeline(
-    task_ledger_chain_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """Anti-drift: seed -> tasks_upsert(add+in_progress) -> finalize BLOCKED -> close -> egress."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        task_ledger_chain_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            TASK_LEDGER_CHAIN_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-        _assert_enrich_aquery_includes_seed_subtasks(project, stub_tag)
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(TASK_LEDGER_CHAIN_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                TASK_LEDGER_CHAIN_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+            _assert_enrich_aquery_includes_seed_subtasks(project, stub_tag)
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
 
 
-@pytest.mark.e2e
-@pytest.mark.e2e_live
-@pytest.mark.mailflow
 def test_task_ledger_bypass_blocker_full_pipeline(
-    task_ledger_bypass_processed_stack: tuple[str, str, str, str, str, str],
+    e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """Gate bypass: open subtask B + blockers + allow_finalize_with_blocker → egress."""
-    project, raw_id, _canonical_id, nm_inner, stub_tag, correlation_key = (
-        task_ledger_bypass_processed_stack
-    )
-    try:
-        assert_full_mailflow_pipeline(
-            TASK_LEDGER_BYPASS_SPEC,
-            project=project,
-            raw_id=raw_id,
-            nm_inner=nm_inner,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
-    except Exception:
-        log.debug(
-            "failure_artifacts",
-            body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
-        )
-        raise
+    with mailflow_inject_and_wait(TASK_LEDGER_BYPASS_SPEC, e2e_runtime.project_name) as (
+        project,
+        raw_id,
+        _canonical_id,
+        nm_inner,
+        stub_tag,
+        correlation_key,
+    ):
+        try:
+            assert_full_mailflow_pipeline(
+                TASK_LEDGER_BYPASS_SPEC,
+                project=project,
+                raw_id=raw_id,
+                nm_inner=nm_inner,
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+        except Exception:
+            log.debug(
+                "failure_artifacts",
+                body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
+            )
+            raise
