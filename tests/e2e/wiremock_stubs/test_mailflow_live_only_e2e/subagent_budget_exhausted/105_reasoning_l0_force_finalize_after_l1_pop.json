@@ -22,8 +22,8 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_l1_tasks_ledger_done",
-        "hasNotProperty": "phase_l1_done"
+        "hasProperty": "phase_tasks_ledger_done",
+        "hasNotProperty": "phase_l0_egress_done"
       }
     }
   },
@@ -33,7 +33,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-live-egress-l1-pop",
+      "id": "chatcmpl-e2e-live-l0-force-finalize",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -46,11 +46,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_threlium_e2e_egress_l1",
+                "id": "call_threlium_e2e_l0_force_finalize",
                 "type": "function",
                 "function": {
                   "name": "response_finalize",
-                  "arguments": "{\"reasoning\": \"e2e L1: returning result to parent frame\", \"subject\": \"e2e subagent result\", \"verification_summary\": \"e2e: nested subtask complete\", \"content\": \"e2e L1 budget-exhausted notice relay (POP to L0).\"}"
+                  "arguments": "{\"reasoning\": \"e2e L0: hop budget exhausted — hard finalize to user\", \"subject\": \"e2e reply\", \"verification_summary\": \"e2e: budget exhausted at root\", \"content\": \"ok from llm-mock\"}"
                 }
               }
             ]
@@ -65,7 +65,7 @@
       "parameters": {
         "context": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[x-threlium-thread-root]}}",
         "state": {
-          "phase_l1_done": "1"
+          "phase_l0_egress_done": "1"
         }
       }
     }

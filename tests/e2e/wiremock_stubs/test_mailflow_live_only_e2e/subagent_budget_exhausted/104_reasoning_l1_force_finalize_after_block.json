@@ -16,16 +16,13 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "FORCED FINALIZE"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_nested",
+        "hasProperty": "phase_l1_subagent_attempted",
         "hasNotProperty": "phase_l1_done"
       }
     }

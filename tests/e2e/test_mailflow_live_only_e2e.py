@@ -128,7 +128,9 @@ LIVE_SUBAGENT_SHALLOW_STUB_DIR = _LIVE_ONLY_ROOT / "subagent_table_shallow"
 LIVE_SUBAGENT_BUDGET_EXHAUSTED_STUB_TAG = "stub-mailflow-live-sat-budget-exhausted-01"
 LIVE_SUBAGENT_BUDGET_EXHAUSTED_SUBJECT = "e2e_subagent_budget_exhausted live sat-budget-exhausted-01"
 LIVE_SUBAGENT_BUDGET_EXHAUSTED_STUB_DIR = _LIVE_ONLY_ROOT / "subagent_budget_exhausted"
-E2E_SUBAGENT_BUDGET_EXHAUSTED_NOTICE = "X-Threlium-Hop-Budget exhausted"
+# Plain subagent_intent body uses "X-Threlium-Hop-Budget exhausted"; L1 reasoning after
+# enrich_fast relay gets reasoning/budget_exhausted.j2 (remaining < 1), visible in WM journal.
+E2E_SUBAGENT_BUDGET_EXHAUSTED_NOTICE = "hop-budget for this thread is exhausted"
 
 LIVE_MEMORY_THREAD_STUB_TAG = "stub-mailflow-live-mem-thread-01"
 LIVE_MEMORY_THREAD_SUBJECT = "e2e_memory_thread_live live mem-thread-01"
@@ -637,8 +639,8 @@ def test_live_subagent_budget_exhausted_on_running_stack(live_mailflow_runtime) 
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     try:
-        e2e_refresh_hop_budget_sub(rt.project_name, budget_sub=4, repo_root=REPO_ROOT)
         _live_prepare_wiremock(rt, kind="subagent_budget_exhausted", correlation_key=correlation_key)
+        e2e_refresh_hop_budget_sub(rt.project_name, budget_sub=4, repo_root=REPO_ROOT)
         smtp_h, smtp_p = rt.greenmail_smtp_host, rt.greenmail_smtp_port
         imap_h, imap_p = rt.greenmail_imap_host, rt.greenmail_imap_port
         to_addr = e2e_greenmail_mailbox_address(E2E_FETCHMAIL_USER)
@@ -704,8 +706,8 @@ def test_live_subagent_budget_exhausted_on_running_stack(live_mailflow_runtime) 
             ),
         )
     finally:
-        assert_wiremock_zero_unmatched_requests(wm_base)
         e2e_refresh_hop_budget_default(rt.project_name, repo_root=REPO_ROOT)
+        assert_wiremock_zero_unmatched_requests(wm_base)
 
 
 @pytest.mark.e2e
@@ -957,6 +959,8 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(live_mailflow_run
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     try:
+        # После budget-exhausted теста в threlium.yaml может остаться ``budget_sub: 4``.
+        e2e_refresh_hop_budget_default(rt.project_name, repo_root=REPO_ROOT)
         _live_prepare_wiremock(rt, kind="hitl_matrix", correlation_key=correlation_key)
         smtp_h, smtp_p = rt.greenmail_smtp_host, rt.greenmail_smtp_port
         imap_h, imap_p = rt.greenmail_imap_host, rt.greenmail_imap_port

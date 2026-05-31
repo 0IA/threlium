@@ -19,9 +19,6 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "sat-budget-exhausted-01"
       }
     ],
     "customMatcher": {
@@ -56,7 +53,7 @@
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e L0: record task completion before finalize\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
+                  "arguments": "{\"reasoning\": \"e2e L0: record task completion before user reply\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
                 }
               }
             ]

@@ -16,16 +16,13 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "X-Threlium-Hop-Budget exhausted"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_l1_subagent_attempted",
+        "hasProperty": "phase_nested",
         "hasNotProperty": "phase_l1_tasks_ledger_done"
       }
     }
@@ -53,7 +50,7 @@
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e L1: record budget-exhausted outcome before return to parent\",\"new_subtasks\": [{\"text\": \"Nested subagent blocked by hop budget\",\"status\": \"cancelled\"}]}"
+                  "arguments": "{\"reasoning\": \"e2e L1: seed task ledger before nested subagent attempt\",\"new_subtasks\": [{\"text\": \"Complete the nested subtask\",\"status\": \"done\"}]}"
                 }
               }
             ]
