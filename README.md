@@ -2,78 +2,71 @@
 
 **English** | [Русский](README.ru.md)
 
-A self-hosted AI agent built from Unix primitives: Maildir, systemd, fdm, notmuch. Communicates via Email (IMAP), Telegram, and Matrix. Performs multi-step reasoning using LLM tool calls, maintains long-term memory in a knowledge graph (LightRAG), can execute shell commands and modify its own code.
-
-Detailed architecture article (in Russian): [docs/ARTICLE.md](docs/ARTICLE.md)
+A self-hosted AI agent built from Unix primitives: Maildir, systemd, **fdm**, notmuch. Communicates via Email (IMAP IDLE), Telegram, and Matrix. Multi-step reasoning via LLM tool calls; long-term memory in LightRAG; shell execution and self-modification through a gated CLI pipeline.
 
 ## Features
 
-- **~6k lines of Python** — minimal code, configs and scripts instead of frameworks
-- **FSM on Maildirs** — every event = RFC 5322 message, every stage = folder on disk
-- **Orchestration via systemd --user** — no Celery, RabbitMQ, Kubernetes
-- **Three I/O channels** — Email (IMAP IDLE), Telegram (Bot API), Matrix (nio)
-- **Three-layer memory** — thread context, global facts, LightRAG (knowledge graph)
-- **CLI with security policy** — decision/policy/execution separation + HITL
-- **Subagents** — recursive calls via IRT chains
-- **Web admin panel** — Cockpit + Roundcube + Dovecot (agent's thoughts visible as mail threads)
-- **Self-modification** — the agent can edit its own prompts, configs, and code
-- **Minimal resources** — fits on a cheap VPS, no Docker in production
+- **~20k lines of Python** — FSM handlers and runners; configs, prompts, and Ansible instead of frameworks
+- **FSM on Maildirs** — each event is an RFC 5322 message; each stage is `stages/<stage>/Maildir/`
+- **Union notmuch index** — one database over all stage maildirs; durable history in `cur/`, no separate legacy archive tree
+- **Orchestration via systemd --user** — `fdm` → `notmuch insert` → `threlium-dispatch.sh` → `threlium-work@` / `threlium-engine`
+- **Three I/O channels** — symmetric `threlium.bridges.*` → canonical `ingress@localhost`
+- **Three-layer memory** — thread context, global facts, LightRAG knowledge graph (RAG-loop inside `threlium-engine`)
+- **CLI with security policy** — `cli_intent` (policy) → `cli_exec` (sandbox) + HITL
+- **Subagents & formal reasoning** — IRT chains, hop budget, SHACL/SPARQL gate (`formal_reason`)
+- **Web admin** — Cockpit + Roundcube + Dovecot (agent traffic visible as mail threads)
+- **Self-modification** — agent may commit changes in local `threlium_repo_path` via privileged `cli_exec`
+- **Minimal production footprint** — bare metal or VPS; Docker only for e2e harness
 
 ## Architecture (overview)
 
-Every event in the system is an RFC 5322 message (`.eml` file). FSM stages are Maildir folders. Transitions between stages are message deliveries via `fdm` + `notmuch insert`. Orchestration is handled by `systemd --user` (workers, restarts, resource limits, logs via journalctl).
+External signals are normalized once by channel bridges into canonical MIME (`To: ingress@localhost`, `X-Threlium-Route`). The FSM engine (`threlium.runners.engine`) calls stage handlers **in-process**; transitions deliver the next message via **`run_fdm`** → terminating **`fdm` pipe** → `notmuch insert` + dispatch. LightRAG indexing runs on a dedicated asyncio loop in the same daemon after `nm_settle()`.
 
-### FSM stages
+Typical happy path:
 
-`ingress` → `enrich` → `reasoning` → (`egress_router` | `cli_intent` | `thread_memory` | `global_memory` | `subagent_intent` | `reflect`) → ... → `egress_email` / `egress_telegram` / `egress_matrix` → `archive`
+`ingress` → `enrich` → `reasoning` → (`egress_router` | memory | CLI | subagent | `formal_reason` | response tools | …) → `egress_<channel>` → `archive`
 
-Each stage is a Python module with a single function:
+Stage contract:
 
 ```python
-def main(msg: EmailMessage, stage: FsmStage, *, config: Config) -> EmailMessage | None:
+def main(msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings) -> EmailMessage | None:
 ```
 
-### Components
+| Layer | Implementation |
+| ----- | -------------- |
+| Event store | Durable stage Maildirs under `~/threlium/stages/` |
+| Index | notmuch2 (union over `stages/*/Maildir`) |
+| Routing | fdm (`~/.fdm.conf`) |
+| Orchestration | systemd --user (`threlium-engine`, `threlium-work@`, bridges, sweep) |
+| Reasoning | litellm + tool calls (edge choice is never free-text parsing) |
+| Memory | LightRAG + `thread_memory` / `global_memory` |
+| Wire MIME | `threlium.mail` (parse/serialize/IMAP); domain types in `threlium.types` (msgspec) |
+| Deployment | Ansible push (`site.yml`: `deploy` / `refresh`) |
+| Testing | pytest e2e only — Docker Compose + baked SUT + WireMock + GreenMail |
 
-| Component          | Implementation                                |
-| ------------------ | --------------------------------------------- |
-| Event store        | Maildir (files on disk)                       |
-| Index              | notmuch (Xapian)                              |
-| Queue              | Maildir `new/` → `cur/`                       |
-| Orchestration      | systemd --user                                |
-| Routing            | fdm (`~/.fdm.conf`)                           |
-| Reasoning          | litellm + tool calls                          |
-| Memory             | LightRAG (NanoVectorDB + NetworkX)            |
-| Channels           | IMAP IDLE, Telegram Bot API, Matrix (nio)     |
-| Prompts            | Jinja2 templates                              |
-| Deployment         | Ansible push model                            |
-| Configuration      | pydantic-settings + YAML (`threlium.yaml`)    |
-| Testing            | pytest e2e + Docker + WireMock + GreenMail    |
-| CLI security       | cli_intent (policy) → cli_exec (sandbox)      |
-
-Detailed architecture description with diagrams: [docs/ARTICLE.md](docs/ARTICLE.md)
+Normative detail: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/INDEX.md](docs/INDEX.md), [docs/FSM.md](docs/FSM.md). Narrative article (Russian): [docs/ARTICLE.md](docs/ARTICLE.md).
 
 ## Requirements
 
-- **Target host:** Ubuntu 24.04+ (Debian-based) with systemd
-- **Python:** 3.11+
-- **LLM:** OpenAI-compatible endpoint (local vLLM, ollama, or cloud)
-- **Embedding:** OpenAI-compatible endpoint for embeddings (LightRAG)
-- **IMAP server:** for the email channel (GreenMail for tests, any real server for production)
-- **Control node:** Ansible 2.20+ (for deployment)
+- **Target host:** Ubuntu 24.04+ (Debian-based), systemd, `loginctl enable-linger` for the agent user
+- **Python:** 3.11+ (runtime venv on target; repo root `.venv` for dev/e2e)
+- **LLM / embeddings:** OpenAI-compatible HTTP (vLLM, Ollama, cloud, …)
+- **IMAP/SMTP:** for the email channel (GreenMail in e2e)
+- **Control node:** Ansible 2.20+ for deployment
+
+System packages on target include **fdm**, **notmuch**, **msmtp**, **dovecot**, **cockpit**, **caddy** (see role defaults).
 
 ## Installation
 
-### 1. Clone the repository (on the control node)
+### 1. Clone (control node)
 
 ```bash
 git clone <repo-url> threlium
 cd threlium
+python3 -m venv .venv && .venv/bin/pip install -e ".[e2e]"
 ```
 
-### 2. Configure inventory
-
-Copy and edit the inventory file:
+### 2. Inventory
 
 ```bash
 cp ansible/inventory/hosts.yml ansible/inventory/my-host.yml
@@ -89,34 +82,28 @@ all:
           ansible_user: deploy
 ```
 
-### 3. Configure host_vars
+### 3. Host variables
 
-Create a host variables file (example: `ansible/host_vars/th-agent.yml`). Minimum required:
+Create `ansible/host_vars/my-server.yml`. Minimum:
 
 ```yaml
-# Password for PAM auth (Cockpit, Roundcube)
 threlium_agent_login_password: "your-password"
 
-# LLM endpoints (OpenAI-compatible)
 threlium_litellm:
   llm_endpoints:
     - model: "openai/qwen3-35b"
       api_base: "http://your-vllm-host:8000/v1"
       score: 1.0
-      chat_template_kwargs:
-        enable_thinking: true
   embedding_endpoints:
     - model: "openai/bge-m3"
       api_base: "http://your-vllm-host:8001/v1"
 
-# Email bridge (IMAP)
 threlium_bridges:
   email:
     imap_host: "imap.example.com"
     imap_user: "agent@example.com"
     imap_pass: "app-password"
 
-# SMTP for sending replies
 threlium_msmtp:
   host: "smtp.example.com"
   port: 587
@@ -124,18 +111,18 @@ threlium_msmtp:
   password: "app-password"
 ```
 
-### 4. Run the deployment
+Full variable map: [docs/PLAYBOOK.md](docs/PLAYBOOK.md).
+
+### 4. Deploy
 
 ```bash
 ansible-playbook ansible/playbooks/site.yml \
   -i ansible/inventory/my-host.yml \
-  -e @ansible/host_vars/my-host.yml \
+  -e @ansible/host_vars/my-server.yml \
   --tags deploy
 ```
 
-The playbook will install all dependencies (fdm, msmtp, notmuch, python3, Cockpit, Caddy, Roundcube, Dovecot), create a user, deploy code, prompts, configs, systemd units, and start the agent.
-
-### 5. Code update (without full deployment)
+### 5. Code refresh (no apt/web reinstall)
 
 ```bash
 ansible-playbook ansible/playbooks/site.yml \
@@ -143,62 +130,63 @@ ansible-playbook ansible/playbooks/site.yml \
   --tags refresh
 ```
 
-The `refresh` mode syncs code and configs without apt/pip/web stack.
+Re-running full `deploy` on a live host is **disaster recovery** (overwrites local git drift in `threlium_repo_path`). Day-to-day code changes on target go through local commits or `refresh` from the control node.
 
 ## Usage
 
-After deployment, the agent is running and listening for incoming messages. Interaction:
+- **Email** — send to the agent address; replies stay in the same thread (`References` / `In-Reply-To`)
+- **Telegram / Matrix** — enable in `threlium_bridges` and systemd bridge units
 
-- **Email:** send a message to the agent's address — the reply will arrive in the same thread
-- **Telegram:** message the bot (if `threlium_bridge_telegram_enabled` is configured)
-- **Matrix:** message the room (if `threlium_bridge_matrix_enabled` is configured)
-
-### Web admin panel
-
-Available on port `:8080` of the target host after deployment:
-
-- `/webmail/` — Roundcube (read-only view of all agent "thoughts" as mail threads)
-- `/` — Cockpit (terminal, journald logs, systemd unit management, metrics)
-
-### Service management
+**Web UI** (after deploy): `https://<host>:9090` (Cockpit), `http://<host>:8080/webmail/` (Roundcube).
 
 ```bash
-# On the target host as the threlium user:
+# On target as the threlium user:
 systemctl --user status threlium-engine.service
-systemctl --user restart threlium-engine.service
 journalctl --user -u threlium-engine.service -f
 ```
 
 ## Testing
 
-E2e tests run the full pipeline in Docker (Ubuntu 24.04 SUT + GreenMail + WireMock):
+E2e is the only automated test layer ([docs/TESTING.md](docs/TESTING.md)):
 
 ```bash
-pip install -e ".[e2e]"
-pytest tests/e2e/
+.venv/bin/pip install -e ".[e2e]"
+
+# First time or after playbook/package changes — bake SUT image:
+.venv/bin/pytest -n0 tests/e2e/wipe_bake.py
+
+# Scenarios (shared Docker Compose: sut + greenmail + wiremock):
+.venv/bin/pytest tests/e2e
+
+# Serial runner with per-test logs:
+./test-runs/run_individual_e2e.sh
 ```
 
-Baked image strategy: the first run executes the full `site.yml` on bare Ubuntu and commits the image. Subsequent tests start instantly from the baked image.
+After RFC822 / `threlium.mail` changes: `scripts/check_mail_wire.sh`.
 
-## Project structure
+## Project layout
 
 ```
 ansible/
-  playbooks/site.yml              # single deployment scenario
-  playbooks/tasks/                # included tasks (refresh, web stack, ssh)
+  playbooks/site.yml           # deploy + refresh
   roles/threlium/
-    defaults/main.yml             # default variables
-    vars/main.yml                 # canonical FSM stages
-    files/scripts/                # Python FSM code (threlium package)
-    files/prompts/                # Jinja2 prompts for the LLM
-    templates/                    # config and systemd unit templates
-  host_vars/                      # per-host variables (LLM endpoints, secrets)
-  inventory/                      # inventories (prod and e2e)
-tests/e2e/                        # e2e tests (Docker + WireMock + GreenMail)
-docs/                             # documentation and architecture article
+    files/scripts/threlium/    # FSM, bridges, runners, types, mail/
+    files/prompts/             # Jinja2 LLM prompts
+    files/knowledge/           # bootstrap corpus for LightRAG
+    templates/                 # threlium.yaml, fdm.conf, systemd units
+tests/e2e/                     # pytest + compose + wiremock_stubs/
+docs/                          # architecture contracts (mostly Russian)
 ```
 
 ## Documentation
 
-- [docs/ARTICLE.md](docs/ARTICLE.md) — detailed architecture article with diagrams (in Russian)
-- [docs/TYPES.md](docs/TYPES.md) — data type descriptions
+| Document | Topic |
+| -------- | ----- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System overview, integrations |
+| [docs/INDEX.md](docs/INDEX.md) | Storage + notmuch + LightRAG contract |
+| [docs/FSM.md](docs/FSM.md) | Stage graph and handler contract |
+| [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | systemd, dispatch, concurrency |
+| [docs/PLAYBOOK.md](docs/PLAYBOOK.md) | Ansible deployment |
+| [docs/TESTING.md](docs/TESTING.md) | E2e harness |
+| [docs/TYPES.md](docs/TYPES.md) | msgspec / wire types |
+| [docs/ARTICLE.md](docs/ARTICLE.md) | Long-form architecture article (RU) |
