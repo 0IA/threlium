@@ -5,7 +5,7 @@
 ``$THRELIUM_HOME/prompts/<stage>/<purpose>.j2`` (например,
 ``ingress/orphan_notice.j2``, ``reasoning/<route>/tool_spec.j2``).
 Cross-cutting артефакты, не привязанные ни к
-одной стадии (например, ``lightrag/ingest_body.j2``), лежат под ``prompts/lightrag/``.
+одной стадии (например, ``lightrag/mail_context.j2``), лежат под ``prompts/lightrag/``.
 Стадии (`states/*.py`), раннеры (`runners/*.py`) и мосты (`bridges/*.py`)
 вызывают :func:`render_prompt`,
 передавая только :class:`~threlium.types.prompt_path.PromptPath`.

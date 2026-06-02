@@ -1,14 +1,23 @@
-"""Синтетический RFC822 для ``rag.ainsert``: shell из EmailMessage + Jinja только тело (ADR 0001)."""
+"""Синтетический RFC822 для ``rag.ainsert``: envelope из EmailMessage + N ``<history>``-частей.
+
+Контракт ``docs/CONTEXT_CONTRACT.md`` §7: ingest **не сливает** ``<history>`` в одно
+plain-тело — каждая history-часть переезжает в synthetic ``multipart/mixed`` как inline
+``text/plain`` с тем же контент-адресным CID ``<{sha256(body)}@history>``, что и на диске.
+Границы distill-частей сохраняются для per-part chunking (``lightrag_chunking``).
+"""
 from __future__ import annotations
 
 from email.message import EmailMessage
 
 from threlium.mail import serialize_rfc822_for_wire
-from threlium.mime_reform import concat_history_parts_text
-from threlium.prompts import render_prompt
+from threlium.mime_reform import (
+    EnrichContentId,
+    _make_inline_text_part,
+    history_part_text,
+    iter_history_parts,
+)
 from threlium.types import (
     MailHeaderName,
-    PromptPath,
     RfcDateWire,
     RfcFromWire,
     RfcInReplyToWire,
@@ -44,26 +53,22 @@ def _copy_graph_headers(src: EmailMessage, dst: EmailMessage) -> None:
 
 
 def render_lightrag_ingest_document(msg: EmailMessage, *, thread_term: str) -> str:
-    """RFC822-текст для ``rag.ainsert``: ``EmailMessage`` + ``RFC822_FOR_INSERT``, тело из Jinja."""
-    body_plain = concat_history_parts_text(msg)
+    """RFC822-текст для ``rag.ainsert``: envelope-заголовки + по одной inline-части на ``<history>``.
+
+    Порядок частей = порядок :func:`iter_history_parts`; пустые тела пропускаются. CID каждой
+    части пересчитывается из тела (:meth:`EnrichContentId.from_history_body`) — совпадает с
+    диском, если тело идентично. Слияния в одно plain-тело больше нет.
+    """
     tt = thread_term.strip()
-    subj_w = RfcSubjectWire.parse_present_from_email(msg, _HDR.SUBJECT)
-    from_w = RfcFromWire.parse_present_from_email(msg, _HDR.FROM)
-    subject_h = subj_w.value if subj_w is not None else ""
-    from_h = from_w.value if from_w is not None else ""
-    body_graph = render_prompt(
-        PromptPath.LIGHTRAG_INGEST_BODY,
-        body_plain=body_plain,
-        thread_term=tt,
-        subject_h=subject_h,
-        from_h=from_h,
-    )
     synthetic = EmailMessage()
+    synthetic.make_mixed()
     _copy_graph_headers(msg, synthetic)
     synthetic[_LRAG_HDR.THREAD_ID] = tt
-    synthetic.set_content(
-        body_graph.rstrip("\n"),
-        subtype="plain",
-        charset="utf-8",
-    )
+    for _cid, part in iter_history_parts(msg):
+        text = history_part_text(part).strip()
+        if not text:
+            continue
+        synthetic.attach(
+            _make_inline_text_part(EnrichContentId.from_history_body(text), text)
+        )
     return serialize_rfc822_for_wire(synthetic).decode("utf-8", errors="replace").strip() + "\n"

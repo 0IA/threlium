@@ -18,6 +18,7 @@ from collections.abc import Iterator, Sequence
 from email.message import EmailMessage
 
 from threlium.mail import serialize_rfc822_for_wire
+from threlium.mime_reform import EnrichContentId, _make_inline_text_part
 from pathlib import Path
 
 from lightrag import LightRAG
@@ -38,11 +39,18 @@ def _doc_id_for_path(rel_path: str) -> str:
 
 
 def _wrap_as_rfc822(content: str, *, doc_id: str, filename: str) -> str:
-    """Wrap raw file content in RFC822 with X-Threlium-Thread-Id for chunking compatibility."""
+    """Synthetic ``multipart/mixed`` с одной inline ``<history>``-частью — единый путь chunking.
+
+    Bootstrap-документ проходит тот же per-history chunking, что и FSM-ingest
+    (``docs/CONTEXT_CONTRACT.md`` §7): тело файла кладётся в ``<{sha256(body)}@history>``,
+    ``X-Threlium-Thread-Id`` (= ``doc_id``) и ``Subject`` (= ``filename``) — заголовки конверта.
+    """
+    body = content.rstrip("\n")
     msg = EmailMessage()
+    msg.make_mixed()
     msg[LightragDocumentHeader.THREAD_ID] = doc_id
     msg["Subject"] = filename
-    msg.set_content(content.rstrip("\n"), subtype="plain", charset="utf-8")
+    msg.attach(_make_inline_text_part(EnrichContentId.from_history_body(body), body))
     return serialize_rfc822_for_wire(msg).decode("utf-8", errors="replace").strip() + "\n"
 
 

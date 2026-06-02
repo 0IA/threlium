@@ -762,9 +762,8 @@ def main(
     mckp_capacity = max(0, limit - budget_user - budget_extra)
 
     if config.enrich.summarize_enabled and ctx.all_messages:
-        # Overflow меряется тем же аппаратом, что и упаковка: full-вес unified-бакета
-        # (estimate_unified_weight по тем же tier1/tier2/preview, что и unified_configs[FULL]).
-        # Так решение «суммаризировать» согласовано с реальной сборкой контекста.
+        # Overflow: estimate_unified_weight (все <history> на письмо, как history_text) × те же
+        # tier1/tier2/preview, что unified_configs[FULL] — без полного Jinja mail_context.j2.
         raw_weight = estimate_unified_weight(
             score_messages(ctx.all_messages),
             config.enrich.tier1_full,

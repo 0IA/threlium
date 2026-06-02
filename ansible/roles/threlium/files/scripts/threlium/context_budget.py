@@ -21,7 +21,7 @@ import numpy as np
 from scipy.optimize import LinearConstraint, Bounds, milp
 
 from threlium.mail_header_names import MailHeaderName
-from threlium.mime_reform import EnrichPartId, history_part_text, iter_history_parts
+from threlium.mime_reform import EnrichPartId, concat_history_parts_text, iter_history_parts
 from threlium.types.content_score import ThreliumContentScoreWire
 
 _HDR = MailHeaderName
@@ -95,9 +95,10 @@ def normalize_weights(raw: dict[EnrichPartId, float]) -> dict[EnrichPartId, floa
 
 
 def history_body_chars(msg: EmailMessage) -> int:
-    """Длина тела первой ``<history>``-части (для scoring/оценки веса)."""
-    for _cid, part in iter_history_parts(msg):
-        return len(history_part_text(part))
+    """Длина agent-facing тела: все ``<history>``-части, как ``concat_history_parts_text`` / ``history_text``."""
+    combined = concat_history_parts_text(msg)
+    if combined.strip():
+        return len(combined)
     part = msg.get_body(preferencelist=("plain", "html"))
     return len(part.get_content()) if part else 0
 
@@ -170,8 +171,8 @@ def estimate_unified_weight(
 ) -> int:
     """Оценка веса unified_mail_context без Jinja-рендеринга.
 
-    Использует body_chars из scored для арифметической аппроксимации вместо полного
-    Jinja-рендеринга mail_context.j2. Все сообщения содержательные (есть ``<history>``).
+    Использует body_chars из scored (сумма всех ``<history>``, как ``history_text``) для
+    арифметической аппроксимации вместо полного Jinja-рендеринга mail_context.j2.
     """
     tiered = assign_tiers(scored, tier1_count, tier2_count)
     total = 0

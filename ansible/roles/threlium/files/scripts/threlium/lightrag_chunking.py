@@ -6,7 +6,7 @@ from email.message import EmailMessage
 import msgspec
 
 from threlium.mail import parse_rfc822
-from threlium.mime_reform import extract_plain_body
+from threlium.mime_reform import history_part_text, iter_history_parts
 from threlium.types import (
     LightragChunkRecord,
     LightragWorkerBatchThreadIdKey,
@@ -64,9 +64,11 @@ def threlium_email_chunking_func(
 ) -> list[dict[str, object]]:
     """Совместимо с сигнатурой LightRAG ``chunking_func`` (см. ``lightrag.lightrag``).
 
-    ``split_by_character*`` игнорируются: границы задаются только разбором MIME и
-    токенизацией **тела** (``chunk_token_size`` / ``chunk_overlap_token_size`` с
-    инстанса ``LightRAG``).
+    ``split_by_character*`` игнорируются: границы задаются разбором MIME и токенизацией.
+    Чанкинг идёт **по отдельным** ``<history>``-частям synthetic ingest-письма
+    (``docs/CONTEXT_CONTRACT.md`` §7), без слияния в одно plain-тело: малая часть
+    (``tokens <= chunk_token_size``) → один чанк, большая → окно/overlap внутри части.
+    Нумерация ``chunk_order_index`` сквозная 1..N по всему документу.
     """
     del split_by_character, split_by_character_only
     raw = content.strip().encode("utf-8")
@@ -79,43 +81,45 @@ def threlium_email_chunking_func(
     if not thread_val:
         raise ValueError(f"threlium chunking: missing {_LRAG_HDR.THREAD_ID} header")
 
-    plain = extract_plain_body(em).strip()
-    body_tokens = tokenizer.encode(plain)
     body_max = max(32, int(chunk_token_size))
     overlap = max(0, min(body_max - 1, int(chunk_overlap_token_size)))
     step = max(1, body_max - overlap)
 
     results: list[dict[str, object]] = []
-    if not body_tokens:
-        chunk_text = _chunk_prefix(em, thread_val=thread_val, chunk_number=1) + "\n\n"
-        results.append(
-            msgspec.to_builtins(
-                LightragChunkRecord(
-                    tokens=len(tokenizer.encode(chunk_text)),
-                    content=chunk_text.strip(),
-                    chunk_order_index=0,
-                )
-            )
-        )
-        return results
-
     order = 0
-    for start in range(0, len(body_tokens), step):
-        window = body_tokens[start : start + body_max]
-        piece = tokenizer.decode(window)
-        chunk_no = order + 1
-        prefix = _chunk_prefix(em, thread_val=thread_val, chunk_number=chunk_no)
-        chunk_text = prefix + "\n\n" + piece
-        results.append(
-            msgspec.to_builtins(
-                LightragChunkRecord(
-                    tokens=len(tokenizer.encode(chunk_text)),
-                    content=chunk_text.strip(),
-                    chunk_order_index=order,
+    for _cid, part in iter_history_parts(em):
+        plain = history_part_text(part).strip()
+        if not plain:
+            continue
+        body_tokens = tokenizer.encode(plain)
+        if not body_tokens:
+            continue
+        if len(body_tokens) <= body_max:
+            windows: list[list[int]] = [body_tokens]
+        else:
+            windows = []
+            for start in range(0, len(body_tokens), step):
+                windows.append(body_tokens[start : start + body_max])
+                if start + body_max >= len(body_tokens):
+                    break
+        for window in windows:
+            piece = tokenizer.decode(window)
+            prefix = _chunk_prefix(em, thread_val=thread_val, chunk_number=order + 1)
+            chunk_text = prefix + "\n\n" + piece
+            results.append(
+                msgspec.to_builtins(
+                    LightragChunkRecord(
+                        tokens=len(tokenizer.encode(chunk_text)),
+                        content=chunk_text.strip(),
+                        chunk_order_index=order,
+                    )
                 )
             )
+            order += 1
+
+    if not results:
+        raise ValueError(
+            "threlium chunking: ingest-документ без непустых <history>-частей "
+            "(drain-gate message_has_history гарантирует их наличие — это нарушение инварианта)"
         )
-        order += 1
-        if start + body_max >= len(body_tokens):
-            break
     return results

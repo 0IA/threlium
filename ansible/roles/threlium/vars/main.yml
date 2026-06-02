@@ -155,7 +155,6 @@ threlium_knowledge_effective: "{{ _threlium_knowledge_base | combine(threlium_kn
 
 # Внутренний контракт: обязательные Jinja2-промпты (не user-facing настройка).
 threlium_required_prompts:
-  - lightrag/ingest_body.j2
   - lightrag/enrich_query_plan.j2
   - lightrag/enrich_task_plan.j2
   - lightrag/enrich_incoming_user_text.j2
