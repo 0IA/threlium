@@ -5,26 +5,22 @@ collect_ops. Невалидная позиция → ingress с ошибкой; 
 """
 from __future__ import annotations
 
-import json
-
 from email.message import EmailMessage
 
-from threlium.fsm_emit import build_fsm_plain_to_stage
-from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
+from threlium.fsm_emit_semantic import (
+    emit_ingress_validation_error,
+    emit_preserving_to_enrich_fast,
+)
 from threlium.logutil import logger
 from threlium.mime_reform import system_part_text
-from threlium.prompts import render_prompt
+from threlium.nm import require_fsm_message_id
 from threlium.response.collect import collect_ops
-from threlium.response.ops import AppendOp
+from threlium.response.ops import AppendOp, parse_response_edit_stage_payload
 from threlium.response.state_summary import build_state_summary
 from threlium.settings import ThreliumSettings
 from threlium.types import (
     FsmStage,
-    FsmTransitionPlainBody,
-    MailHeaderName,
-    NotmuchMessageIdInner,
     PromptPath,
-    RfcMessageIdWire,
 )
 
 log = logger.bind(stage="response_edit")
@@ -33,28 +29,20 @@ log = logger.bind(stage="response_edit")
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
-    mid_w = RfcMessageIdWire.parse_present_from_email(msg, MailHeaderName.MESSAGE_ID.value)
-    inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
-    if inner is None:
-        raise RuntimeError("response_edit: no Message-ID on incoming message")
+    mid_w, inner = require_fsm_message_id(msg, "response_edit")
 
     body_raw = system_part_text(msg).strip()
-    try:
-        data = json.loads(body_raw)
-        target_position = int(data["position"])
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        log.error("invalid_body_json", error=str(exc), message_id=mid_w.value if mid_w else None)
-        error_body = render_prompt(
-            PromptPath.RESPONSE_EDIT_ERROR_INVALID_BODY,
-            exc=str(exc),
-        ).strip()
-        return build_fsm_plain_to_stage(
+    payload = parse_response_edit_stage_payload(body_raw)
+    if payload is None:
+        log.error("invalid_body_json", message_id=mid_w.value if mid_w else None)
+        return emit_ingress_validation_error(
             msg,
-            to_addr=FsmStage.INGRESS,
             from_stage=stage,
-            body=FsmTransitionPlainBody.parse(error_body),
             settings=config,
+            prompt_path=PromptPath.RESPONSE_EDIT_ERROR_INVALID_BODY,
+            exc=f"not a valid edit payload: {body_raw[:120]!r}",
         )
+    target_position = payload.position
 
     ops = collect_ops(inner)
     valid_positions = {op.position for op in ops if isinstance(op, AppendOp)}
@@ -66,21 +54,15 @@ def main(
             valid_positions=sorted(valid_positions),
             message_id=mid_w.value if mid_w else None,
         )
-        error_body = render_prompt(
-            PromptPath.RESPONSE_EDIT_ERROR_INVALID_POSITION,
+        return emit_ingress_validation_error(
+            msg,
+            from_stage=stage,
+            settings=config,
+            prompt_path=PromptPath.RESPONSE_EDIT_ERROR_INVALID_POSITION,
             position=target_position,
-            new_content=data.get("new_content"),
+            new_content=payload.new_content,
             valid_positions=sorted(valid_positions),
             buffer_summary=build_state_summary(ops),
-        ).strip()
-        return build_fsm_plain_to_stage(
-            msg,
-            to_addr=FsmStage.INGRESS,
-            from_stage=stage,
-            body=FsmTransitionPlainBody.parse(error_body),
-            settings=config,
         )
 
-    return emit_transition_simple_step_preserving_payload(
-        msg, to_addr=FsmStage.ENRICH_FAST, from_stage=stage, settings=config,
-    )
+    return emit_preserving_to_enrich_fast(msg, stage, settings=config)

@@ -21,30 +21,35 @@ import numpy as np
 from scipy.optimize import LinearConstraint, Bounds, milp
 
 from threlium.mail_header_names import MailHeaderName
-from threlium.mime_reform import EnrichPartId, concat_history_parts_text, iter_history_parts
+from threlium.mime_reform import EnrichContentId, EnrichPartId, concat_history_parts_text, iter_history_parts, part_origin_stage
 from threlium.types.content_score import ThreliumContentScoreWire
 
 _HDR = MailHeaderName
 
 
 def message_content_score(msg: EmailMessage) -> float:
-    """Базовый вес = ``X-Threlium-Content-Score`` первой ``<history>``-части письма.
+    """Базовый вес = максимум ``X-Threlium-Content-Score`` по ВСЕМ ``<history>``-частям письма.
 
-    Скоринг отправителя (источник проставил базовый вес из ``settings.history.score_for``).
-    Нет части/заголовка → нейтральный вес (fallback :meth:`ThreliumContentScoreWire.as_score`).
+    Письмо может нести несколько ``<history>``-частей (ingress distill: language/gaps/notes/
+    user_query; enrich_fast splice: разные origin/score). Вес письма определяет его самая
+    ценная часть (CONTEXT_CONTRACT §3 per-part headers), а не только первая. Нет частей →
+    нейтральный вес (fallback :meth:`ThreliumContentScoreWire.as_score`).
     """
-    for _cid, part in iter_history_parts(msg):
-        return ThreliumContentScoreWire.parse(part.get(_HDR.CONTENT_SCORE.value)).as_score()
-    return ThreliumContentScoreWire.parse(None).as_score()
+    scores = [
+        ThreliumContentScoreWire.parse(part.get(_HDR.CONTENT_SCORE.value)).as_score()
+        for _cid, part in iter_history_parts(msg)
+    ]
+    if not scores:
+        return ThreliumContentScoreWire.parse(None).as_score()
+    return max(scores)
 
 
 def message_origin_label(msg: EmailMessage) -> str:
-    """Метка источника для аннотации ``[from: ...]`` в mail_context.j2.
-
-    ``X-Threlium-Origin`` первой ``<history>``-части (штампует enrich_fast при сплайсе),
-    иначе local-part конвертного ``From:`` (для писем полного enrich без relay-копии).
-    """
+    """Метка источника для аннотации ``[from: ...]`` в mail_context.j2."""
     for _cid, part in iter_history_parts(msg):
+        stage = part_origin_stage(part)
+        if stage is not None:
+            return stage.value
         origin = part.get(_HDR.ORIGIN.value)
         if origin and str(origin).strip():
             return str(origin).strip().split("@", 1)[0]
@@ -95,12 +100,13 @@ def normalize_weights(raw: dict[EnrichPartId, float]) -> dict[EnrichPartId, floa
 
 
 def history_body_chars(msg: EmailMessage) -> int:
-    """Длина agent-facing тела: все ``<history>``-части, как ``concat_history_parts_text`` / ``history_text``."""
-    combined = concat_history_parts_text(msg)
-    if combined.strip():
-        return len(combined)
-    part = msg.get_body(preferencelist=("plain", "html"))
-    return len(part.get_content()) if part else 0
+    """Длина agent-facing тела: все ``<history>``-части (``concat_history_parts_text`` / ``history_text``).
+
+    Без ``get_body`` fallback (CONTEXT_CONTRACT §5/§7): содержательность письма определяется
+    строго наличием ``<history>``-частей, а не «первым text/plain». Письмо без ``<history>``
+    весит 0 (в unified не попадает по ``message_has_history``).
+    """
+    return len(concat_history_parts_text(msg))
 
 
 def message_value(

@@ -14,7 +14,8 @@ from threlium.cli_fsm import (
     cli_payload_as_json,
     parse_cli_intent_payload,
 )
-from threlium.fsm_emit import build_fsm_plain_to_stage, build_fsm_step_to_stage
+from threlium.fsm_emit import build_fsm_plain_to_stage
+from threlium.fsm_emit_semantic import emit_to_enrich_fast
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
@@ -24,7 +25,6 @@ from threlium.types import (
     CliRouteCollision,
     FsmStage,
     FsmTransitionPlainBody,
-    FsmTransitionPlainSubjectLine,
     PromptPath,
 )
 
@@ -35,10 +35,9 @@ def main(
     body = system_part_text(msg).strip()
     payload = parse_cli_intent_payload(body)
     if not payload:
-        return build_fsm_step_to_stage(
+        return emit_to_enrich_fast(
             msg,
-            to_addr=FsmStage.ENRICH_FAST,
-            from_stage=stage,
+            stage,
             history=render_prompt(PromptPath.CLI_INTENT_INVALID, prior=body).strip(),
             settings=config,
         )
@@ -50,10 +49,9 @@ def main(
             note = render_prompt(
                 PromptPath.CLI_INTENT_ROUTE_COLLISION, route=route.value, cmd=cmd
             ).strip()
-            return build_fsm_step_to_stage(
+            return emit_to_enrich_fast(
                 msg,
-                to_addr=FsmStage.ENRICH_FAST,
-                from_stage=stage,
+                stage,
                 history=note,
                 settings=config,
             )

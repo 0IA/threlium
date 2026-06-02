@@ -17,11 +17,10 @@ from threlium.irt_subagent_classifier import (
     hop_from_intent_parent,
 )
 from threlium.logutil import logger
+from threlium.nm import require_fsm_message_id
 from threlium.types import (
     FsmStage,
     MailHeaderName,
-    NotmuchMessageIdInner,
-    RfcMessageIdWire,
 )
 
 log = logger.bind(stage="subagent_end")
@@ -30,12 +29,7 @@ log = logger.bind(stage="subagent_end")
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
-    mid_w = RfcMessageIdWire.parse_present_from_email(msg, MailHeaderName.MESSAGE_ID)
-    inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
-    if inner is None:
-        raise RuntimeError(
-            "FSM-инвариант: subagent_end требует непустой Message-ID"
-        )
+    mid_w, inner = require_fsm_message_id(msg, "subagent_end")
 
     ancestor = find_matching_subagent_intent_ancestor(inner)
     hop = hop_from_intent_parent(ancestor)

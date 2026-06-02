@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import json
 from email.message import EmailMessage
-from typing import Any
 
-from telegram import Bot as TelegramBot, Message as TelegramMessage
-from telegram.request import HTTPXRequest
+from telegram import Message as TelegramMessage
 
 from threlium.delivery import run_fdm
 from threlium.egress_self_archive import (
@@ -27,8 +25,8 @@ from threlium.bridges.telegram import (
     run_ptb,
     send_placeholder_text,
     telegram_native_id_from_sent_message,
-    telegram_token,
 )
+from threlium.bridges.telegram_bot import telegram_bot
 from threlium.settings import ThreliumSettings
 from threlium.types import (
     FsmStage,
@@ -47,36 +45,24 @@ log = logger.bind(stage="egress_telegram")
 
 
 async def _send_placeholder(
-    token: str,
+    config: ThreliumSettings,
     routing: TelegramIngressRoute,
     *,
-    base_url: str | None,
     correlation_headers: dict[str, str] | None = None,
 ) -> TelegramMessage:
-    bot_kw: dict[str, Any] = {}
-    if base_url is not None:
-        bot_kw["base_url"] = base_url
-    if correlation_headers:
-        bot_kw["request"] = HTTPXRequest(httpx_kwargs={"headers": correlation_headers})
-    async with TelegramBot(token, **bot_kw) as bot:
+    async with telegram_bot(config, correlation_headers=correlation_headers) as bot:
         return await send_placeholder_text(bot, routing, PLACEHOLDER_TEXT)
 
 
 async def _edit_final_text(
-    token: str,
+    config: ThreliumSettings,
     *,
     chat_id: int,
     message_id: int,
     text: str,
-    base_url: str | None,
     correlation_headers: dict[str, str] | None = None,
 ) -> TelegramMessage:
-    bot_kw: dict[str, Any] = {}
-    if base_url is not None:
-        bot_kw["base_url"] = base_url
-    if correlation_headers:
-        bot_kw["request"] = HTTPXRequest(httpx_kwargs={"headers": correlation_headers})
-    async with TelegramBot(token, **bot_kw) as bot:
+    async with telegram_bot(config, correlation_headers=correlation_headers) as bot:
         return await edit_message_text(
             bot,
             chat_id=chat_id,
@@ -114,14 +100,12 @@ def main(
             wrong_route_type_message=_wrong_type,
         )
 
-    token_vo = telegram_token(config)
     body_wire = TelegramPtbOutboundReplyBody.parse_present_optional(
         system_part_text(msg)
     )
     if body_wire is None:
         raise RuntimeError("egress_telegram: plain body is empty after strip")
 
-    api_base = config.bridges.telegram.bot_api_base
     final_text = body_wire.value
 
     existing = find_existing_egress_archive(msg)
@@ -131,18 +115,17 @@ def main(
             existing.glue_message_id.value, TelegramNativeId,
         )
         run_ptb(_edit_final_text(
-            token_vo,
+            config,
             chat_id=native.chat_id,
             message_id=native.message_id,
             text=final_text,
-            base_url=api_base,
             correlation_headers=correlation_headers,
         ))
         return None
 
     log.info("sending_placeholder", chat_id=routing.chat_id, reply_to_message_id=routing.message_id)
     placeholder_msg = run_ptb(_send_placeholder(
-        token_vo, routing, base_url=api_base,
+        config, routing,
         correlation_headers=correlation_headers,
     ))
     log.info("placeholder_sent")
@@ -169,11 +152,10 @@ def main(
     log.info("archive_written")
 
     run_ptb(_edit_final_text(
-        token_vo,
+        config,
         chat_id=glue_native.chat_id,
         message_id=glue_native.message_id,
         text=final_text,
-        base_url=api_base,
         correlation_headers=correlation_headers,
     ))
     log.info("placeholder_edited_to_final")

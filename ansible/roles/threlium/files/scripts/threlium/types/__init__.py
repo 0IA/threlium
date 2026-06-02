@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._core import NonEmptyStr
+from ._core import NonEmptyStr, parse_json_payload
 from .bridges import (
     BridgeEmailSubjectLine,
     MatrixOutboundPlainBodyWire,
@@ -87,6 +87,7 @@ from .matrix_client_room_message import (
     MatrixClientRoomMessageRelatesTo,
     build_matrix_client_room_message_m_text_content,
     matrix_client_room_message_m_text_content_as_dict_for_nio,
+    reply_parent_event_id_from_message_source,
 )
 from .ingress import (
     EmailStruct,
@@ -154,6 +155,8 @@ from .enrich_tool_args import (
 )
 from .enrich_tool_function import EnrichToolBridgeError, EnrichToolFunctionName
 from .summarize_tool_args import (
+    SummarizeContextBatch,
+    SummarizeContextStagePayload,
     SummarizeResponseBufferToolArgs,
     SummarizeThreadContextToolArgs,
 )
@@ -164,6 +167,8 @@ from .summarize_tool_function import (
 from .ingress_distill import (
     IngressDistillBriefText,
     IngressDistillEnvelope,
+    IngressDistillHistoryPart,
+    IngressDistillHistoryPartKind,
     IngressDistillResult,
     IngressExternalBodyText,
     bridge_channel_from_email,
@@ -177,6 +182,7 @@ from .ingress_distill_tool_function import (
 )
 from .litellm_call_site import LitellmCallSite
 from .litellm_correlation_header import LitellmCorrelationHeader
+from .litellm_correlation_snapshot import LitellmCorrelationSnapshot
 from .litellm_routing_site import LitellmRoutingSite
 from .prompt_path import (
     PromptPath,
@@ -223,6 +229,7 @@ from .reasoning_tool_args import (
     ResponseAppendToolArgs,
     ResponseEditToolArgs,
     FormalReasonToolArgs,
+    formal_reason_stage_payload_from_tool_args,
     ResponseFinalizeToolArgs,
     ResponseObserveToolArgs,
     SubagentIntentToolArgs,
@@ -294,6 +301,8 @@ __all__ = [
     "EnrichTaskPlanToolArgs",
     "EnrichToolBridgeError",
     "EnrichToolFunctionName",
+    "SummarizeContextBatch",
+    "SummarizeContextStagePayload",
     "SummarizeResponseBufferToolArgs",
     "SummarizeThreadContextToolArgs",
     "SummarizeToolBridgeError",
@@ -352,6 +361,7 @@ __all__ = [
     "LightragWorkerBatchThreadIdKey",
     "LitellmCallSite",
     "LitellmCorrelationHeader",
+    "LitellmCorrelationSnapshot",
     "LitellmRoutingSite",
     "LiteLlmAcompletionKwargs",
     "LiteLlmAembeddingKwargs",
@@ -368,6 +378,7 @@ __all__ = [
     "MatrixClientRoomMessageRelatesTo",
     "build_matrix_client_room_message_m_text_content",
     "matrix_client_room_message_m_text_content_as_dict_for_nio",
+    "reply_parent_event_id_from_message_source",
     "MatrixIngressRoute",
     "MatrixNativeId",
     "MatrixOutboundPlainBodyWire",
@@ -390,6 +401,7 @@ __all__ = [
     "EnrichThreadMemoryText",
     "EnrichUnifiedMailContextText",
     "NonEmptyStr",
+    "parse_json_payload",
     "NotmuchBridgeFromLocalhost",
     "NotmuchIndexedHeader",
     "NotmuchMessageIds",
@@ -456,6 +468,7 @@ __all__ = [
     "FormalReasonResultPayload",
     "FormalReasonStagePayload",
     "FormalReasonToolArgs",
+    "formal_reason_stage_payload_from_tool_args",
     "SystemdStatusBody",
     "TelegramBridgeInboundCaptionOrText",
     "TelegramIngressRoute",

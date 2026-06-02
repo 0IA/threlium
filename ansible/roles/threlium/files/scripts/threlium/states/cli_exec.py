@@ -9,7 +9,7 @@ import subprocess
 from email.message import EmailMessage
 
 from threlium.cli_fsm import parse_cli_intent_payload, resolve_cli_exec_argv
-from threlium.fsm_emit import build_fsm_step_to_stage
+from threlium.fsm_emit_semantic import emit_to_enrich_fast
 from threlium.logutil import logger
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
@@ -87,10 +87,9 @@ def main(
     if not cli:
         log.warning("no_parseable_payload")
         body = render_prompt(PromptPath.CLI_EXEC_OBSERVATION, cmd_line="", prior=prior)
-        return build_fsm_step_to_stage(
+        return emit_to_enrich_fast(
             msg,
-            to_addr=FsmStage.ENRICH_FAST,
-            from_stage=stage,
+            stage,
             history=body,
             system=body,
             settings=config,
@@ -137,10 +136,9 @@ def main(
         mode=mode,
         privileged=privileged,
     )
-    return build_fsm_step_to_stage(
+    return emit_to_enrich_fast(
         msg,
-        to_addr=FsmStage.ENRICH_FAST,
-        from_stage=stage,
+        stage,
         history=body,
         system=body,
         settings=config,

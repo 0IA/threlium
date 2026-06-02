@@ -7,14 +7,14 @@ plain text summary в summarize_memory (стадия-хранитель).
 """
 from __future__ import annotations
 
-import json
 from email.message import EmailMessage
+
+import msgspec
 
 from threlium import nm as nmlib
 from threlium.fsm_emit import build_fsm_step_to_stage
+from threlium.litellm_correlation_headers import fsm_correlation_snap
 from threlium.litellm_required_tool import build_site_call, invoke_required_tool
-from threlium.litellm_correlation_headers import build_litellm_correlation_headers
-from threlium.litellm_route_context import get_litellm_http_correlation
 from threlium.litellm_tool_spec import load_tool_spec
 from threlium.logutil import logger
 from threlium.mime_reform import system_part_text
@@ -29,50 +29,30 @@ from threlium.types import (
     NotmuchMessageIdInner,
     NotmuchTag,
     PromptPath,
+    SummarizeContextStagePayload,
     SummarizeToolBridgeError,
 )
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
+
+
+def _parse_payload(text: str) -> tuple[list[str], list[str], str] | None:
+    """payload → ``(mids, bodies, user_query)``.
+
+    Через msgspec (TYPES § stage payload), без ``json.loads`` + ручного ``dict``.
+    Невалидный/пустой batch → ``None``.
+    """
+    try:
+        payload = msgspec.json.decode(
+            text.strip().encode("utf-8"), type=SummarizeContextStagePayload
+        )
+    except (msgspec.DecodeError, msgspec.ValidationError):
+        return None
+    batch = payload.summarize
+    if not batch.mids:
+        return None
+    return (list(batch.mids), list(batch.bodies), payload.user_query)
+
 
 log = logger.bind(stage="summarize_context")
-
-
-def _parse_payload(text: str) -> tuple[list[str], list[str]] | None:
-    """Parse ``{"summarize": {"mids": [...], "bodies": [...]}}``."""
-    try:
-        obj = json.loads(text.strip())
-    except (json.JSONDecodeError, ValueError):
-        return None
-    if not isinstance(obj, dict):
-        return None
-    inner = obj.get("summarize")
-    if not isinstance(inner, dict):
-        return None
-    mids = inner.get("mids")
-    bodies = inner.get("bodies")
-    if not isinstance(mids, list) or not isinstance(bodies, list):
-        return None
-    if not mids:
-        return None
-    return ([str(m) for m in mids], [str(b) for b in bodies])
-
-
-def _e2e_litellm_correlation(
-    msg: EmailMessage, config: ThreliumSettings
-) -> dict[str, str] | None:
-    """Снимок TLS FSM + ``X-Threlium-Call-Site: summarize_context`` для WireMock (E2E_ISOLATION)."""
-    if not config.e2e.litellm_route_correlation:
-        return None
-    snap = get_litellm_http_correlation()
-    if snap is not None:
-        corr = dict(snap)
-    else:
-        corr = build_litellm_correlation_headers(
-            msg, call_site=LitellmCallSite.SUMMARIZE_THREAD_CONTEXT
-        )
-    corr[LitellmCorrelationHeader.CALL_SITE.value] = (
-        LitellmCallSite.SUMMARIZE_THREAD_CONTEXT.value
-    )
-    return corr
 
 
 def main(
@@ -84,7 +64,7 @@ def main(
         log.error("unparseable_payload", body_preview=body_raw[:200])
         return None
 
-    mids, bodies = parsed
+    mids, bodies, user_query = parsed
     log.info("summarizing", message_count=len(mids))
 
     system = render_prompt(PromptPath.SUMMARIZE_CONTEXT_SYSTEM).strip()
@@ -103,21 +83,30 @@ def main(
         ],
     )
     tool_spec = load_tool_spec(PromptPath.SUMMARIZE_CONTEXT_TOOL_SPEC)
+    # Fail-fast симметрично enrich overflow (CONTEXT_CONTRACT §5): при провале tool bridge
+    # или пустой сводке оригиналы НЕ тегируются context_summarized — иначе они выпали бы из
+    # unified без замены, потеряв хвост треда. Тег ставится только после валидной сводки.
     try:
         assistant = invoke_required_tool(
             settings=config,
             call=call,
             tool_spec=tool_spec,
-            correlation_snap=_e2e_litellm_correlation(msg, config),
+            correlation_snap=fsm_correlation_snap(
+                msg, config, LitellmCallSite.SUMMARIZE_THREAD_CONTEXT
+            ),
             context="summarize_thread_context",
         )
         summary = parse_summarize_thread_context_assistant(assistant).summary
     except SummarizeToolBridgeError as exc:
-        log.warning("summarize_tool_bridge_failed", error=str(exc))
-        summary = ""
+        log.error("summarize_tool_bridge_failed", error=str(exc))
+        raise RuntimeError(
+            "summarize_context: tool bridge failed; originals left untagged"
+        ) from exc
     if not summary.strip():
-        log.warning("empty_summary", message_count=len(mids))
-        summary = "(summary unavailable)"
+        log.error("empty_summary", message_count=len(mids))
+        raise RuntimeError(
+            "summarize_context: empty summary; originals left untagged"
+        )
 
     nm_mids = [NotmuchMessageIdInner.parse(m) for m in mids]
     tagged = nmlib.batch_tag_add(nm_mids, NotmuchTag.CONTEXT_SUMMARIZED)
@@ -125,11 +114,13 @@ def main(
 
     # Сводка едет <history>-частью: оригиналы помечены context_summarized (выпадают из
     # unified), поэтому именно эта history-копия заменяет их в контексте следующего enrich.
-    # summarize_memory payload не потребляет (re-trigger по IRT), <system> не нужен.
+    # user_query релеится в <system>: summarize_memory отдаст его enrich как <history>, чтобы
+    # re-trigger повторил тот же ход пользователя (суммаризация его не меняет, CONTEXT §5).
     return build_fsm_step_to_stage(
         msg,
         to_addr=FsmStage.SUMMARIZE_MEMORY,
         from_stage=stage,
         history=summary,
+        system=user_query,
         settings=config,
     )

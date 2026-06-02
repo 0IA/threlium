@@ -7,9 +7,9 @@ import hashlib
 import json
 from email.message import EmailMessage
 
-from nio import AsyncClient, AsyncClientConfig
 from nio.responses import RoomSendError, RoomSendResponse
 
+from threlium.bridges.matrix_client import matrix_client
 from threlium.delivery import run_fdm
 from threlium.egress_self_archive import (
     build_egress_sent_record_to_archive,
@@ -22,6 +22,7 @@ from threlium.ingress_route_resolve import (
 from threlium.logutil import logger
 from threlium.mail import serialize_rfc822_for_wire
 from threlium.mime_reform import system_part_text
+from threlium.nm import require_fsm_message_id
 from threlium.settings import ThreliumSettings
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 from threlium.types import (
@@ -37,7 +38,6 @@ from threlium.types import (
     MailHeaderName,
     build_matrix_client_room_message_m_text_content,
     matrix_client_room_message_m_text_content_as_dict_for_nio,
-    matrix_homeserver_url,
 )
 
 _HDR = MailHeaderName
@@ -47,19 +47,14 @@ log = logger.bind(stage="egress_matrix")
 
 def _txn_id(msg: EmailMessage) -> MatrixRoomSendTxnId:
     """Детерминированный ``txnId`` из ``Message-ID`` задания (server-side idempotency)."""
-    mid_w = RfcMessageIdWire.parse_present_from_email(msg, _HDR.MESSAGE_ID)
-    if mid_w is None:
-        raise RuntimeError("egress_matrix: task has no Message-ID for txnId")
-    raw = mid_w.value.encode("utf-8", errors="replace")
+    _mid_w, inner = require_fsm_message_id(msg, "egress_matrix")
+    raw = inner.value.encode("utf-8", errors="replace")
     return MatrixRoomSendTxnId(hashlib.sha256(raw).hexdigest()[:24])
 
 
 async def _send_matrix_message(
     *,
-    stage: FsmStage,
-    homeserver: str,
-    token: str,
-    user: str,
+    config: ThreliumSettings,
     room_id: MatrixRoomId,
     body: MatrixOutboundPlainBodyWire,
     reply_to_event_id: MatrixRoomEventId | None,
@@ -67,15 +62,7 @@ async def _send_matrix_message(
     correlation_headers: dict[str, str] | None = None,
 ) -> RoomSendResponse:
     """Отправка в Matrix; возвращает ``RoomSendResponse`` с API-присвоенным ``event_id``."""
-    hs = homeserver or ""
-    tok = token or ""
-    uid = user or ""
-    base = matrix_homeserver_url(hs)
-    cfg = AsyncClientConfig(custom_headers=correlation_headers) if correlation_headers else None
-    client = AsyncClient(base, user="", config=cfg) if cfg else AsyncClient(base, user="")
-    client.access_token = tok
-    client.user_id = uid
-    try:
+    async with matrix_client(config, correlation_headers=correlation_headers) as client:
         payload = build_matrix_client_room_message_m_text_content(body, reply_to_event_id)
         content = matrix_client_room_message_m_text_content_as_dict_for_nio(payload)
         resp = await client.room_send(room_id, "m.room.message", content, tx_id=txn)
@@ -87,8 +74,6 @@ async def _send_matrix_message(
             )
         log.info("send_ok")
         return resp
-    finally:
-        await client.close()
 
 
 def main(
@@ -146,10 +131,7 @@ def main(
 
     send_resp = asyncio.run(
         _send_matrix_message(
-            stage=stage,
-            homeserver=homeserver_vo,
-            token=token_vo,
-            user=user_vo,
+            config=config,
             room_id=routing.room_id,
             body=body_wire,
             reply_to_event_id=routing.reply_to_event_id,

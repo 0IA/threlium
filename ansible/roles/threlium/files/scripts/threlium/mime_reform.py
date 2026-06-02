@@ -13,6 +13,7 @@ import msgspec
 
 from threlium.logutil import logger
 from threlium.mail_header_names import MailHeaderName
+from threlium.types.fsm_stage import FsmStage
 from threlium.types.bridge_raw import RawIngressCaptureAttachmentFilename
 
 if TYPE_CHECKING:
@@ -199,10 +200,18 @@ def extract_plain_body(msg: EmailMessage) -> str:
 def ingress_external_body_text(msg: EmailMessage) -> "IngressExternalBodyText":
     """Полное внешнее тело для ingress distill (без raw-capture attachment).
 
-    Предпочитает ``text/plain``, затем ``text/html``; пропускает attachment
-    ``threlium-raw-ingress.txt``.
+    CONTEXT_CONTRACT §2 (внешняя граница): если письмо несёт ровно одну ``<system>``-часть —
+    тело берётся из неё (``system_part_text``, канонический payload), а не из «первого
+    text/plain». Иначе (bridge-вход без ``<system>``) — первый ``text/plain`` / ``text/html``,
+    пропуская attachment ``threlium-raw-ingress.txt``.
     """
     from threlium.types.ingress_distill import IngressExternalBodyText
+
+    system_parts = iter_system_parts(msg)
+    if len(system_parts) == 1:
+        sys_text = _leaf_part_text(system_parts[0][1])
+        if sys_text.strip():
+            return IngressExternalBodyText.parse(sys_text)
 
     raw_fn = RawIngressCaptureAttachmentFilename.canonical().value
     if msg.is_multipart():
@@ -404,12 +413,19 @@ def system_leaf_part_text(part: EmailMessage) -> str:
     return _leaf_part_text(part)
 
 
+def part_origin_stage(part: EmailMessage) -> FsmStage | None:
+    """``X-Threlium-Origin`` leaf-части → :class:`FsmStage`; иначе ``None``."""
+    raw = part.get(MailHeaderName.ORIGIN.value)
+    if not raw or not str(raw).strip():
+        return None
+    local = str(raw).strip().split("@", 1)[0]
+    return FsmStage.try_from_mailbox(f"{local}@localhost")
+
+
 def part_origin_label(part: EmailMessage) -> str:
     """Local-part ``X-Threlium-Origin`` leaf-части; иначе ``?``."""
-    raw = part.get(MailHeaderName.ORIGIN.value)
-    if raw and str(raw).strip():
-        return str(raw).strip().split("@", 1)[0]
-    return "?"
+    stage = part_origin_stage(part)
+    return stage.value if stage is not None else "?"
 
 
 def iter_history_parts(msg: EmailMessage) -> list[tuple[EnrichContentId, EmailMessage]]:
@@ -482,6 +498,37 @@ def message_has_system(msg: EmailMessage) -> bool:
         if _leaf_part_text(part).strip():
             return True
     return False
+
+
+def email_without_system_parts(msg: EmailMessage) -> EmailMessage:
+    """Копия ``multipart/mixed`` без leaf ``<system>``-частей (ingress history-only relay)."""
+    if not message_has_system(msg):
+        return msg
+    from copy import deepcopy
+
+    if not msg.is_multipart():
+        return msg
+    kept: list[EmailMessage] = []
+    for part in msg.get_payload():
+        if not isinstance(part, EmailMessage):
+            kept.append(part)
+            continue
+        cid = EnrichContentId.from_mime_part(part)
+        if cid is not None and cid.family is EnrichPartId.SYSTEM:
+            continue
+        kept.append(deepcopy(part))
+    if not kept:
+        out = EmailMessage()
+        out.set_content("", subtype="plain", charset="utf-8")
+        return out
+    out = EmailMessage()
+    out.set_payload(kept)
+    ct = msg.get(MailHeaderName.CONTENT_TYPE) or msg.get_content_type() or "multipart/mixed"
+    out[MailHeaderName.CONTENT_TYPE] = ct
+    mv = msg.get(MailHeaderName.MIME_VERSION)
+    if mv:
+        out[MailHeaderName.MIME_VERSION] = mv
+    return out
 
 
 def system_part_text(msg: EmailMessage) -> str:

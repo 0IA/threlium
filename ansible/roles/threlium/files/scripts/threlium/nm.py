@@ -46,7 +46,10 @@ from tenacity import (
     before_sleep_log,
 )
 
-_log = logging.getLogger(__name__)
+from threlium.logutil import logger
+
+log = logger.bind(module=__name__)
+_RETRY_STDLOG = logging.getLogger(__name__)
 
 _RETRY_MAX_ATTEMPTS = 5
 _RETRY_WAIT = wait_exponential(multiplier=0.1, min=0.1, max=2)
@@ -61,7 +64,7 @@ def _is_retryable_xapian(exc: BaseException) -> bool:
 
 
 _RETRY_CONDITION = retry_if_exception(_is_retryable_xapian)
-_RETRY_BEFORE_SLEEP = before_sleep_log(_log, logging.WARNING)
+_RETRY_BEFORE_SLEEP = before_sleep_log(_RETRY_STDLOG, logging.WARNING)
 
 from threlium.types import (
     MailHeaderName,
@@ -106,6 +109,22 @@ def require_inner_message_id_from_fsm_email(msg: EmailMessage) -> NotmuchMessage
             f"({MailHeaderName.MESSAGE_ID.value})"
         )
     return inner
+
+
+def require_fsm_message_id(
+    msg: EmailMessage, stage_name: str
+) -> tuple[RfcMessageIdWire, NotmuchMessageIdInner]:
+    """``(wire, inner)`` ``Message-ID`` с конверта FSM-задачи; иначе ``RuntimeError``.
+
+    Стадии, которым нужен и present-wire (для логов), и inner (для CRDT/settle):
+    ``mid_w, inner = require_fsm_message_id(msg, "<stage>")``. При отсутствии
+    парсящегося id — ``RuntimeError`` с именем стадии.
+    """
+    mid_w = RfcMessageIdWire.parse_present_from_email(msg, MailHeaderName.MESSAGE_ID.value)
+    inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
+    if mid_w is None or inner is None:
+        raise RuntimeError(f"{stage_name}: no Message-ID on incoming message")
+    return mid_w, inner
 
 
 def _require_message_id_with_db(db: notmuch2.Database, file_path: Path) -> NotmuchMessageIdInner:
@@ -208,18 +227,18 @@ def _prepare_settle_target(db: notmuch2.Database, inner: NotmuchMessageIdInner) 
         )
     fp = Path(msg.path)
     if fp.parent.name == "cur":
-        _log.info(
-            "nm_settle: db.find miss, recovery from_maildir_flags inner=%s path=%s",
-            inner.value,
-            fp,
+        log.info(
+            "nm_settle_db_find_miss_recovery",
+            inner=inner.value,
+            path=str(fp),
         )
         with db.atomic():
             msg.tags.from_maildir_flags()
         return
-    _log.info(
-        "nm_settle: db.find miss, resolved via query inner=%s path=%s",
-        inner.value,
-        fp,
+    log.info(
+        "nm_settle_db_find_miss_query",
+        inner=inner.value,
+        path=str(fp),
     )
 
 
