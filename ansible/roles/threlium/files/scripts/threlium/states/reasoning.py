@@ -10,6 +10,9 @@ from __future__ import annotations
 from email.message import EmailMessage
 
 from threlium.formal_reason_gate import formal_reason_gate_active
+from threlium.litellm_call_site_wire import reasoning_call_site_wire
+from threlium.litellm_required_tool import correlation_with_call_site
+from threlium.litellm_route_context import get_litellm_http_correlation
 from threlium.litellm_tool_completion import completion_required_tool_sync
 from threlium.litellm_tool_response import require_tool_calls_response
 from litellm.types.utils import Message
@@ -173,6 +176,7 @@ def _decide(
     routes = sorted(allowed, key=lambda s: s.value)
     tools, schemas = load_tools_for_routes(routes)
     restricted = len(allowed) < len(REASONING_TARGET_STAGES)
+    call_site_wire = reasoning_call_site_wire()
 
     system = render_prompt(PromptPath.REASONING_SYSTEM).strip()
     length_recovery_system = render_prompt(
@@ -206,10 +210,16 @@ def _decide(
             chat_template_kwargs=ep.chat_template_kwargs or None,
         )
 
+        correlation = None
+        if config.e2e.litellm_route_correlation:
+            correlation = correlation_with_call_site(
+                get_litellm_http_correlation(), call_site_wire
+            )
         resp = completion_required_tool_sync(
             settings=config,
             call=call,
             tools=tools,
+            correlation_override=correlation,
         )
         finish = reasoning_finish_reason(resp)
         if finish == "length":

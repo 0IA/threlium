@@ -13,12 +13,9 @@ from threlium.cli_hitl_tool_bridge import parse_confirm_cli_hitl_assistant
 from threlium.fsm_emit import build_fsm_plain_to_stage, build_fsm_step_to_stage
 from threlium.ingress_hitl_resolve import find_cli_intent_maildir_path_from_in_reply_to_ancestors
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers
+from threlium.litellm_required_tool import invoke_required_tool
 from threlium.litellm_route_context import get_litellm_http_correlation
-from threlium.litellm_tool_completion import completion_required_tool_sync
-from threlium.litellm_tool_response import (
-    LiteLlmToolResponseError,
-    require_tool_calls_response,
-)
+from threlium.litellm_tool_response import LiteLlmToolResponseError
 from threlium.litellm_tool_spec import load_tool_spec
 from threlium.logutil import clip_log_text, logger
 from threlium.mime_reform import extract_plain_body, system_part_text
@@ -63,10 +60,10 @@ def _e2e_litellm_correlation(
         corr = dict(snap)
     else:
         corr = build_litellm_correlation_headers(
-            msg, call_site=LitellmCallSite.CLI_HITL_RESUME
+            msg, call_site=LitellmCallSite.CONFIRM_CLI_HITL
         )
     corr[LitellmCorrelationHeader.CALL_SITE.value] = (
-        LitellmCallSite.CLI_HITL_RESUME.value
+        LitellmCallSite.CONFIRM_CLI_HITL.value
     )
     return corr
 
@@ -128,13 +125,13 @@ def _classify_hitl_reply(
     last_error: BaseException | None = None
     for attempt in range(_MAX_CLI_HITL_CLASSIFY_RETRIES + 1):
         try:
-            resp = completion_required_tool_sync(
+            assistant = invoke_required_tool(
                 settings=config,
                 call=call,
-                tools=[tool_spec],
-                correlation_override=correlation,
+                tool_spec=tool_spec,
+                correlation_snap=correlation,
+                context="cli_hitl_resume",
             )
-            assistant = require_tool_calls_response(resp, context="cli_hitl_resume")
             args = parse_confirm_cli_hitl_assistant(assistant)
             log.info(
                 "cli_hitl_classify_ok",

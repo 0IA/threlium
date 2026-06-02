@@ -12,13 +12,15 @@ from email.message import EmailMessage
 
 from threlium import nm as nmlib
 from threlium.fsm_emit import build_fsm_step_to_stage
-from threlium.litellm_client import litellm_site_completion_text
+from threlium.litellm_required_tool import build_site_call, invoke_required_tool
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers
 from threlium.litellm_route_context import get_litellm_http_correlation
+from threlium.litellm_tool_spec import load_tool_spec
 from threlium.logutil import logger
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
+from threlium.summarize_tool_bridge import parse_summarize_thread_context_assistant
 from threlium.types import (
     FsmStage,
     LiteLlmChatMessage,
@@ -27,6 +29,7 @@ from threlium.types import (
     NotmuchMessageIdInner,
     NotmuchTag,
     PromptPath,
+    SummarizeToolBridgeError,
 )
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
@@ -64,10 +67,10 @@ def _e2e_litellm_correlation(
         corr = dict(snap)
     else:
         corr = build_litellm_correlation_headers(
-            msg, call_site=LitellmCallSite.SUMMARIZE_CONTEXT
+            msg, call_site=LitellmCallSite.SUMMARIZE_THREAD_CONTEXT
         )
     corr[LitellmCorrelationHeader.CALL_SITE.value] = (
-        LitellmCallSite.SUMMARIZE_CONTEXT.value
+        LitellmCallSite.SUMMARIZE_THREAD_CONTEXT.value
     )
     return corr
 
@@ -91,16 +94,28 @@ def main(
         bodies=bodies,
     ).strip()
 
-    summary = litellm_site_completion_text(
+    call = build_site_call(
         config,
         LitellmRoutingSite.SUMMARIZE_CONTEXT,
         [
             LiteLlmChatMessage(role="system", content=system),
             LiteLlmChatMessage(role="user", content=user),
         ],
-        correlation_override=_e2e_litellm_correlation(msg, config),
     )
-    if not summary:
+    tool_spec = load_tool_spec(PromptPath.SUMMARIZE_CONTEXT_TOOL_SPEC)
+    try:
+        assistant = invoke_required_tool(
+            settings=config,
+            call=call,
+            tool_spec=tool_spec,
+            correlation_snap=_e2e_litellm_correlation(msg, config),
+            context="summarize_thread_context",
+        )
+        summary = parse_summarize_thread_context_assistant(assistant).summary
+    except SummarizeToolBridgeError as exc:
+        log.warning("summarize_tool_bridge_failed", error=str(exc))
+        summary = ""
+    if not summary.strip():
         log.warning("empty_summary", message_count=len(mids))
         summary = "(summary unavailable)"
 

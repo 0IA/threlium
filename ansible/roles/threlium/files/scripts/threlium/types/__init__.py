@@ -147,6 +147,16 @@ from .lightrag_tool_wire import (
 )
 from .cli_hitl_tool_args import ConfirmCliHitlToolArgs
 from .cli_hitl_tool_function import CliHitlBridgeError, CliHitlToolFunctionName
+from .enrich_tool_args import EnrichQueryPlanToolArgs, EnrichTaskPlanToolArgs
+from .enrich_tool_function import EnrichToolBridgeError, EnrichToolFunctionName
+from .summarize_tool_args import (
+    SummarizeResponseBufferToolArgs,
+    SummarizeThreadContextToolArgs,
+)
+from .summarize_tool_function import (
+    SummarizeToolBridgeError,
+    SummarizeToolFunctionName,
+)
 from .ingress_distill import (
     IngressDistillBriefText,
     IngressDistillEnvelope,
@@ -274,6 +284,14 @@ __all__ = [
     "EmailIngressRoute",
     "EmailNativeId",
     "EnrichLightragQuestionSubjectLine",
+    "EnrichQueryPlanToolArgs",
+    "EnrichTaskPlanToolArgs",
+    "EnrichToolBridgeError",
+    "EnrichToolFunctionName",
+    "SummarizeResponseBufferToolArgs",
+    "SummarizeThreadContextToolArgs",
+    "SummarizeToolBridgeError",
+    "SummarizeToolFunctionName",
     "EngineWireError",
     "EngineWireOk",
     "EngineWireRequest",

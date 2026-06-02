@@ -1,0 +1,20 @@
+{#- tool_spec for thread-context summarization (tool_choice=required, score 1) — standalone -#}
+{
+  "type": "function",
+  "function": {
+    "name": "summarize_thread_context",
+    "description": "Tool-only: call once; no assistant text outside tool_calls. Produce one concise, self-contained summary of the provided email messages, preserving key facts, decisions, action items, and technical details.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The summary text, in the same language as the substantive message bodies; record each fact once; no commentary or opinions."
+        }
+      },
+      "required": ["summary"],
+      "additionalProperties": false
+    }
+  }
+}

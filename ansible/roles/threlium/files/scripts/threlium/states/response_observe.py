@@ -9,12 +9,15 @@ from __future__ import annotations
 from email.message import EmailMessage
 
 from threlium.fsm_emit import build_fsm_step_to_stage
-from threlium.litellm_client import litellm_site_completion_text
+from threlium.litellm_required_tool import build_site_call, invoke_required_tool
+from threlium.litellm_route_context import get_litellm_http_correlation
+from threlium.litellm_tool_spec import load_tool_spec
 from threlium.logutil import logger
 from threlium.prompts import render_prompt
 from threlium.response.collect import collect_ops
 from threlium.response.state_summary import build_state_data
 from threlium.settings import ThreliumSettings
+from threlium.summarize_tool_bridge import parse_summarize_response_buffer_assistant
 from threlium.task import collect_task_ops, reduce_task_ops
 from threlium.types import (
     FsmStage,
@@ -30,10 +33,10 @@ log = logger.bind(stage="response_observe")
 
 
 def _llm_observe(data_kw: dict[str, object], config: ThreliumSettings) -> str:
-    """LLM-суммаризация буфера ответа."""
+    """LLM-суммаризация буфера ответа через tool ``summarize_response_buffer``."""
     system = render_prompt(PromptPath.RESPONSE_OBSERVE_SYSTEM).strip()
     user = render_prompt(PromptPath.RESPONSE_OBSERVE_USER, **data_kw).strip()
-    return litellm_site_completion_text(
+    call = build_site_call(
         config,
         LitellmRoutingSite.RESPONSE_OBSERVE,
         [
@@ -41,6 +44,20 @@ def _llm_observe(data_kw: dict[str, object], config: ThreliumSettings) -> str:
             LiteLlmChatMessage(role="user", content=user),
         ],
     )
+    tool_spec = load_tool_spec(PromptPath.RESPONSE_OBSERVE_TOOL_SPEC)
+    correlation = (
+        get_litellm_http_correlation()
+        if config.e2e.litellm_route_correlation
+        else None
+    )
+    assistant = invoke_required_tool(
+        settings=config,
+        call=call,
+        tool_spec=tool_spec,
+        correlation_snap=correlation,
+        context="summarize_response_buffer",
+    )
+    return parse_summarize_response_buffer_assistant(assistant).observation
 
 
 def main(

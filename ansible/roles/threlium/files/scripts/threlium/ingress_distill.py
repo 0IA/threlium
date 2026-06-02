@@ -8,12 +8,9 @@ import jsonschema
 from email.message import EmailMessage
 from threlium.enrich_context import trim_context_text
 from threlium.ingress_distill_tool_bridge import parse_ingress_distill_assistant
+from threlium.litellm_required_tool import invoke_required_tool
 from threlium.litellm_route_context import get_litellm_http_correlation
-from threlium.litellm_tool_completion import completion_required_tool_sync
-from threlium.litellm_tool_response import (
-    LiteLlmToolResponseError,
-    require_tool_calls_response,
-)
+from threlium.litellm_tool_response import LiteLlmToolResponseError
 from threlium.litellm_tool_spec import tool_spec_parameters
 from threlium.logutil import logger
 from threlium.prompts import render_prompt
@@ -94,13 +91,13 @@ def ingress_distill_llm(
     last_error: BaseException | None = None
     for attempt in range(_MAX_INGRESS_DISTILL_RETRIES + 1):
         try:
-            resp = completion_required_tool_sync(
+            assistant = invoke_required_tool(
                 settings=config,
                 call=call,
-                tools=[tool_spec],
-                correlation_override=correlation,
+                tool_spec=tool_spec,
+                correlation_snap=correlation,
+                context="ingress_distill",
             )
-            assistant = require_tool_calls_response(resp, context="ingress_distill")
             args = parse_ingress_distill_assistant(assistant, schema=schema)
             parts = ingress_distill_history_parts_from_tool_args(args)
             log.info(

@@ -1,0 +1,20 @@
+{#- tool_spec for response-buffer observation (tool_choice=required, score 1) — standalone -#}
+{
+  "type": "function",
+  "function": {
+    "name": "summarize_response_buffer",
+    "description": "Tool-only: call once; no assistant text outside tool_calls. Produce a concise structured assessment of the reply state (buffer chunks + task ledger) for the reasoning stage to decide the next action.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "observation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The structured assessment text (buffer overview, per-chunk summaries, plan progress, structure, completeness, unresolved issues, explored-vs-assumed, recommendations); under 480 words."
+        }
+      },
+      "required": ["observation"],
+      "additionalProperties": false
+    }
+  }
+}

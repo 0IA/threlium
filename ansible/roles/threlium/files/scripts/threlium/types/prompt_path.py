@@ -137,11 +137,20 @@ class PromptPath(StrEnum):
     INGRESS_TASKS_UPSERT_ERROR = "ingress/tasks_upsert_error.j2"
 
     LIGHTRAG_ENRICH_TASK_PLAN = "lightrag/enrich_task_plan.j2"
+    LIGHTRAG_ENRICH_TASK_PLAN_TOOL_SPEC = (
+        "lightrag/tools/enrich_task_plan_tool_spec.j2"
+    )
+    LIGHTRAG_ENRICH_QUERY_PLAN_TOOL_SPEC = (
+        "lightrag/tools/enrich_query_plan_tool_spec.j2"
+    )
     TASK_STATE_SUMMARY = "task/state_summary.j2"
 
     RESPONSE_OBSERVE_STATE_SUMMARY = "response_observe/state_summary.j2"
     RESPONSE_OBSERVE_SYSTEM = "response_observe/observe_system.j2"
     RESPONSE_OBSERVE_USER = "response_observe/observe_user.j2"
+    RESPONSE_OBSERVE_TOOL_SPEC = (
+        "response_observe/tools/summarize_response_buffer_tool_spec.j2"
+    )
 
     RESPONSE_FINALIZE_COMPOSE = "response_finalize/compose.j2"
     RESPONSE_FINALIZE_FALLBACK_SUBJECT = "response_finalize/fallback_subject.j2"
@@ -152,6 +161,9 @@ class PromptPath(StrEnum):
 
     SUMMARIZE_CONTEXT_SYSTEM = "summarize_context/system.j2"
     SUMMARIZE_CONTEXT_USER = "summarize_context/user.j2"
+    SUMMARIZE_CONTEXT_TOOL_SPEC = (
+        "summarize_context/tools/summarize_thread_context_tool_spec.j2"
+    )
 
     RUNNERS_LIGHTRAG_ADDON_PARAMS = "runners/lightrag/addon_params.j2"
 
@@ -192,6 +204,9 @@ class PromptPath(StrEnum):
 
     LIGHTRAG_EXTRACT_KNOWLEDGE_GRAPH_TOOL_SPEC = (
         "lightrag/tools/extract_knowledge_graph_tool_spec.j2"
+    )
+    LIGHTRAG_EXTRACT_KNOWLEDGE_GRAPH_GLEANING_TOOL_SPEC = (
+        "lightrag/tools/extract_knowledge_graph_gleaning_tool_spec.j2"
     )
     LIGHTRAG_SUMMARIZE_DESCRIPTIONS_TOOL_SPEC = (
         "lightrag/tools/summarize_descriptions_tool_spec.j2"
