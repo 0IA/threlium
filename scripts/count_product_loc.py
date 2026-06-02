@@ -9,9 +9,9 @@
 исключая каталог types/.
 
 Примеры:
-  python tests/e2e/scripts/count_product_loc.py
-  python tests/e2e/scripts/count_product_loc.py --verbose
-  python tests/e2e/scripts/count_product_loc.py --with-types
+  python scripts/count_product_loc.py
+  python scripts/count_product_loc.py --verbose
+  python scripts/count_product_loc.py --with-types
 """
 from __future__ import annotations
 
