@@ -5,6 +5,7 @@ import contextlib
 import fcntl
 import os
 import subprocess
+import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,6 +32,7 @@ from .runtime import (
     E2EComposeRuntime,
     _compose_container,
     _compose_project_containers,
+    _docker_client,
     _mapped_port,
     discover_runtime,
 )
@@ -55,6 +57,7 @@ def _e2e_auto_bake_if_missing() -> bool:
     return str(raw).strip().lower() not in ("0", "false", "no", "off")
 
 
+@contextlib.contextmanager
 def _e2e_bake_image_lock() -> Iterator[None]:
     lock_path = Path(tempfile.gettempdir()) / "threlium_e2e_bake_image.lock"
     fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o644)
