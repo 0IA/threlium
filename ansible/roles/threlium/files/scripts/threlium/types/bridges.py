@@ -1,7 +1,7 @@
 """Wire-строки email / Matrix / Telegram мостов."""
 from __future__ import annotations
 
-from ._core import _OptionalStripEmpty
+from ._core import _OptionalStripEmpty, _SingleLineHeaderWire
 
 
 def matrix_homeserver_url(raw: str) -> str:
@@ -12,11 +12,11 @@ def matrix_homeserver_url(raw: str) -> str:
     return s
 
 
-class BridgeEmailSubjectLine(_OptionalStripEmpty):
+class BridgeEmailSubjectLine(_SingleLineHeaderWire):
     """Subject входящего письма email-моста (канонизация)."""
 
 
-class MatrixRoomNameWire(_OptionalStripEmpty):
+class MatrixRoomNameWire(_SingleLineHeaderWire):
     """Имя комнаты Matrix (``m.room.name`` → ``content.name``) после strip на границе sync."""
 
 

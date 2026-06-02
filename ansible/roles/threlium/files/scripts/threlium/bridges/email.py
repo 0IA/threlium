@@ -37,16 +37,13 @@ import ssl
 import sys
 from collections.abc import Callable, Iterable
 from typing import Optional, Union, cast
-from email import policy as email_policy
 from email.message import EmailMessage
-from email.parser import BytesParser
 from email.utils import formatdate, getaddresses
 
 import notmuch2  # pyright: ignore[reportMissingImports]
 from imap_tools import MailBox, MailBoxUnencrypted
 from imap_tools.errors import MailboxUidsError
 from imap_tools.mailbox import BaseMailBox, Criteria
-from imap_tools.message import MailMessage as ImapMailMessage
 from imap_tools.utils import check_command_status
 
 import threlium.nm as nm
@@ -54,7 +51,8 @@ from threlium.fsm_emit import HDR_HOP_BUDGET, HDR_ROUTE
 from threlium.litellm_route_context import e2e_route_wire_tail
 from threlium.delivery import fdm_bytes_from_message, run_fdm
 from threlium.logutil import logger
-from threlium.mime_reform import canonicalize_mime, ingress_raw_email_capture, parse_rfc822
+from threlium.mail import canonicalize_mime, imap_fetch_rfc822_bytes, parse_rfc822
+from threlium.mime_reform import ingress_raw_email_capture
 from threlium.bridges import attach_raw_ingress_capture
 from threlium.systemd_notify import notify_status
 from threlium.types.systemd_status import SystemdStatusBody
@@ -64,6 +62,7 @@ from threlium.types import (
     EmailIngressRoute,
     EmailNativeId,
     ExternalRfcMidWire,
+    ImapFolderUid,
     IngressRouteB62Wire,
     IrtHashWire,
     NotmuchBridgeFromLocalhost,
@@ -75,6 +74,8 @@ from threlium.types import (
     RfcReferencesWire,
     RfcSenderWire,
     MailHeaderName,
+    imap_folder_uid_as_imaplib_arg,
+    imap_folder_uid_from_int,
 )
 
 _HDR = MailHeaderName
@@ -225,7 +226,6 @@ def _build_canonical(
     refs_src = refs_w.value if refs_w is not None else None
     irt_w = RfcInReplyToWire.parse_present_from_email(msg, _HDR.IN_REPLY_TO)
     subj_w = BridgeEmailSubjectLine.parse_present_from_email(msg, _HDR.SUBJECT)
-    subject = subj_w.value if subj_w is not None else ""
 
     out = EmailMessage()
     skip = _BRIDGE_CANONICAL_SKIP_LOWER
@@ -264,7 +264,8 @@ def _build_canonical(
     route_wire = IngressRouteB62Wire.from_ingress_route(route_struct).value
     out[_HDR.FROM] = "email@localhost"
     out[_HDR.TO] = "ingress@localhost"
-    out[_HDR.SUBJECT] = subject.replace("\n", " ").replace("\r", "")[:900]
+    if subj_w is not None:
+        out[_HDR.SUBJECT] = subj_w.value
     out[_HDR.DATE] = formatdate(localtime=True)
     out[_HDR.MESSAGE_ID] = wire_mid
 
@@ -300,9 +301,7 @@ def rfc822_bytes_to_fsm_message(
 
     ``imap_uid`` / ``imap_uidvalidity`` пробрасываются в ``EmailIngressRoute`` checkpoint.
     """
-    incoming: EmailMessage = BytesParser(
-        policy=email_policy.default
-    ).parsebytes(raw)  # type: ignore[assignment]
+    incoming = parse_rfc822(raw)
     canonical = canonicalize_mime(incoming)
     return _build_canonical(
         canonical,
@@ -319,26 +318,21 @@ def rfc822_bytes_to_fsm_bytes(raw: bytes, *, settings: ThreliumSettings) -> byte
 
 def _imap_rfc822_by_uid(
     mailbox: BaseMailBox,
-    uid: str,
+    uid: ImapFolderUid,
     *,
     mark_seen: bool,
     headers_only: bool = False,
 ) -> bytes:
-    """Сырые RFC822-байты (тело или только заголовки) по UID через ``UID FETCH``.
+    """Сырые RFC822-байты по UID: ``mailbox.client`` + :func:`~threlium.mail.imap_fetch_rfc822_bytes`.
 
-    Без ``fetch(A(uid=…))`` → ``UID SEARCH (UID …)``: GreenMail отвечает
-    ``BAD Search command not supported`` на критерий ``UID`` в скобках внутри ``UID SEARCH``
-    (проверено на e2e GreenMail). ``UID FETCH`` по конкретному UID работает на всех серверах.
-    Границу «байты → :class:`EmailMessage`» делает вызывающий через :func:`parse_rfc822`.
+    Поиск UID — imap_tools; FETCH literal — imaplib (без ``MailMessage.obj.as_bytes()``).
     """
-    message_parts = (
-        f"(BODY{'' if mark_seen else '.PEEK'}[{'HEADER' if headers_only else ''}] "
-        "UID FLAGS RFC822.SIZE)"
+    return imap_fetch_rfc822_bytes(
+        mailbox.client,
+        uid,
+        mark_seen=mark_seen,
+        headers_only=headers_only,
     )
-    raw = next(mailbox._fetch_by_one([uid], message_parts), None)
-    if raw is None:
-        raise RuntimeError(f"IMAP: UID FETCH для UID {uid} вернул пусто")
-    return ImapMailMessage(raw).obj.as_bytes()
 
 
 def _parse_email_routing(route_wire: IngressRouteB62Wire | None) -> EmailIngressRoute:
@@ -406,14 +400,15 @@ def _search_uids_from(mailbox: BaseMailBox, start_uid: int) -> list[int]:
     return sorted(u for u in (int(x) for x in raw.decode().split()) if u >= start_uid)
 
 
-def _incoming_inner_mid(head: EmailMessage, uid: str) -> str:
+def _incoming_inner_mid(head: EmailMessage, uid: ImapFolderUid) -> str:
     """Inner ``Message-ID`` (без угловых скобок) через ``RfcMessageIdWire`` (как ``_build_canonical``)."""
+    uid_s = imap_folder_uid_as_imaplib_arg(uid)
     mid_w = RfcMessageIdWire.parse_present_from_email(head, _HDR.MESSAGE_ID)
     if mid_w is None:
-        raise RuntimeError(f"FSM-инвариант: UID {uid} без Message-ID")
+        raise RuntimeError(f"FSM-инвариант: UID {uid_s} без Message-ID")
     prev_inner = mid_w.value.strip("<>")
     if not prev_inner:
-        raise RuntimeError(f"FSM-инвариант: UID {uid} с пустым Message-ID")
+        raise RuntimeError(f"FSM-инвариант: UID {uid_s} с пустым Message-ID")
     return prev_inner
 
 
@@ -449,7 +444,7 @@ def _ensure_processed_folder(mailbox: BaseMailBox, folder: str) -> None:
 
 
 def _imap_finalize_message(
-    mailbox: BaseMailBox, uid: str, *, processed_folder: str
+    mailbox: BaseMailBox, uid: ImapFolderUid, *, processed_folder: str
 ) -> None:
     """Финализация обработанного UID: ``UID MOVE`` в ``processed_folder`` либо флаг ``\\Seen``.
 
@@ -458,11 +453,12 @@ def _imap_finalize_message(
     письмо с выборки ``UID SEARCH`` независимо от ``\\Seen`` и notmuch-watermark — при редеплое
     с пустым notmuch старая почта в INBOX больше не пересканируется. Пусто → legacy ``\\Seen``.
     """
+    uid_s = imap_folder_uid_as_imaplib_arg(uid)
     if processed_folder:
-        mailbox.move(uid, processed_folder)
-        log.info("imap_moved", uid=uid, folder=processed_folder)
+        mailbox.move(uid_s, processed_folder)
+        log.info("imap_moved", uid=uid_s, folder=processed_folder)
         return
-    mailbox.flag(uid, "\\Seen", True)
+    mailbox.flag(uid_s, "\\Seen", True)
 
 
 def process_inbox_tail(
@@ -510,7 +506,8 @@ def process_inbox_tail(
 
     with nm.notmuch_database(write=False) as db:
         for uid_int in uids:
-            uid = str(uid_int)
+            uid = imap_folder_uid_from_int(uid_int)
+            uid_s = imap_folder_uid_as_imaplib_arg(uid)
             head = parse_rfc822(
                 _imap_rfc822_by_uid(mailbox, uid, mark_seen=False, headers_only=True)
             )
@@ -520,22 +517,22 @@ def process_inbox_tail(
             )
 
             if nm.notmuch_index_has_message_id_in_db(db, mid_nm):
-                log.info("duplicate_skip", message_id=prev_inner, uid=uid)
+                log.info("duplicate_skip", message_id=prev_inner, uid=uid_s)
                 if _e2e_litellm_route_correlation(settings):
-                    log.debug("e2e_bridge_duplicate_skip", inner_incoming_mid=prev_inner, uid=uid)
+                    log.debug("e2e_bridge_duplicate_skip", inner_incoming_mid=prev_inner, uid=uid_s)
                 _imap_finalize_message(mailbox, uid, processed_folder=processed_folder)
                 session_high_uid = max(session_high_uid, uid_int)
                 continue
 
             parent_nm = _incoming_canonical_irt_inner(head)
             if parent_nm is not None and not nm.notmuch_index_has_message_id_in_db(db, parent_nm):
-                log.info("orphan_skip", message_id=prev_inner, in_reply_to=parent_nm.value, uid=uid)
+                log.info("orphan_skip", message_id=prev_inner, in_reply_to=parent_nm.value, uid=uid_s)
                 if _e2e_litellm_route_correlation(settings):
                     log.debug(
                         "e2e_bridge_orphan_skip",
                         inner_incoming_mid=prev_inner,
                         parent_inner=parent_nm.value,
-                        uid=uid,
+                        uid=uid_s,
                     )
                 _imap_finalize_message(mailbox, uid, processed_folder=processed_folder)
                 session_high_uid = max(session_high_uid, uid_int)
@@ -566,8 +563,8 @@ def process_inbox_tail(
             session_high_uid = max(session_high_uid, uid_int)
             if _e2e_litellm_route_correlation(settings):
                 rw = data.get(HDR_ROUTE)
-                log.debug("e2e_bridge_delivered", inner_incoming_mid=prev_inner, uid=uid, route_tail=e2e_route_wire_tail(rw if isinstance(rw, str) else None))
-            log.info("delivered", message_id=prev_inner, uid=uid)
+                log.debug("e2e_bridge_delivered", inner_incoming_mid=prev_inner, uid=uid_s, route_tail=e2e_route_wire_tail(rw if isinstance(rw, str) else None))
+            log.info("delivered", message_id=prev_inner, uid=uid_s)
             notify_status(SystemdStatusBody.bridge_email_connected_idle_simple())
 
     return session_high_uid

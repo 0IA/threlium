@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """cli_resume@localhost: ответ после HITL → cli_exec или enrich_fast@ (ARCHITECTURE §6.2, §4.3)."""
-import email as _email_mod
-from email import policy as _email_policy
 from email.message import EmailMessage
 
 import jsonschema
@@ -49,7 +47,9 @@ _MAX_CLI_HITL_CLASSIFY_RETRIES = 2
 def _extract_decoded_body_from_maildir_file(path) -> str:
     """Read a Maildir file and properly decode its body (handles QP, base64, etc.)."""
     raw_bytes = path.read_bytes()
-    intent_msg = _email_mod.message_from_bytes(raw_bytes, policy=_email_policy.default)
+    from threlium.mail import email_message_from_bytes
+
+    intent_msg = email_message_from_bytes(raw_bytes)
     return extract_plain_body(intent_msg)
 
 

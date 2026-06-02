@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 
 from threlium.irt_chain import IrtAncestorSnapshot
-from threlium.mime_reform import extract_plain_body, email_message_from_path
+from threlium.mail import email_message_from_path
+from threlium.mime_reform import extract_plain_body
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.types import FsmStage, NotmuchMessageIdInner
 

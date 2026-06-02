@@ -34,6 +34,20 @@ MatrixRoomEventId = NewType("MatrixRoomEventId", str)
 MatrixRoomId = NewType("MatrixRoomId", str)
 # Клиентский ``txnId`` для ``PUT …/send/…`` (идемпотентность отправки).
 MatrixRoomSendTxnId = NewType("MatrixRoomSendTxnId", str)
+# IMAP UID письма в папке моста (RFC 3501); на границе FETCH — opaque int, в imaplib — str.
+ImapFolderUid = NewType("ImapFolderUid", int)
+
+
+def imap_folder_uid_from_int(n: int) -> ImapFolderUid:
+    """``int`` → :class:`ImapFolderUid` (RFC 3501: UID ≥ 1)."""
+    if n < 1:
+        raise ValueError(f"IMAP UID must be >= 1, got {n!r}")
+    return ImapFolderUid(n)
+
+
+def imap_folder_uid_as_imaplib_arg(uid: ImapFolderUid) -> str:
+    """Единственное место ``str(...)`` для ``client.uid('fetch', …)`` / imap_tools move."""
+    return str(int(uid))
 
 
 class EmailNativeId(msgspec.Struct, frozen=True):

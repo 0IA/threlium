@@ -1,9 +1,9 @@
 """Синтетический RFC822 для ``rag.ainsert``: shell из EmailMessage + Jinja только тело (ADR 0001)."""
 from __future__ import annotations
 
-from email import policy
 from email.message import EmailMessage
 
+from threlium.mail import serialize_rfc822_for_wire
 from threlium.mime_reform import concat_history_parts_text
 from threlium.prompts import render_prompt
 from threlium.types import (
@@ -23,12 +23,6 @@ _HDR = MailHeaderName
 _LRAG_HDR = LightragDocumentHeader
 
 
-def _header_fold_one_line(raw: str | None) -> str:
-    if raw is None:
-        return ""
-    return " ".join(str(raw).replace("\r\n", "\n").split())
-
-
 def _copy_graph_headers(src: EmailMessage, dst: EmailMessage) -> None:
     """Копирование выбранных заголовков через ``Rfc*Wire.parse_present_from_email`` (``docs/TYPES.md``)."""
     parsers: list[tuple[str, type]] = [
@@ -44,20 +38,19 @@ def _copy_graph_headers(src: EmailMessage, dst: EmailMessage) -> None:
         wire = wire_cls.parse_present_from_email(src, name)
         if wire is None:
             continue
-        folded = _header_fold_one_line(wire.value)
-        if not folded.strip():
+        if not wire.value.strip():
             continue
-        dst[name] = folded
+        dst[name] = wire.value
 
 
 def render_lightrag_ingest_document(msg: EmailMessage, *, thread_term: str) -> str:
-    """RFC822-текст для ``rag.ainsert``: ``EmailMessage`` + ``policy.default``, тело из Jinja."""
+    """RFC822-текст для ``rag.ainsert``: ``EmailMessage`` + ``RFC822_FOR_INSERT``, тело из Jinja."""
     body_plain = concat_history_parts_text(msg)
     tt = thread_term.strip()
     subj_w = RfcSubjectWire.parse_present_from_email(msg, _HDR.SUBJECT)
     from_w = RfcFromWire.parse_present_from_email(msg, _HDR.FROM)
-    subject_h = _header_fold_one_line(subj_w.value if subj_w is not None else None)
-    from_h = _header_fold_one_line(from_w.value if from_w is not None else None)
+    subject_h = subj_w.value if subj_w is not None else ""
+    from_h = from_w.value if from_w is not None else ""
     body_graph = render_prompt(
         PromptPath.LIGHTRAG_INGEST_BODY,
         body_plain=body_plain,
@@ -73,4 +66,4 @@ def render_lightrag_ingest_document(msg: EmailMessage, *, thread_term: str) -> s
         subtype="plain",
         charset="utf-8",
     )
-    return synthetic.as_string(policy=policy.default).strip() + "\n"
+    return serialize_rfc822_for_wire(synthetic).decode("utf-8", errors="replace").strip() + "\n"

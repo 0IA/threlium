@@ -12,9 +12,9 @@ from email.message import EmailMessage
 
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.logutil import logger
+from threlium.mail import email_message_from_path
 from threlium.mime_reform import (
     concat_history_parts_text,
-    email_message_from_path,
     extract_plain_body,
     message_has_history,
 )

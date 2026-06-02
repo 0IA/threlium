@@ -22,9 +22,9 @@ from threlium.formal_reason_gate import assert_formal_reason_relay_after_splice
 from threlium.fsm_emit import emit_transition_preserving_payload
 from threlium.fsm_emit_semantic import managed_patch_simple_fsm_step
 from threlium.logutil import logger
+from threlium.mail import email_message_from_path
 from threlium.mime_reform import (
     EnrichContentId,
-    email_message_from_path,
     iter_history_parts,
     iter_system_parts,
     splice_e_prev_with_history,

@@ -17,6 +17,7 @@ from threlium.mime_reform import (
 from threlium.types import (
     CanonicalMidWire,
     FsmPlainToStageSubjectLine,
+    FsmRePrefixedSubjectLine,
     FsmStage,
     FsmTransitionPlainBody,
     FsmTransitionPlainSubjectLine,
@@ -247,10 +248,13 @@ def build_fsm_plain_to_stage(
     mid_w = RfcMessageIdWire.parse_present_from_email(incoming, HDR_MESSAGE_ID)
     irt_inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
     irt = irt_inner.as_angle_bracket_header() if irt_inner is not None else None
-    subj = FsmPlainToStageSubjectLine.parse(incoming.get(HDR_SUBJECT)).value
+    subj = FsmPlainToStageSubjectLine.parse(incoming.get(HDR_SUBJECT))
 
-    out_subj_raw = subject_line.value if subject_line is not None else f"Re: {subj}"
-    out_subj = out_subj_raw.replace("\n", " ").replace("\r", "")[:900]
+    out_subj = (
+        subject_line.value
+        if subject_line is not None
+        else FsmRePrefixedSubjectLine.from_plain_to_stage(subj).value
+    )
     out = EmailMessage()
     out.make_mixed()
     out[HDR_FROM] = from_stage.rfc822_mailbox
@@ -294,13 +298,13 @@ def build_fsm_multipart_to_stage(
     mid_w = RfcMessageIdWire.parse_present_from_email(incoming, HDR_MESSAGE_ID)
     irt_inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
     irt = irt_inner.as_angle_bracket_header() if irt_inner is not None else None
-    subj = FsmPlainToStageSubjectLine.parse(incoming.get(HDR_SUBJECT)).value
+    subj = FsmPlainToStageSubjectLine.parse(incoming.get(HDR_SUBJECT))
 
     out = EmailMessage()
     out.make_mixed()
     out[HDR_FROM] = from_stage.rfc822_mailbox
     out[HDR_TO] = to_addr.rfc822_mailbox
-    out[HDR_SUBJECT] = f"Re: {subj}".replace("\n", " ").replace("\r", "")[:900]
+    out[HDR_SUBJECT] = FsmRePrefixedSubjectLine.from_plain_to_stage(subj).value
     out[HDR_DATE] = formatdate(localtime=True)
     mid_new = RfcMessageIdWire.internal_for_fsm()
     CanonicalMidWire.assert_from_wire(mid_new)
@@ -361,14 +365,17 @@ def build_fsm_step_to_stage(
     mid_w = RfcMessageIdWire.parse_present_from_email(incoming, HDR_MESSAGE_ID)
     irt_inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
     irt = irt_inner.as_angle_bracket_header() if irt_inner is not None else None
-    subj = FsmPlainToStageSubjectLine.parse(incoming.get(HDR_SUBJECT)).value
+    subj = FsmPlainToStageSubjectLine.parse(incoming.get(HDR_SUBJECT))
 
     out = EmailMessage()
     out.make_mixed()
     out[HDR_FROM] = from_stage.rfc822_mailbox
     out[HDR_TO] = to_addr.rfc822_mailbox
-    out_subj_raw = subject_line.value if subject_line is not None else f"Re: {subj}"
-    out[HDR_SUBJECT] = out_subj_raw.replace("\n", " ").replace("\r", "")[:900]
+    out[HDR_SUBJECT] = (
+        subject_line.value
+        if subject_line is not None
+        else FsmRePrefixedSubjectLine.from_plain_to_stage(subj).value
+    )
     out[HDR_DATE] = formatdate(localtime=True)
     mid_new = RfcMessageIdWire.internal_for_fsm()
     CanonicalMidWire.assert_from_wire(mid_new)

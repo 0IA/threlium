@@ -40,12 +40,12 @@ from threlium.enrich_context import build_unified_email_messages, trim_context_t
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
 from threlium.logutil import logger
+from threlium.mail import email_message_from_path
 from threlium.mime_reform import (
     EnrichContentId,
     EnrichPartId,
     build_enriched_multipart,
     concat_history_parts_text,
-    email_message_from_path,
 )
 from threlium.litellm_client import litellm_site_completion_text
 from threlium.prompts import render_prompt

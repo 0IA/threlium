@@ -19,6 +19,14 @@ def _kv_dict(value: str | None, key: str) -> dict[str, str]:
     return d
 
 
+def _reject_embedded_crlf_after_strip(s: str) -> str:
+    """Fail-fast: в однострочном RFC822-заголовке не допускаются ``\\r``/``\\n`` после strip."""
+    t = str(s).strip()
+    if "\r" in t or "\n" in t:
+        raise ValueError(f"embedded CRLF in single-line header value: {t!r}")
+    return t
+
+
 def _kv_dict_lower(value: str | None, key: str) -> dict[str, str]:
     """Как :func:`_kv_dict`, но после ``strip`` применяется ``lower`` (параметры запросов)."""
     d: dict[str, str] = {}
@@ -67,6 +75,30 @@ class _OptionalStripEmpty(msgspec.Struct, frozen=True, kw_only=True):
         except LookupError:
             return None
         return cls.parse_present_optional(str(raw))
+
+
+class _SingleLineHeaderWire(_OptionalStripEmpty):
+    """Subject и прочие однострочные заголовки: strip + reject встроенных CRLF (без replace/slice)."""
+
+    @classmethod
+    def parse(cls, raw: str | None) -> Self:
+        if raw is None:
+            return cls()
+        t = _reject_embedded_crlf_after_strip(str(raw))
+        return msgspec.convert(_kv_dict(t, "value"), type=cls)
+
+    @classmethod
+    def parse_present_optional(cls, raw: str | None) -> Self | None:
+        if raw is None:
+            return None
+        t = str(raw).strip()
+        if not t:
+            return None
+        t = _reject_embedded_crlf_after_strip(t)
+        out = msgspec.convert(_kv_dict(t, "value"), type=cls)
+        if not out.value:
+            return None
+        return out
 
 
 class _OptionalStripLowerEmpty(msgspec.Struct, frozen=True, kw_only=True):

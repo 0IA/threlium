@@ -14,7 +14,7 @@ from .identity import (
     NativeId,
     TNative,
 )
-from ._core import _OptionalStripEmpty
+from ._core import _OptionalStripEmpty, _SingleLineHeaderWire
 
 _MSGID_RE = re.compile(r"<\s*([^<>]+)\s*>")
 _CANONICAL_MSGID_RE = re.compile(
@@ -46,7 +46,7 @@ class RfcSenderWire(_OptionalStripEmpty):
     """Значение заголовка ``Sender`` (wire) после strip."""
 
 
-class RfcSubjectWire(_OptionalStripEmpty):
+class RfcSubjectWire(_SingleLineHeaderWire):
     """Значение заголовка ``Subject`` (wire) после strip."""
 
 

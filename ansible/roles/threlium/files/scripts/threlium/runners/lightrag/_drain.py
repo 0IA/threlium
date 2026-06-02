@@ -16,7 +16,8 @@ from threlium.litellm_route_context import (
 )
 from threlium.lightrag_drain_query import lightrag_drain_pending_search
 from threlium.logutil import logger
-from threlium.mime_reform import email_message_from_path, message_has_history
+from threlium.mail import email_message_from_path
+from threlium.mime_reform import message_has_history
 from threlium.lightrag_ingest import render_lightrag_ingest_document
 from threlium.nm import (
     batch_tag_add,

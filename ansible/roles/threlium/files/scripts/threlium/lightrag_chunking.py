@@ -1,12 +1,11 @@
 """Кастомный ``chunking_func`` для LightRAG: RFC822 ingest → чанки с префиксом заголовков."""
 from __future__ import annotations
 
-from email import policy
 from email.message import EmailMessage
-from email.parser import BytesParser
 
 import msgspec
 
+from threlium.mail import parse_rfc822
 from threlium.mime_reform import extract_plain_body
 from threlium.types import (
     LightragChunkRecord,
@@ -71,7 +70,7 @@ def threlium_email_chunking_func(
     """
     del split_by_character, split_by_character_only
     raw = content.strip().encode("utf-8")
-    em = BytesParser(policy=policy.default).parsebytes(raw)
+    em = parse_rfc822(raw)
     if not isinstance(em, EmailMessage):
         raise ValueError("threlium chunking: content is not a valid RFC822 message")
 

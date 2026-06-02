@@ -23,8 +23,8 @@ _HDR = MailHeaderName
 
 
 def _parse_rfc822_bytes(data: bytes) -> EmailMessage:
-    """Ленивый разбор RFC822 — без импорта ``mime_reform`` на уровне модуля (цикл с ``types``)."""
-    from threlium.mime_reform import parse_rfc822
+    """Ленивый разбор RFC822 — без импорта ``threlium.mail`` на уровне модуля."""
+    from threlium.mail import parse_rfc822
 
     return parse_rfc822(data)
 

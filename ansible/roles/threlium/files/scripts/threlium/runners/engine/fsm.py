@@ -7,7 +7,7 @@ from pathlib import Path
 
 from threlium.delivery import run_fdm
 from threlium.logutil import logger
-from threlium.mime_reform import RFC822_FOR_INSERT, email_message_from_bytes
+from threlium.mail import email_message_from_bytes, serialize_rfc822_for_wire
 from threlium.settings import ThreliumSettings
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers
 from threlium.litellm_route_context import (
@@ -112,7 +112,7 @@ def _run_stage(
         )
     next_stage = FsmStage.from_incoming_to(out_msg)
     _log.info("fsm_result_transition", next_stage=next_stage.value)
-    return out_msg.as_bytes(policy=RFC822_FOR_INSERT)
+    return serialize_rfc822_for_wire(out_msg)
 
 
 def process_thread_message(

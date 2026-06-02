@@ -7,7 +7,7 @@ import subprocess
 from email.message import EmailMessage
 from pathlib import Path
 
-from threlium.mime_reform import RFC822_FOR_INSERT, parse_rfc822
+from threlium.mail import parse_rfc822, serialize_rfc822_for_wire
 
 
 def require_exe(which_name: str, default: str, install_hint: str) -> str:
@@ -20,8 +20,8 @@ def require_exe(which_name: str, default: str, install_hint: str) -> str:
 def run_fdm(stdin: bytes) -> None:
     """Одно письмо на stdin → ``fdm -m -a stdin fetch`` (``~/.fdm.conf``).
 
-    Вход нормализуется через stdlib ``email``: разбор :func:`~threlium.mime_reform.parse_rfc822`
-    и сериализация :data:`~threlium.mime_reform.RFC822_FOR_INSERT`.
+    Вход нормализуется через :mod:`threlium.mail`: :func:`~threlium.mail.parse_rfc822`
+    и :func:`~threlium.mail.serialize_rfc822_for_wire`.
 
     Маршрутизация и ``notmuch insert`` — в fdm.conf; стадия не передаётся из Python.
     При ошибке или коде ≠ 0 — ``RuntimeError``.
@@ -29,7 +29,7 @@ def run_fdm(stdin: bytes) -> None:
     fdm_bin = require_exe("fdm", "/usr/bin/fdm", "fdm")
     env = os.environ.copy()
     env["HOME"] = str(Path.home())
-    payload = parse_rfc822(stdin).as_bytes(policy=RFC822_FOR_INSERT)
+    payload = serialize_rfc822_for_wire(parse_rfc822(stdin))
     proc = subprocess.run(
         [fdm_bin, "-m", "-a", "stdin", "fetch"],
         input=payload,
@@ -42,5 +42,5 @@ def run_fdm(stdin: bytes) -> None:
 
 
 def fdm_bytes_from_message(msg: EmailMessage) -> bytes:
-    """Сериализация письма для stdin fdm / ``notmuch insert`` (:data:`~threlium.mime_reform.RFC822_FOR_INSERT`)."""
-    return msg.as_bytes(policy=RFC822_FOR_INSERT)
+    """Сериализация письма для stdin fdm / ``notmuch insert`` (:func:`~threlium.mail.serialize_rfc822_for_wire`)."""
+    return serialize_rfc822_for_wire(msg)

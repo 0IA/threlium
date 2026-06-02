@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import msgspec
 
-from ._core import _OptionalStripEmpty, _OptionalStripNone
+from ._core import _OptionalStripEmpty, _OptionalStripNone, _SingleLineHeaderWire
 
 
 class MessageIdHeaderNormalizationInput(_OptionalStripNone):
@@ -14,7 +14,7 @@ class ReasoningAssistantMessageText(_OptionalStripEmpty):
     """Текстовый ``content`` ответа ассистента litellm (reasoning)."""
 
 
-class ReasoningToolRouteEmailSubject(_OptionalStripEmpty):
+class ReasoningToolRouteEmailSubject(_SingleLineHeaderWire):
     """Subject из ``tool_call`` маршрута reasoning."""
 
 
@@ -22,8 +22,16 @@ class ReasoningToolRouteEmailBody(_OptionalStripEmpty):
     """Тело из ``tool_call`` маршрута reasoning."""
 
 
-class FsmPlainToStageSubjectLine(_OptionalStripEmpty):
+class FsmPlainToStageSubjectLine(_SingleLineHeaderWire):
     """Subject входящего письма для ``build_fsm_plain_to_stage`` (ветка ``Re:``)."""
+
+
+class FsmRePrefixedSubjectLine(_SingleLineHeaderWire):
+    """Исходящий Subject ``Re: …`` для FSM-эмита (без ручного fold/unfold)."""
+
+    @classmethod
+    def from_plain_to_stage(cls, subj: FsmPlainToStageSubjectLine) -> Self:
+        return cls.parse(f"Re: {subj.value}")
 
 
 class OrphanNoticePrefixLine(_OptionalStripEmpty):
@@ -62,8 +70,8 @@ class FsmTransitionPlainBody(_OptionalStripEmpty):
     """Тело text/plain для :func:`threlium.fsm_emit.build_fsm_plain_to_stage`."""
 
 
-class FsmTransitionPlainSubjectLine(_OptionalStripEmpty):
-    """Исходящий Subject для ``build_fsm_plain_to_stage`` (strip на границе; длина для RFC822 режется в билдере)."""
+class FsmTransitionPlainSubjectLine(_SingleLineHeaderWire):
+    """Исходящий Subject для ``build_fsm_plain_to_stage`` (strip + reject CRLF)."""
 
 
 class EnrichObservationNoteText(_OptionalStripEmpty):

@@ -15,8 +15,9 @@ import itertools
 import logging
 import time
 from collections.abc import Iterator, Sequence
-from email import policy
 from email.message import EmailMessage
+
+from threlium.mail import serialize_rfc822_for_wire
 from pathlib import Path
 
 from lightrag import LightRAG
@@ -42,7 +43,7 @@ def _wrap_as_rfc822(content: str, *, doc_id: str, filename: str) -> str:
     msg[LightragDocumentHeader.THREAD_ID] = doc_id
     msg["Subject"] = filename
     msg.set_content(content.rstrip("\n"), subtype="plain", charset="utf-8")
-    return msg.as_string(policy=policy.default).strip() + "\n"
+    return serialize_rfc822_for_wire(msg).decode("utf-8", errors="replace").strip() + "\n"
 
 
 def _iter_eligible_files(knowledge_dir: Path) -> Iterator[tuple[str, str]]:

@@ -4,9 +4,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
-from email import policy
 from email.message import EmailMessage, Message
-from email.parser import BytesParser
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self, TypeAlias
@@ -174,15 +172,6 @@ class EnrichContentId(msgspec.Struct, frozen=True):
     def is_core(self) -> bool:
         """Фиксированная часть полного ``enrich`` (не relay-хвост)."""
         return any(self.value == p.value for p in _CORE_PART_IDS)
-
-# Единая политика сериализации RFC822 для приложения: ``email.policy.SMTP`` с
-# ``max_line_length=0`` (без refold длинных заголовков) и ``linesep`` как Unix LF.
-# Используется для fdm stdin / ``notmuch insert``, handoff движка, egress msmtp prep,
-# round-trip в :func:`canonicalize_mime` (см. docs/INDEX.md §4 — ранее ``reformail -c``).
-RFC822_FOR_INSERT: Final = policy.SMTP.clone(max_line_length=0, linesep="\n")
-
-_PARSE_RFC822: Final = policy.default.clone(max_line_length=0)
-
 
 def _extract_plain_body_from_message(msg: Message) -> str:
     if msg.is_multipart():
@@ -612,36 +601,5 @@ def splice_e_prev_with_history(
         appended.append(cid)
 
     return RelaySpliceResult(message=out, appended=tuple(appended), skipped=tuple(skipped))
-
-
-def canonicalize_mime(msg: EmailMessage) -> EmailMessage:
-    """Round-trip MIME средствами stdlib ``email``.
-
-    Сериализация :data:`RFC822_FOR_INSERT` (Unix LF, без refold длинных строк) →
-    парсинг ``policy.default``. Заменяет прежний
-    ``reformime -r -s0``: без subprocess, без внешних бинарников.
-
-    Эквивалентно типичному use-case на наших данных, где сообщение уже
-    распарсено либо воркером (``parse_rfc822``), либо ``BytesParser(default)``
-    (мост ``bridges.email`` — long-running IMAP IDLE bridge).
-    """
-    return BytesParser(policy=policy.default).parsebytes(
-        msg.as_bytes(policy=RFC822_FOR_INSERT)
-    )  # type: ignore[return-value]
-
-
-def parse_rfc822(data: bytes) -> EmailMessage:
-    """Разбор байт → EmailMessage (policy.default + ``max_line_length=0`` на парсе)."""
-    return BytesParser(policy=_PARSE_RFC822).parsebytes(data)  # type: ignore[return-value]
-
-
-def email_message_from_bytes(data: bytes) -> EmailMessage:
-    """Алиас :func:`parse_rfc822` для явной границы «байты → полное письмо»."""
-    return parse_rfc822(data)
-
-
-def email_message_from_path(path: Path | str) -> EmailMessage:
-    """Один проход ``read_bytes`` + :func:`parse_rfc822` (runner'ы, pending)."""
-    return parse_rfc822(Path(path).read_bytes())
 
 

@@ -10,6 +10,7 @@ from typing import Self
 from threlium.types._core import _RequiredNonEmpty
 from threlium.types.bridge_ingress_channel import BridgeIngressChannel
 from threlium.types.fsm_stage import FsmStage
+from threlium.types.identity import ImapFolderUid, imap_folder_uid_as_imaplib_arg
 from threlium.types.notmuch import NotmuchThreadScopeId
 
 _VO = "systemd_status"
@@ -159,10 +160,10 @@ class SystemdStatusBody(_RequiredNonEmpty):
         )
 
     @classmethod
-    def bridge_email_delivering_uid(cls, *, uid: str) -> Self:
+    def bridge_email_delivering_uid(cls, *, uid: ImapFolderUid) -> Self:
         return cls.require(
             name=_VO,
-            raw=f"Bridge email: delivering uid={uid}",
+            raw=f"Bridge email: delivering uid={imap_folder_uid_as_imaplib_arg(uid)}",
         )
 
     @classmethod

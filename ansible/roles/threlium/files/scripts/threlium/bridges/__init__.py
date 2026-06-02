@@ -29,23 +29,13 @@ _HDR = MailHeaderName
 
 BridgeInReplyTo = RfcMessageIdWire | RfcInReplyToWire | NotmuchMessageIdInner | None
 
-_BRIDGE_INGRESS_SUBJECT_MAX = 900
-
-
 def matrix_room_name_to_ingress_subject_wire(
     name: MatrixRoomNameWire | None,
 ) -> RfcSubjectWire | None:
-    """``m.room.name`` → :class:`~threlium.types.rfc.RfcSubjectWire` для заголовка bridge→ingress.
-
-    Та же нормализация длины/переводов строк, что при канонизации Subject email-моста
-    (см. :mod:`threlium.bridges.email` ``_build_canonical``).
-    """
+    """``m.room.name`` → :class:`~threlium.types.rfc.RfcSubjectWire` для заголовка bridge→ingress."""
     if name is None:
         return None
-    folded = (
-        name.value.replace("\n", " ").replace("\r", "")[:_BRIDGE_INGRESS_SUBJECT_MAX]
-    )
-    return RfcSubjectWire.parse_present_optional(folded)
+    return RfcSubjectWire.parse_present_optional(name.value)
 
 
 def _bridge_in_reply_to_header_value(v: BridgeInReplyTo) -> str | None:

@@ -49,6 +49,7 @@ from .fsm_strings import (
     EnrichThreadMemoryText,
     EnrichUnifiedMailContextText,
     FsmPlainToStageSubjectLine,
+    FsmRePrefixedSubjectLine,
     FsmTransitionPlainBody,
     FsmTransitionPlainSubjectLine,
     IngressRouterResolvedChannelSlug,
@@ -64,6 +65,7 @@ from .identity import (
     EmailIngressRoute,
     EmailNativeId,
     ExternalRfcMidWire,
+    ImapFolderUid,
     IngressRoute,
     MatrixIngressRoute,
     MatrixNativeId,
@@ -75,6 +77,8 @@ from .identity import (
     TelegramIngressRoute,
     TelegramNativeId,
     TNative,
+    imap_folder_uid_as_imaplib_arg,
+    imap_folder_uid_from_int,
 )
 from threlium.mail_header_names import MailHeaderName
 from .matrix_client_room_message import (
@@ -276,6 +280,10 @@ __all__ = [
     "ExternalRfcMidWire",
     "EgressRouterToolArgs",
     "FsmPlainToStageSubjectLine",
+    "FsmRePrefixedSubjectLine",
+    "ImapFolderUid",
+    "imap_folder_uid_as_imaplib_arg",
+    "imap_folder_uid_from_int",
     "FsmStage",
     "FsmTransitionPlainBody",
     "FsmTransitionPlainSubjectLine",

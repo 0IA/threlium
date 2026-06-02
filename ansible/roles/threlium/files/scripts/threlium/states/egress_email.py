@@ -17,10 +17,8 @@ from threlium.egress_self_archive import (
 )
 from threlium.ingress_route_resolve import resolve_egress_task_route_ancestor
 from threlium.logutil import logger
-from threlium.mime_reform import (
-    RFC822_FOR_INSERT,
-    system_part_text,
-)
+from threlium.mail import serialize_rfc822_for_wire
+from threlium.mime_reform import system_part_text
 from threlium.types import (
     EmailIngressRoute,
     EmailNativeId,
@@ -75,7 +73,7 @@ def main(
         )
         ext_mid = f"<{glue_native.message_id}>"
         resend_msg = _build_smtp_message(msg, ext_mid, config=config)
-        smtp_bytes = resend_msg.as_bytes(policy=RFC822_FOR_INSERT)
+        smtp_bytes = serialize_rfc822_for_wire(resend_msg)
         _run_msmtp_stdin(smtp_bytes)
         return None
 
@@ -87,7 +85,7 @@ def main(
 
     outbound_mid = make_msgid(domain="localhost")
     smtp_msg = _build_smtp_message(msg, outbound_mid, config=config)
-    smtp_bytes = smtp_msg.as_bytes(policy=RFC822_FOR_INSERT)
+    smtp_bytes = serialize_rfc822_for_wire(smtp_msg)
 
     ext_inner = outbound_mid.strip().strip("<>")
     glue_native = EmailNativeId(v=1, message_id=ext_inner)
@@ -98,7 +96,7 @@ def main(
         msg, stage=stage, sent_raw=sent_raw, glue_message_id_wire=glue_mid,
         settings=config,
     )
-    run_fdm(archive_email.as_bytes(policy=RFC822_FOR_INSERT))
+    run_fdm(serialize_rfc822_for_wire(archive_email))
     log.info("archive_written")
 
     log.info("msmtp_sending")
@@ -172,11 +170,10 @@ def _build_smtp_message(
 
     subj_w = ancestor_snap.header_subject
     if subj_w is not None:
-        smtp_subj = subj_w.value.replace("\n", " ").replace("\r", "")[:900]
-        if smtp_subj:
+        if subj_w.value:
             for h in list(smtp_msg.keys()):
                 if h.lower() == _HDR.SUBJECT.value.lower():
                     del smtp_msg[h]
-            smtp_msg[_HDR.SUBJECT] = smtp_subj
+            smtp_msg[_HDR.SUBJECT] = subj_w.value
 
     return smtp_msg

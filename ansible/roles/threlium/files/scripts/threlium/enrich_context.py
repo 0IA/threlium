@@ -11,11 +11,8 @@ from threlium import nm
 from threlium.logutil import logger
 from threlium.settings import ThreliumSettings
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
-from threlium.mime_reform import (
-    email_message_from_path,
-    iter_history_parts,
-    message_has_history,
-)
+from threlium.mail import email_message_from_path
+from threlium.mime_reform import iter_history_parts, message_has_history
 from threlium.types import (
     FsmStage,
     MailHeaderName,

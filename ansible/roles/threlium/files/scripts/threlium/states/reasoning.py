@@ -16,7 +16,7 @@ from litellm.types.utils import Message
 
 from threlium.fsm_emit import HDR_HOP_BUDGET, build_fsm_step_to_stage, hop_budget_remaining
 from threlium.logutil import clip_log_text, logger
-from threlium.mime_reform import canonicalize_mime
+from threlium.mail import canonicalize_mime
 from threlium.prompts import render_prompt
 from threlium.states.reasoning_tool_spec import (
     load_tools_for_routes,

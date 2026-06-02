@@ -20,7 +20,8 @@ from threlium.ingress_route_resolve import (
     resolve_egress_task_route_ancestor_with_thread_correlation,
 )
 from threlium.logutil import logger
-from threlium.mime_reform import RFC822_FOR_INSERT, system_part_text
+from threlium.mail import serialize_rfc822_for_wire
+from threlium.mime_reform import system_part_text
 from threlium.settings import ThreliumSettings
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 from threlium.types import (
@@ -184,6 +185,6 @@ def main(
         msg, stage=stage, sent_raw=sent_raw, glue_message_id_wire=glue_mid,
         settings=config,
     )
-    run_fdm(archive_email.as_bytes(policy=RFC822_FOR_INSERT))
+    run_fdm(serialize_rfc822_for_wire(archive_email))
     log.info("archive_written")
     return None
