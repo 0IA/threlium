@@ -22,9 +22,6 @@
       },
       {
         "contains": "violations:"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

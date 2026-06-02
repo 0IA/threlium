@@ -12,13 +12,13 @@
 """
 from __future__ import annotations
 
-import smtplib
 import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from email.message import EmailMessage
 from pathlib import Path
 
+from .mail_wire import e2e_smtp_send
 from .helpers import (
     E2EComposeRuntime,
     TIMEOUT_POLL_SHORT,
@@ -83,12 +83,12 @@ def test_greenmail_inbox_delivery_smoke(e2e_runtime: E2EComposeRuntime) -> None:
             )
         )
 
-        with smtplib.SMTP(
+        e2e_smtp_send(
             e2e_runtime.greenmail_smtp_host,
             e2e_runtime.greenmail_smtp_port,
-            timeout=int(TIMEOUT_POLL_SHORT),
-        ) as smtp:
-            smtp.send_message(msg)
+            msg,
+            timeout=float(TIMEOUT_POLL_SHORT),
+        )
 
         wait_for_greenmail_inbox_message_host(
             e2e_runtime.greenmail_imap_host,

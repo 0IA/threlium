@@ -1,0 +1,52 @@
+{
+  "id": "b1c2d3e4-f5a6-7b8c-9d0e-1f2a3b4c5d6f",
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Thread-Root": {
+        "equalTo": "e2e-bootstrap"
+      },
+      "X-Threlium-Call-Site": {
+        "equalTo": "lightrag_index_summarize"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "contains": "\"tools\""
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-e2e-bootstrap-knowledge-summarize",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_008b_chat_completions_bootstrap_summarize",
+                "type": "function",
+                "function": {
+                  "name": "summarize_descriptions",
+                  "arguments": "{\"summary\": \"Synthetic entity from knowledge bootstrap indexing.\"}"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

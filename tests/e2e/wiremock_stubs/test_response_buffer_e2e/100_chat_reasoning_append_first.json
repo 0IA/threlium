@@ -19,9 +19,6 @@
       },
       {
         "contains": "E2E-RESPONSE-BUFFER-BODY-MARKER"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

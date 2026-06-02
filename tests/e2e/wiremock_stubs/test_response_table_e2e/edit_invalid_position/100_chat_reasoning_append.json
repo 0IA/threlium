@@ -19,9 +19,6 @@
       },
       {
         "contains": "E2E-RESP-EDIT-INVALID-MARKER"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

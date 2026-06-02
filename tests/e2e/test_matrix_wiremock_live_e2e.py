@@ -57,6 +57,7 @@ from .helpers import (
 from .wiremock_client import (
     WiremockCorrelation,
     assert_wiremock_matrix_e2e_openai_coverage,
+    journal_has_compose_bootstrap_request,
     journal_has_request,
     log_wiremock_correlation_journal,
     prepare_wiremock_scenario,
@@ -207,37 +208,51 @@ def _wait_bridge_matrix_duplicate_skip(project: str, *, event_id: str) -> None:
 
 def test_live_matrix_bridge_duplicate_skip_on_running_stack(
     e2e_runtime: E2EComposeRuntime,
+    request: pytest.FixtureRequest,
 ) -> None:
     """Повторная доставка того же Matrix event → ``duplicate_skip`` в journal matrix-бриджа."""
-    rt = e2e_runtime
-    base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    room_id, event_id = e2e_matrix_generate_room_ids()
-    try:
-        wiremock_matrix_register_room(
-            base,
-            room_id=room_id,
-            event_id=event_id,
-            event_body="e2e matrix duplicate_skip probe",
-            room_name="E2E Matrix Dup Room",
+    with wiremock_correlation_scope(
+        e2e_runtime, MATRIX_WIREMOCK_STUB_TAG, request.node.nodeid
+    ) as wc:
+        rt = e2e_runtime
+        test_id = wc.test_id
+        base = wc.public_base
+        room_id, event_id = e2e_matrix_generate_room_ids()
+        correlation_key = e2e_matrix_thread_root_mid_for_sync_event(
+            room_id=room_id, event_id=event_id,
         )
-        poll_until(
-            lambda: True
-            if journal_has_request(base, method="GET", url_contains="/sync")
-            else None,
-            timeout=TIMEOUT_POLL_SHORT,
-            interval=2.0,
-            desc="matrix /sync activity after first register",
-        )
-        wiremock_matrix_register_room(
-            base,
-            room_id=room_id,
-            event_id=event_id,
-            event_body="e2e matrix duplicate_skip probe",
-            room_name="E2E Matrix Dup Room",
-        )
-        _wait_bridge_matrix_duplicate_skip(rt.project_name, event_id=str(event_id))
-    finally:
         try:
-            wiremock_matrix_unregister_room(base, room_id=room_id)
-        except Exception:  # noqa: BLE001
-            pass
+            prepare_wiremock_scenario(
+                base,
+                stub_dir=MATRIX_WIREMOCK_STUB_DIR,
+                stub_tag=test_id,
+                correlation_key=correlation_key,
+            )
+            wiremock_matrix_register_room(
+                base,
+                room_id=room_id,
+                event_id=event_id,
+                event_body="e2e matrix duplicate_skip probe",
+                room_name="E2E Matrix Dup Room",
+            )
+            poll_until(
+                lambda: True
+                if journal_has_compose_bootstrap_request(base, method="GET", url_contains="/sync")
+                else None,
+                timeout=TIMEOUT_POLL_SHORT,
+                interval=2.0,
+                desc="matrix /sync activity after first register",
+            )
+            wiremock_matrix_register_room(
+                base,
+                room_id=room_id,
+                event_id=event_id,
+                event_body="e2e matrix duplicate_skip probe",
+                room_name="E2E Matrix Dup Room",
+            )
+            _wait_bridge_matrix_duplicate_skip(rt.project_name, event_id=str(event_id))
+        finally:
+            try:
+                wiremock_matrix_unregister_room(base, room_id=room_id)
+            except Exception:  # noqa: BLE001
+                pass

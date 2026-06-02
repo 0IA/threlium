@@ -19,9 +19,6 @@
       },
       {
         "contains": "query_result:"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

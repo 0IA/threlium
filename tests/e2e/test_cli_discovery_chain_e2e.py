@@ -94,6 +94,7 @@ def test_cli_discovery_chain_full_pipeline(
     e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """``sh -c 'rg … && echo …'`` → cli_exec → reasoning sees stdout marker → finalize."""
+    _ensure_discovery_marker_file(e2e_runtime.project_name)
     with mailflow_inject_and_wait(CLI_DISCOVERY_CHAIN_SPEC, e2e_runtime.project_name) as (
         project,
         raw_id,
@@ -145,6 +146,9 @@ CLI_ROUTE_COLLISION_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-cli-route-collision-verified",
+    # Multi-hop (cli_intent → enrich_fast ×2 → tasks → finalize): ранние LightRAG chat
+    # не должны открывать окно GreenMail до стаба egress finalize.
+    wiremock_journal_ready_needle="call_threlium_e2e_egress_after_allow",
 )
 
 

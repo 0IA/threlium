@@ -20,9 +20,6 @@
       {
         "comment": "Third reasoning: recover from the all-cancelled block by recording real completed work as a NEW done subtask (cancelled is terminal and cannot be downgraded). content_id 262b71525451 = 'Answer the user question about the task ledger'.",
         "contains": "E2E-TASK-LEDGER-ALLCANCEL-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

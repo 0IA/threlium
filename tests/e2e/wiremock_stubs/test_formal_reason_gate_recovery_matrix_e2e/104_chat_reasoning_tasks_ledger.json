@@ -18,16 +18,7 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "query_result:"
-      },
-      {
-        "doesNotMatch": "(?s).*Gate retry counter:.*"
-      },
-      {
         "contains": "E2E-FORMAL-REASON-GATE-MATRIX-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

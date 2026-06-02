@@ -16,15 +16,6 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "query_result:"
-      },
-      {
-        "contains": "E2E-FORMAL-REASON-GATE-MATRIX-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

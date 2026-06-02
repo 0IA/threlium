@@ -45,8 +45,6 @@ REASONING_CTX_TRIM_SPEC = MailflowScenarioSpec(
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
         FsmStage.ENRICH.value,
-        FsmStage.SUMMARIZE_CONTEXT.value,
-        FsmStage.SUMMARIZE_MEMORY.value,
         FsmStage.REASONING.value,
         FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,

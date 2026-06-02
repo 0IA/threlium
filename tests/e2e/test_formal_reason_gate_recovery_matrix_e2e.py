@@ -73,6 +73,8 @@ FORMAL_REASON_GATE_MATRIX_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-formal-reason-gate-matrix-verified-answer",
+    # Длинный matrix: 30s до tasks_ledger; finalize+egress — в окне GreenMail (после tasks ещё LightRAG drain).
+    wiremock_journal_ready_needle="call_e2e_tasks_ledger_matrix",
 )
 
 

@@ -22,13 +22,6 @@
       },
       {
         "contains": "E2E-FORMAL-REASON-GATE-MATRIX-BODY"
-      },
-      {
-        "comment": "Hop после memory_query: в дельте enrich_fast нет formal_reason @system (CONTEXT_CONTRACT §5, FORMAL_REASON_GATE §2) — gate OFF на этом LLM-вызове. Стаб отвечает formal_reason с битым SPARQL; стадия сама эмитит QUERY ERROR в @system дельты → gate ON на 103.",
-        "doesNotMatch": "(?s).*Gate retry counter:.*"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

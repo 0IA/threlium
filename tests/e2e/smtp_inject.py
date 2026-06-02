@@ -18,8 +18,16 @@ import os
 import smtplib
 import sys
 from email.message import EmailMessage
+from email.utils import getaddresses, parseaddr
+from pathlib import Path
+
+_REPO = Path(__file__).resolve().parents[2]
+_SCRIPTS = _REPO / "ansible" / "roles" / "threlium" / "files" / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
 
 from threlium.logutil import logger, setup_logging, shutdown_logging
+from threlium.mail import serialize_rfc822_for_wire
 
 _DEFAULT_MESSAGE_ID = "e2e-inbound@localhost"
 _DEFAULT_SUBJECT = "e2e inbound"
@@ -80,8 +88,16 @@ def main() -> None:
         msg["References"] = irt
     msg.set_content(body_text if body_text is not None else "e2e body")
     # Thread-root MID в SUT: e2e_thread_root_mid_for_message_id(message_id)
-    with smtplib.SMTP(host, port) as s:
-        s.send_message(msg)
+    payload = serialize_rfc822_for_wire(msg)
+    from_addr = parseaddr(msg.get("From", "pytest@localhost"))[1] or "pytest@localhost"
+    to_hdrs: list[str] = []
+    for h in ("To", "Cc", "Bcc"):
+        to_hdrs.extend(msg.get_all(h, []))
+    recipients = [a for _, a in getaddresses(to_hdrs) if a]
+    if not recipients:
+        raise SystemExit("smtp_inject: no recipients on message")
+    with smtplib.SMTP(host, port) as smtp:
+        smtp.sendmail(from_addr, recipients, payload)
     log.info("smtp_inject_ok", host=host, port=port, message_id=message_id.strip("<>"))
     shutdown_logging()
 

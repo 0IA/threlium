@@ -82,9 +82,8 @@ MAILFLOW_SPEC = MailflowScenarioSpec(
 def _assert_egress_reply_excludes_internal_mime(project: str, *, raw_id: str) -> None:
     """External SMTP reply must not leak ``@history`` / ``@system`` MIME parts (egress_email purity)."""
     import imaplib
-    from email import message_from_bytes
-
     from .helpers import E2E_FETCHMAIL_PASS, E2E_GREENMAIL_REPLY_USER
+    from .mail_wire import e2e_parse_rfc822
 
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     user_inner = raw_id.strip().strip("<>").lower()
@@ -107,7 +106,7 @@ def _assert_egress_reply_excludes_internal_mime(project: str, *, raw_id: str) ->
                 raw = msg_data[0][1]
                 if not isinstance(raw, bytes):
                     continue
-                msg = message_from_bytes(raw)
+                msg = e2e_parse_rfc822(raw)
                 irt = (msg.get("In-Reply-To") or "").lower()
                 if user_inner not in irt:
                     continue

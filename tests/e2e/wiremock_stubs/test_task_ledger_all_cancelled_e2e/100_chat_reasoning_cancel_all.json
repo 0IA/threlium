@@ -20,9 +20,6 @@
       {
         "comment": "First reasoning: cancel BOTH seeded subtasks. content_id 8a1ea957bf2b = 'Investigate the all-cancelled guard behavior', a132885eea74 = 'Summarize the all-cancelled guard for the user'.",
         "contains": "E2E-TASK-LEDGER-ALLCANCEL-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

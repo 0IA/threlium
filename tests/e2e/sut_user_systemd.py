@@ -29,6 +29,7 @@ def e2e_threlium_user_unit_journalctl_bash(
     *,
     transport_journal: bool = True,
     shell_redirect: str = "2>&1 || true",
+    since: str | None = None,
 ) -> str:
     """Одна bash-команда: ``journalctl`` user-юнита в журнале ``E2E_THRELIUM_USER`` на SUT (exec от root).
 
@@ -43,7 +44,8 @@ def e2e_threlium_user_unit_journalctl_bash(
     uq = shlex.quote(user_unit)
     n = max(1, int(lines))
     t = f" {E2E_THRELIUM_USER_JOURNAL_TRANSPORT_MATCH}" if transport_journal else ""
-    return f"{E2E_THRELIUM_USER_JOURNALCTL_PREFIX} --user-unit={uq} -n {n}{t} --no-pager {shell_redirect}"
+    since_opt = f" --since={shlex.quote(since)}" if since else ""
+    return f"{E2E_THRELIUM_USER_JOURNALCTL_PREFIX} --user-unit={uq} -n {n}{t}{since_opt} --no-pager {shell_redirect}"
 
 
 # Стабильные юниты — ``journalctl --user-unit=name``; шаблонные — через :func:`e2e_threlium_user_unit_journalctl_bash`.
@@ -79,17 +81,17 @@ done
 # Зависший/failed engine (напр. прерванный job): сбросить состояние, чтобы последующий
 # start не упёрся в "Job canceled"/failed.
 runuser -u {u} -- systemctl --user reset-failed threlium-engine.service 2>/dev/null || true
-for u in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-bridge@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
-  runuser -u {u} -- systemctl --user reset-failed "$u" 2>/dev/null || true
-  runuser -u {u} -- systemctl --user stop "$u" 2>/dev/null || true
+for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-bridge@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
+  runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
+  runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
 done
-for u in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-work@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
-  runuser -u {u} -- systemctl --user reset-failed "$u" 2>/dev/null || true
-  runuser -u {u} -- systemctl --user stop "$u" 2>/dev/null || true
+for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-work@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
+  runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
+  runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
 done
-for u in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-sweep@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
-  runuser -u {u} -- systemctl --user reset-failed "$u" 2>/dev/null || true
-  runuser -u {u} -- systemctl --user stop "$u" 2>/dev/null || true
+for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-sweep@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
+  runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
+  runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
 done
 echo "[e2e] SUT user-scope pipeline stopped (engine + bridges + work + sweep)"
 """
@@ -166,8 +168,8 @@ done
 # Сбросить failed-состояние перед стартом (идемпотентный рестарт на живом контейнере).
 runuser -u {u} -- systemctl --user reset-failed threlium-engine.service 2>/dev/null || true
 runuser -u {u} -- systemctl --user start threlium-engine.service
-for u in $(runuser -u {u} -- systemctl --user list-unit-files 'threlium-bridge@*.service' --no-legend 2>/dev/null | awk '$2=="enabled"{{print $1}}' || true); do
-  runuser -u {u} -- systemctl --user start "$u" 2>/dev/null || true
+for unit in $(runuser -u {u} -- systemctl --user list-unit-files 'threlium-bridge@*.service' --no-legend 2>/dev/null | awk '$2=="enabled"{{print $1}}' || true); do
+  runuser -u {u} -- systemctl --user start "$unit" 2>/dev/null || true
 done
 for i in $(seq 1 30); do
   st=$(runuser -u {u} -- systemctl --user is-active threlium-engine.service 2>/dev/null || true)

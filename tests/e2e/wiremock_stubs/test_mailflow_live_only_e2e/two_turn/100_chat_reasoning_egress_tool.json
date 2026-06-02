@@ -19,16 +19,14 @@
       },
       {
         "matches": "(?s).*e2e-live-tw-anchor-01.*"
-      },
-      {
-        "doesNotMatch": "(?s).*partb.*"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-mailflow-live-two-turn-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_turn1_tasks_ledger_done"
+        "hasProperty": "phase_turn1_tasks_ledger_done",
+        "hasNotProperty": "phase_turn2_tasks_ledger_done"
       }
     }
   },

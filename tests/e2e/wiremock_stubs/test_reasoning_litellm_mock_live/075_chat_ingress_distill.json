@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_query\": \"E2E-REASONING-LITELLM-LIVE-BODY: run LiteLLM live mock pipeline.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-reasoning-litellm-live-01.\"]}"
+                  "arguments": "{\"user_query\": \"E2E-REASONING-LITELLM-BODY-MARKER\\ne2e reasoning litellm inbound body\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-reasoning-litellm-live-01.\"]}"
                 }
               }
             ]

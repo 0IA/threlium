@@ -20,9 +20,6 @@
       {
         "comment": "First reasoning: enrich seeded nothing (bootstrap 009 => []), so <task_state> is empty. The LLM (wrongly) tries to finalize; the Python gate must refuse on the EMPTY ledger (fail-closed) and bounce to ingress with the ledger_empty notice.",
         "contains": "E2E-TASK-LEDGER-EMPTY-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

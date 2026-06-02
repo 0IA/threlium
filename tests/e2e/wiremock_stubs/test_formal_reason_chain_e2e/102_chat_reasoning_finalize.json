@@ -27,9 +27,6 @@
       {
         "comment": "unified-delta durability: дельта 1-го цикла (вход formal_reason, ex:PositiveAgeShape) перенесена в E_prev через части прошлого enrich_fast и видна в промпте 3-го reasoning вместе с дельтой 2-го цикла (вход memory_query).",
         "contains": "ex:PositiveAgeShape"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

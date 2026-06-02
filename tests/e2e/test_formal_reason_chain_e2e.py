@@ -87,6 +87,7 @@ FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-formal-reason-verified-answer",
+    wiremock_journal_ready_needle="call_e2e_response_finalize_logic",
 )
 
 

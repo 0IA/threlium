@@ -76,10 +76,10 @@ RECOVERY_SPEC = MailflowScenarioSpec(
 )
 
 
-def _wait_failed_reasoning_work(project: str, *, nm_inner: str) -> str:
+def _wait_failed_reasoning_work(project: str, *, nm_inner: str, since: str | None = None) -> str:
     id_term = notmuch_id_search_term(nm_inner)
     journal = e2e_threlium_user_unit_journalctl_bash(
-        "threlium-work@*.service", 300, transport_journal=False
+        "threlium-work@*.service", 300, transport_journal=False, since=since
     )
 
     def _probe() -> str | None:
@@ -152,9 +152,9 @@ def _assert_ingress_settled(project: str, *, nm_inner: str) -> None:
     assert count == "0", f"ingress should be settled (no unread), count={count!r}"
 
 
-def _assert_journal_has_traceback(project: str) -> None:
+def _assert_journal_has_traceback(project: str, *, since: str | None = None) -> None:
     journal = e2e_threlium_user_unit_journalctl_bash(
-        "threlium-work@*.service", 400, transport_journal=False
+        "threlium-work@*.service", 400, transport_journal=False, since=since
     )
     r = service_exec(
         project, "sut", ["bash", "-lc", journal], repo_root=REPO_ROOT, timeout=60
@@ -168,6 +168,9 @@ def test_fsm_handler_failure_then_recovery(e2e_runtime: E2EComposeRuntime) -> No
     project = e2e_runtime.project_name
     rt = discover_runtime(project, repo_root=REPO_ROOT)
 
+    r_time = service_exec(project, "sut", ["date", "+%Y-%m-%d %H:%M:%S"], repo_root=REPO_ROOT)
+    test_start_time = (r_time.stdout or "").strip()
+
     try:
         with mailflow_inject_and_wait(FAILURE_ACT1_SPEC, project) as (
             _p,
@@ -180,41 +183,41 @@ def test_fsm_handler_failure_then_recovery(e2e_runtime: E2EComposeRuntime) -> No
             mailflow_wait_fsm_maildir_activity(
                 project, repo_root=REPO_ROOT, message_id=nm_a
             )
-            _wait_failed_reasoning_work(project, nm_inner=nm_a)
-            _assert_journal_has_traceback(project)
+            _wait_failed_reasoning_work(project, nm_inner=nm_a, since=test_start_time)
+            _assert_journal_has_traceback(project, since=test_start_time)
             _assert_ingress_settled(project, nm_inner=nm_a)
             _wait_act1_reasoning_drained(project, nm_inner=nm_a)
             # Act1 стабы закрывают тред через response_finalize → egress; дождаться
             # завершения work@*, иначе act2 гоняется с хвостом act1 (reasoning new:1, нет reply).
             wait_for_sut_threlium_user_workers_idle(project, timeout=TIMEOUT_POLL_SHORT)
 
-        raw_b = f"{E2E_FSM_HANDLER_FAILURE_RECOVERY}-{uuid.uuid4().hex}@localhost"
-        smtp_inject_inbound(
-            project,
-            checkout="/unused",
-            repo_root=REPO_ROOT,
-            message_id=raw_b,
-            in_reply_to=raw_a,
-            body=e2e_dense_threlium_ctx_body(
-                head=RECOVERY_SPEC.body_head,
+            raw_b = f"{E2E_FSM_HANDLER_FAILURE_RECOVERY}-{uuid.uuid4().hex}@localhost"
+            smtp_inject_inbound(
+                project,
+                checkout="/unused",
+                repo_root=REPO_ROOT,
+                message_id=raw_b,
+                in_reply_to=raw_a,
+                body=e2e_dense_threlium_ctx_body(
+                    head=RECOVERY_SPEC.body_head,
+                    correlation_key=correlation_key,
+                ),
+            )
+            wait_for_greenmail_inbox_message_gone_host(
+                rt.greenmail_imap_host, rt.greenmail_imap_port, message_id=raw_b
+            )
+            nm_b = email_ingress_notmuch_id_inner(raw_b)
+            mailflow_wait_fsm_maildir_activity(
+                project, repo_root=REPO_ROOT, message_id=nm_b
+            )
+            assert_full_mailflow_pipeline(
+                RECOVERY_SPEC,
+                project=project,
+                raw_id=raw_b,
+                nm_inner=nm_b,
+                stub_tag=stub_tag,
                 correlation_key=correlation_key,
-            ),
-        )
-        wait_for_greenmail_inbox_message_gone_host(
-            rt.greenmail_imap_host, rt.greenmail_imap_port, message_id=raw_b
-        )
-        nm_b = email_ingress_notmuch_id_inner(raw_b)
-        mailflow_wait_fsm_maildir_activity(
-            project, repo_root=REPO_ROOT, message_id=nm_b
-        )
-        assert_full_mailflow_pipeline(
-            RECOVERY_SPEC,
-            project=project,
-            raw_id=raw_b,
-            nm_inner=nm_b,
-            stub_tag=stub_tag,
-            correlation_key=correlation_key,
-        )
+            )
     except Exception:
         log.debug(
             "failure_artifacts",

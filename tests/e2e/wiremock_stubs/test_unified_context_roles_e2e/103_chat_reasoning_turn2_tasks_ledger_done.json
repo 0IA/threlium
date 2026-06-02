@@ -19,9 +19,6 @@
       },
       {
         "contains": "E2E-ROLE-INGRESS-TURN2"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

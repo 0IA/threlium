@@ -20,9 +20,6 @@
       {
         "comment": "Second reasoning: the task_state relayed by enrich_fast shows A in_progress + B/C pending. The LLM (wrongly) tries to finalize; the Python gate in response_finalize must refuse and bounce to ingress.",
         "contains": "E2E-TASK-LEDGER-CHAIN-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

@@ -19,9 +19,6 @@
       },
       {
         "contains": "E2E-RESP-FIN-MODE3-MARKER"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

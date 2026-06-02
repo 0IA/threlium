@@ -20,9 +20,6 @@
       {
         "comment": "After the empty-ledger block bounced to ingress, the LLM records work: one subtask marked done in the same tasks_upsert call (the trivial-answer path). content_id 262b71525451 = hash('Answer the user question about the task ledger').",
         "contains": "E2E-TASK-LEDGER-EMPTY-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

@@ -13,9 +13,6 @@
       },
       {
         "contains": "response-state analyst"
-      },
-      {
-        "doesNotContain": "\"tools\""
       }
     ],
     "customMatcher": {

@@ -1,5 +1,4 @@
 {
-  "priority": 1,
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
@@ -13,26 +12,18 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "<envelope>"
-      },
-      {
         "contains": "\"tools\""
       },
       {
         "contains": "E2E-REASONING-LITELLM-BODY-MARKER"
-      },
-      {
-        "doesNotMatch": "(?s).*finish_reason=length.*"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-reasoning-litellm-live-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasNotProperty": "phase_tasks_ledger_done"
+        "hasProperty": "phase_length_recovery_e2e",
+        "hasNotProperty": "phase_length_truncated_done"
       }
     }
   },
@@ -58,5 +49,16 @@
         }
       ]
     }
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "stub-reasoning-litellm-live-01::{{request.headers.[x-threlium-thread-root]}}",
+        "state": {
+          "phase_length_truncated_done": "1"
+        }
+      }
+    }
+  ]
 }

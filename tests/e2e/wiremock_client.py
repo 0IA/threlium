@@ -357,6 +357,32 @@ def wiremock_state_reset_phase(
         r.raise_for_status()
 
 
+def wiremock_e2e_state_length_recovery_post_url(public_base: str) -> str:
+    """Публичный URL стаба ``015_e2e_state_length_recovery.json`` (сценарный каталог)."""
+    root = _normalize_wiremock_public_root(public_base)
+    return f"{root}/__threlium/e2e/state/length_recovery"
+
+
+def wiremock_state_length_recovery_enable(
+    public_base: str,
+    correlation_key: str,
+    *,
+    timeout: float = TIMEOUT_POLL_SHORT,
+) -> None:
+    """Включить length-recovery сценарий: ``phase_length_recovery_e2e`` в State Extension.
+
+    ``correlation_key`` — составной (``stub_tag::thread_root``).
+    """
+    with _wiremock_admin_api_exclusive(timeout=timeout):
+        url = wiremock_e2e_state_length_recovery_post_url(public_base)
+        r = _wm_session().post(
+            url,
+            json={"correlation_key": correlation_key},
+            timeout=timeout,
+        )
+        r.raise_for_status()
+
+
 def wiremock_e2e_state_reasoning_release_post_url(public_base: str) -> str:
     """Публичный URL стаба ``015_e2e_state_reasoning_release.json`` (сценарный каталог)."""
     root = _normalize_wiremock_public_root(public_base)
@@ -1068,6 +1094,48 @@ def find_wiremock_requests_by_body_contains(
         )
         if needle in _journal_request_body(e)
     ]
+
+
+def journal_entry_request_or_response_contains(
+    entry: dict[str, Any], needle: str
+) -> bool:
+    """``True``, если ``needle`` есть в теле запроса или ответа записи журнала."""
+    if needle in _journal_request_anchor_haystack(entry):
+        return True
+    return needle in _entry_response_body_preview(entry)
+
+
+def wait_for_wiremock_stub_journal_contains(
+    public_base: str,
+    *,
+    stub_tag: str,
+    needle: str,
+    wait_timeout_sec: float | None = None,
+    diag_callback: Callable[[], None] | None = None,
+) -> None:
+    """Poll журнала: запись с ``stub_tag`` содержит ``needle`` в request/response."""
+    w = float(TIMEOUT_POLL_SHORT) if wait_timeout_sec is None else float(wait_timeout_sec)
+
+    def _probe() -> bool:
+        for entry in journal_entries_for_stub_tag(
+            public_base, stub_tag=stub_tag, timeout=w
+        ):
+            if journal_entry_request_or_response_contains(entry, needle):
+                return True
+        return False
+
+    def _msg() -> str:
+        return (
+            f"expected WireMock journal (stub_tag={stub_tag!r}) to contain {needle!r} "
+            f"in request or response within {w}s"
+        )
+
+    _poll_wiremock_with_tenacity(
+        probe=_probe,
+        wait_timeout_sec=wait_timeout_sec,
+        diag_callback=diag_callback,
+        build_error=_msg,
+    )
 
 
 def journal_has_request(

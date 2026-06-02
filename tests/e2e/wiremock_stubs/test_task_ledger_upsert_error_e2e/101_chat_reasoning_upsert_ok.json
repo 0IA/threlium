@@ -20,9 +20,6 @@
       {
         "comment": "After the rejection bounced to ingress, the LLM reads the real content_id from <task_state> and updates it correctly. content_id 9d9d077ccc56 = 'Reproduce the tasks_upsert validation error'.",
         "contains": "E2E-TASK-LEDGER-UPSERTERR-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

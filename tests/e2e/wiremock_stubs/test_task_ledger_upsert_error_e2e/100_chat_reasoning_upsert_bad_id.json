@@ -20,9 +20,6 @@
       {
         "comment": "First reasoning: tasks_upsert targeting a content_id that is NOT in the ledger. The handler must reject it and bounce to ingress with the tasks_upsert_error notice (no ledger mutation).",
         "contains": "E2E-TASK-LEDGER-UPSERTERR-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

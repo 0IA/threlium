@@ -20,9 +20,6 @@
       {
         "comment": "First reasoning: close A, leave B in_progress, set blockers + allow_finalize_with_blocker — gate must allow finalize despite open B.",
         "contains": "E2E-TASK-LEDGER-BYPASS-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

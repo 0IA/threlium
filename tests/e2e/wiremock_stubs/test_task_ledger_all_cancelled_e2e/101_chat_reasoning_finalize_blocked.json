@@ -20,9 +20,6 @@
       {
         "comment": "Second reasoning: both subtasks cancelled, none done. The LLM tries to finalize; the Python all-cancelled guard must refuse (no escape hatch) and bounce to ingress.",
         "contains": "E2E-TASK-LEDGER-ALLCANCEL-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

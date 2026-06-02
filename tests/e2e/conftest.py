@@ -85,6 +85,9 @@ from .helpers import (
     e2e_controller_hint_cleanup,
     e2e_controller_hint_read,
     e2e_controller_hint_write,
+    e2e_flush_greenmail_inboxes,
+    e2e_flush_sut_fsm_maildirs,
+    e2e_install_deterministic_knowledge_corpus,
     e2e_shared_compose_stack_is_healthy,
     e2e_start_threlium_user_pipeline_services,
     e2e_stop_threlium_user_pipeline_services,
@@ -198,6 +201,9 @@ def _e2e_wiremock_journal_reset_once(
             return
         try:
             rt = discover_runtime(pn)
+            e2e_stop_threlium_user_pipeline_services(rt)
+            e2e_flush_sut_fsm_maildirs(rt)
+            e2e_flush_greenmail_inboxes(rt)
             wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
             reset_request_journal(wm)
             upsert_wiremock_compose_bootstrap_stubs(wm)
@@ -317,16 +323,23 @@ def e2e_runtime(
     os.environ["COMPOSE_PROJECT_NAME"] = project_name
 
     if _e2e_request_is_bootstrap_module(request):
-        yield discover_runtime(project_name)
+        rt = discover_runtime(project_name)
+        e2e_install_deterministic_knowledge_corpus(rt)
+        yield rt
         return
 
     rt = discover_runtime(project_name)
     wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     reset_request_journal(wm)
+    e2e_flush_sut_fsm_maildirs(rt)
+    e2e_flush_greenmail_inboxes(rt)
     e2e_start_threlium_user_pipeline_services(rt)
     wait_for_sut_threlium_user_workers_idle(project_name, timeout=120.0)
     reset_request_journal(wm)
-    yield discover_runtime(project_name)
+    try:
+        yield discover_runtime(project_name)
+    finally:
+        e2e_stop_threlium_user_pipeline_services(rt)
 
 
 @pytest.fixture(autouse=True, scope="function")

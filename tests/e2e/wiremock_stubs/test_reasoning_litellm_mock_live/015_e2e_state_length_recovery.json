@@ -1,0 +1,27 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/state/length_recovery"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "context": "{{jsonPath request.body '$.correlation_key'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{jsonPath request.body '$.correlation_key'}}",
+        "state": {
+          "phase_length_recovery_e2e": "1"
+        }
+      }
+    }
+  ]
+}

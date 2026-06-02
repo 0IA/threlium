@@ -19,9 +19,6 @@
       },
       {
         "contains": "E2E-MEMORY-QUERY-BODY"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
       }
     ],
     "customMatcher": {

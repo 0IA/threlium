@@ -61,7 +61,7 @@ compose, что в ``tests/e2e/compose``). Подъём стека и ``site.yml
 """
 from __future__ import annotations
 
-from email import message_from_bytes
+from tests.e2e.mail_wire import e2e_parse_rfc822, e2e_serialize_rfc822, e2e_smtp_send
 from email.header import decode_header
 from email.message import EmailMessage
 
@@ -360,7 +360,7 @@ def _pytest_inbox_rows(
             _, raw_data = imap.uid("fetch", uid, "(RFC822)")
             if not raw_data or not isinstance(raw_data[0], tuple):
                 continue
-            msg = message_from_bytes(raw_data[0][1])
+            msg = e2e_parse_rfc822(raw_data[0][1])
             rows.append(
                 (
                     uid.decode("ascii") if isinstance(uid, bytes) else str(uid),
@@ -376,8 +376,7 @@ def _pytest_inbox_rows(
 
 
 def _smtp_send(host: str, port: int, msg: EmailMessage) -> None:
-    with smtplib.SMTP(host, port, timeout=int(TIMEOUT_POLL_SHORT)) as s:
-        s.send_message(msg)
+    e2e_smtp_send(host, port, msg, timeout=float(TIMEOUT_POLL_SHORT))
 
 
 def _debug_greenmail_smtp_payload(label: str, msg: EmailMessage) -> None:
@@ -396,7 +395,7 @@ def _debug_greenmail_smtp_payload(label: str, msg: EmailMessage) -> None:
         count=len(refs),
         values=refs,
     )
-    raw = msg.as_bytes()
+    raw = e2e_serialize_rfc822(msg)
     head, sep, _rest = raw.partition(b"\r\n\r\n")
     if not sep:
         head, sep, _rest = raw.partition(b"\n\n")

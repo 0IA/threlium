@@ -7,6 +7,7 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 
@@ -52,6 +53,7 @@ REASONING_SPEC = MailflowScenarioSpec(
     ),
 )
 
+LENGTH_RECOVERY_SPEC = replace(REASONING_SPEC, length_recovery_e2e=True)
 
 
 def test_reasoning_litellm_mailflow_hits_wiremock_full_pipeline(
@@ -107,7 +109,7 @@ def test_reasoning_length_recovery_then_tasks_ledger(
     e2e_runtime: E2EComposeRuntime,
 ) -> None:
     """``finish_reason=length`` on first completion → recovery hint → successful tool call."""
-    with mailflow_inject_and_wait(REASONING_SPEC, e2e_runtime.project_name) as (
+    with mailflow_inject_and_wait(LENGTH_RECOVERY_SPEC, e2e_runtime.project_name) as (
         project,
         raw_id,
         _canonical_id,
@@ -117,7 +119,7 @@ def test_reasoning_length_recovery_then_tasks_ledger(
     ):
         try:
             assert_full_mailflow_pipeline(
-                REASONING_SPEC,
+                LENGTH_RECOVERY_SPEC,
                 project=project,
                 raw_id=raw_id,
                 nm_inner=nm_inner,

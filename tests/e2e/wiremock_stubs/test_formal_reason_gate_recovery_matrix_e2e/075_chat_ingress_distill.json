@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_query\": \"E2E-FORMAL-REASON-GATE-RECOVERY-MATRIX-BODY: trigger formal_reason gate recovery.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-formal-reason-gate-matrix-01.\"]}"
+                  "arguments": "{\"user_query\": \"E2E-FORMAL-REASON-GATE-MATRIX-BODY: trigger formal_reason gate recovery.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-formal-reason-gate-matrix-01.\"]}"
                 }
               }
             ]

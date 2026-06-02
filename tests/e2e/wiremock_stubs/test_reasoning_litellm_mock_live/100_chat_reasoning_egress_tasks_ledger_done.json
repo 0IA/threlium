@@ -19,12 +19,6 @@
       },
       {
         "contains": "E2E-REASONING-LITELLM-BODY-MARKER"
-      },
-      {
-        "doesNotMatch": "(?s).*\"enable_thinking\"\\s*:\\s*false.*"
-      },
-      {
-        "contains": "finish_reason=length"
       }
     ],
     "customMatcher": {

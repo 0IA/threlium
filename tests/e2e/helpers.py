@@ -17,9 +17,9 @@ import sys
 import tempfile
 import time
 import uuid
-from email import message_from_bytes
 from email.header import decode_header
 from email.message import EmailMessage
+from tests.e2e.mail_wire import e2e_parse_rfc822, e2e_smtp_send
 from datetime import datetime, timezone
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -86,6 +86,15 @@ _E2E_REMOTE_PROBE_LOGGER_BOOT = (
     "    _probe_out.addHandler(_h)\n"
     "    _probe_out.setLevel(logging.INFO)\n"
     "    _probe_out.propagate = False\n"
+)
+# SUT heredoc: system ``python3`` не видит editable ``threlium`` (только agent/.venv).
+_E2E_REMOTE_RFC822_PARSER_BOOT = (
+    "from email import policy\n"
+    "from email.parser import BytesParser\n"
+    "def parse_rfc822(data):\n"
+    "    if isinstance(data, str):\n"
+    "        data = data.encode('utf-8', errors='replace')\n"
+    "    return BytesParser(policy=policy.default).parsebytes(data)\n"
 )
 
 
@@ -1411,7 +1420,7 @@ def wait_for_greenmail_inbox_message_host(
                 raw_header = cell[1]
                 if not isinstance(raw_header, (bytes, bytearray)):
                     continue
-                msg = message_from_bytes(raw_header)
+                msg = e2e_parse_rfc822(raw_header)
                 if message_id and msg.get("Message-ID", "").strip("<>") != message_id.strip("<>"):
                     continue
                 if subject and _decoded_email_subject(msg) != subject:
@@ -1472,7 +1481,7 @@ def wait_for_greenmail_inbox_message_seen_host(
                 raw_header = cell[1]
                 if not isinstance(raw_header, (bytes, bytearray)):
                     continue
-                msg = message_from_bytes(raw_header)
+                msg = e2e_parse_rfc822(raw_header)
                 if message_id and msg.get("Message-ID", "").strip("<>") != message_id.strip("<>"):
                     continue
                 if subject and _decoded_email_subject(msg) != subject:
@@ -1535,7 +1544,7 @@ def wait_for_greenmail_inbox_message_gone_host(
                 raw_header = cell[1]
                 if not isinstance(raw_header, (bytes, bytearray)):
                     continue
-                msg = message_from_bytes(raw_header)
+                msg = e2e_parse_rfc822(raw_header)
                 if message_id and msg.get("Message-ID", "").strip("<>") != message_id.strip("<>"):
                     continue
                 if subject and _decoded_email_subject(msg) != subject:
@@ -1600,7 +1609,7 @@ def run_greenmail_host_readiness_probe(
     msg.set_content("readiness probe")
 
     with smtplib.SMTP(gm_smtp_host, gm_smtp_port, timeout=int(TIMEOUT_POLL_SHORT)) as smtp:
-        smtp.send_message(msg)
+        e2e_smtp_send(gm_smtp_host, gm_smtp_port, msg, timeout=float(TIMEOUT_POLL_SHORT))
 
     if through_agent_mailbox:
         wait_for_greenmail_inbox_message_gone_host(
@@ -1673,7 +1682,8 @@ def wait_for_greenmail_inbox_message(
             "    if not isinstance(cell, tuple) or len(cell) < 2: continue\n"
             "    hdr = cell[1]\n"
             "    if not isinstance(hdr, (bytes, bytearray)): continue\n"
-            "    msg = email.message_from_bytes(hdr)\n"
+            + _E2E_REMOTE_RFC822_PARSER_BOOT
+            + "    msg = parse_rfc822(hdr)\n"
             f"    {mid_check}"
             f"    {subj_check}"
             "    m.logout(); _probe_out.info('INBOX_COUNT=%d MATCH=1' % (count,)); raise SystemExit(0)\n"
@@ -1765,7 +1775,8 @@ def wait_for_greenmail_inbox_message_gone(
             "    if not isinstance(cell, tuple) or len(cell) < 2: continue\n"
             "    hdr = cell[1]\n"
             "    if not isinstance(hdr, (bytes, bytearray)): continue\n"
-            "    msg = email.message_from_bytes(hdr)\n"
+            + _E2E_REMOTE_RFC822_PARSER_BOOT
+            + "    msg = parse_rfc822(hdr)\n"
             f"    {mid_check}"
             f"    {subj_check}"
             "    m.logout(); _probe_out.info('UNSEEN=%d GONE=0' % (len(ids),)); raise SystemExit(2)\n"
@@ -3163,8 +3174,7 @@ def wait_for_greenmail_user_reply(
     py_body = f"""import imaplib
 import re
 import sys
-{_E2E_REMOTE_PROBE_LOGGER_BOOT}from email import message_from_bytes
-from email.header import decode_header
+{_E2E_REMOTE_PROBE_LOGGER_BOOT}{_E2E_REMOTE_RFC822_PARSER_BOOT}from email.header import decode_header
 
 def _decode_subject(raw: str) -> str:
     if not raw:
@@ -3204,7 +3214,7 @@ def check() -> bool:
         if not raw_data or not isinstance(raw_data[0], tuple):
             continue
         raw = raw_data[0][1]
-        msg = message_from_bytes(raw)
+        msg = parse_rfc822(raw)
 {anchor_check}\
         subj = _decode_subject(msg.get("Subject") or "").lower()
         body = _plain_body(msg).lower()
@@ -3294,7 +3304,7 @@ def greenmail_wait_agent_reply_message_id(
                 _, raw_data = imap.uid("fetch", uid, "(RFC822)")
                 if not raw_data or not isinstance(raw_data[0], tuple):
                     continue
-                msg = message_from_bytes(raw_data[0][1])
+                msg = e2e_parse_rfc822(raw_data[0][1])
                 m = re.search(r"<([^>]+)>", msg.get("In-Reply-To") or "")
                 first = m.group(1).strip().lower() if m else ""
                 if first != anchor.lower():
@@ -3762,7 +3772,11 @@ class MailflowScenarioSpec:
     expect_notmuch_stage_folders: tuple[str, ...] | None = None
     reply_subject_needle: str | None = None
     reply_body_needle: str | None = None
+    # Длинные multi-hop: poll журнала WireMock (request/response) до GreenMail, чтобы
+    # min_chat_completion_posts на раннем lightrag не «съел» TIMEOUT_POLL_SHORT.
+    wiremock_journal_ready_needle: str | None = None
     assert_thread_no_unread: bool = False
+    length_recovery_e2e: bool = False
 
 
 def _wait_rag_drain_idle(project_name: str, *, label: str) -> None:
@@ -3894,6 +3908,16 @@ def mailflow_inject_and_wait(
         stub_tag=spec.stub_tag,
         correlation_key=correlation_key,
     )
+    if spec.length_recovery_e2e:
+        from .wiremock_client import (  # noqa: PLC0415
+            composite_context_key,
+            wiremock_state_length_recovery_enable,
+        )
+
+        wiremock_state_length_recovery_enable(
+            wm_base,
+            composite_context_key(spec.stub_tag, correlation_key),
+        )
 
     if spec.min_rerank_posts > 0:
         _inject_rag_warmup(
@@ -4042,6 +4066,26 @@ def mailflow_inject_and_wait(
         )
 
 
+def _mailflow_wait_wiremock_journal_ready_if_configured(
+    spec: MailflowScenarioSpec,
+    *,
+    project: str,
+    stub_tag: str,
+) -> None:
+    needle = spec.wiremock_journal_ready_needle
+    if not needle:
+        return
+    from .wiremock_client import (  # noqa: PLC0415
+        wait_for_wiremock_stub_journal_contains,
+        wiremock_public_base,
+    )
+
+    rt = discover_runtime(project, repo_root=REPO_ROOT)
+    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+    mailflow_log_phase(f"{spec.label}: wait wiremock journal needle={needle!r}")
+    wait_for_wiremock_stub_journal_contains(wm, stub_tag=stub_tag, needle=needle)
+
+
 def assert_full_mailflow_pipeline(
     spec: MailflowScenarioSpec,
     *,
@@ -4060,6 +4104,9 @@ def assert_full_mailflow_pipeline(
     wait_for_notmuch_message(project, message_id=nm_inner, repo_root=REPO_ROOT)
     mailflow_log_phase(f"{spec.label}: notmuch OK (+{time.monotonic() - t0:.1f}s)")
     mailflow_pipeline_diag(project, anchor_message_id=nm_inner, repo_root=REPO_ROOT)
+    _mailflow_wait_wiremock_journal_ready_if_configured(
+        spec, project=project, stub_tag=stub_tag
+    )
     assert_wiremock_mailflow_received_chat_completion_posts(
         project,
         stub_tag=stub_tag,
@@ -4080,8 +4127,8 @@ def assert_full_mailflow_pipeline(
             min_posts=spec.min_rerank_posts,
             repo_root=REPO_ROOT,
         )
-    # Multi-hop scenarios (empty-ledger bounce, tasks_upsert, …) finish only after egress.
-    # Wait for the user-visible reply before requiring the notmuch thread to be fully settled.
+    # Multi-hop: ответ пользователю только после egress; для длинных контуров см.
+    # ``wiremock_journal_ready_needle`` (poll finalize-стаба до GreenMail).
     wait_for_greenmail_user_reply(
         project,
         raw_id=raw_id,
@@ -4210,7 +4257,7 @@ def _iter_notmuch_mbox_show_messages(mbox_text: str) -> Iterator[EmailMessage]:
         else:
             rfc822 = block
         if rfc822.strip():
-            yield message_from_bytes(rfc822.encode("utf-8", errors="replace"))
+            yield e2e_parse_rfc822(rfc822.encode("utf-8", errors="replace"))
 
 
 def _notmuch_mbox_show_route_b62_for_message(

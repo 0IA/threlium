@@ -47,6 +47,7 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
             FsmStage.ARCHIVE.value,
         ),
         reply_body_needle="e2e-task-ledger-verified",
+        wiremock_journal_ready_needle="call_e2e_finalize_ok",
     ),
     MailflowScenarioSpec(
         label="task_ledger_bypass",
@@ -69,6 +70,7 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
             FsmStage.ARCHIVE.value,
         ),
         reply_body_needle="e2e-task-ledger-bypass-verified",
+        wiremock_journal_ready_needle="call_e2e_finalize_bypass_ok",
     ),
     MailflowScenarioSpec(
         label="task_ledger_empty_blocked",
@@ -91,6 +93,7 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
             FsmStage.ARCHIVE.value,
         ),
         reply_body_needle="e2e-task-ledger-empty-verified",
+        wiremock_journal_ready_needle="call_e2e_empty_finalize_ok",
     ),
     MailflowScenarioSpec(
         label="task_ledger_all_cancelled",
@@ -113,6 +116,7 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
             FsmStage.ARCHIVE.value,
         ),
         reply_body_needle="e2e-task-ledger-all-cancelled-verified",
+        wiremock_journal_ready_needle="call_e2e_allcancel_finalize_ok",
     ),
     MailflowScenarioSpec(
         label="task_ledger_upsert_error",
@@ -135,6 +139,7 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
             FsmStage.ARCHIVE.value,
         ),
         reply_body_needle="e2e-task-ledger-upsert-error-verified",
+        wiremock_journal_ready_needle="call_e2e_upserterr_finalize_ok",
     ),
 )
 
