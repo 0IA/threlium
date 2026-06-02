@@ -19,7 +19,7 @@ from .formal_reason_assertions import (
     assert_ungated_reasoning_has_finalize,
 )
 from .log import clip_log_body, log
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,

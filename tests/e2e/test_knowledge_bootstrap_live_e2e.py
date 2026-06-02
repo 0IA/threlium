@@ -1,10 +1,10 @@
 """E2E: детерминированная bootstrap-индексация knowledge + инфраструктурные проверки.
 
 Детерминизм: probe-корпус ``e2e_bootstrap_probe.md`` ставится при cold reset
-(:func:`tests.e2e.helpers.e2e_install_deterministic_knowledge_corpus` в ``wipe_sync`` /
+(:func:`tests.e2e.toolkit.knowledge.e2e_install_deterministic_knowledge_corpus` в ``wipe_sync`` /
 ``fsts_between_test_reset``), не в pytest-fixture.
 
-Reindex probe — :func:`tests.e2e.helpers.e2e_bootstrap_reindex_and_wait` из тела теста
+Reindex probe — :func:`tests.e2e.toolkit.knowledge.e2e_bootstrap_reindex_and_wait` из тела теста
 (``e2e_runtime`` для этого модуля только discover, без pipeline).
 
 Проверки:
@@ -25,7 +25,7 @@ import pytest
 from tests.e2e.log import log
 from tests.e2e.sut_user_systemd import E2E_THRELIUM_USER
 
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     E2E_BOOTSTRAP_THREAD_ROOT,
     E2E_KNOWLEDGE_PROBE_FILENAME,

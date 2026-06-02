@@ -19,7 +19,7 @@ from .formal_reason_assertions import (
     assert_all_reasoning_gate_absent,
     assert_ungated_reasoning_has_finalize,
 )
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     E2EComposeRuntime,
     MailflowScenarioSpec,

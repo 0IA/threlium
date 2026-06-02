@@ -2,7 +2,7 @@
 # Bake-bootstrap: Ubuntu 24.04 (geerlingguy/docker-ubuntu2404-ansible); готовый SUT — threlium/e2e-sut:baked.
 # Noble/e2e: MDA — fdm (`site.yml`); см. также ARCHITECTURE §8.4.
 #
-# Образ SUT: по умолчанию предсобранный baked (совпадает с E2E_BAKED_SUT_IMAGE в tests/e2e/helpers.py).
+# Образ SUT: по умолчанию предсобранный baked (совпадает с E2E_BAKED_SUT_IMAGE в tests/e2e/toolkit/constants.py).
 # Эталон «с нуля» (upstream): THRELIUM_E2E_SUT_IMAGE=geerlingguy/docker-ubuntu2404-ansible:latest
 # (см. tests/e2e/scripts/bake_e2e_sut_image.sh и README).
 

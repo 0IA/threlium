@@ -15,7 +15,7 @@ import pytest
 from tests.e2e.log import log
 from threlium.types import FsmStage
 
-from .helpers import (
+from .toolkit import (
     TIMEOUT_POLL_SHORT,
     E2EComposeRuntime,
     assert_notmuch_folder_contains_body_token,

@@ -22,7 +22,7 @@ from .formal_reason_assertions import (
     assert_memory_query_tool_served,
     assert_ungated_reasoning_has_finalize,
 )
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     MailflowScenarioSpec,
     REPO_ROOT,

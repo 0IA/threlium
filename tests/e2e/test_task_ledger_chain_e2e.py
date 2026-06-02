@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tests.e2e.log import clip_log_body, log
 
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     assert_full_mailflow_pipeline,
     discover_runtime,

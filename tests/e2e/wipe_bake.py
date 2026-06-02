@@ -8,8 +8,8 @@
    pytest -n0 -vv -s tests/e2e/wipe_bake.py
 
 Использует тот же ``FileLock`` и каталог координаторов, что :func:`compose_stack`
-в ``conftest.py`` (:func:`~tests.e2e.helpers.e2e_compose_coord_paths`).
-Запекание вызывает ``bake_e2e_sut_image.sh``: полный ``site.yml`` (образ с нуля; чистка ``never+refresh`` при обычном прогоне не выполняется). Тег ``refresh`` для harness — ``wipe_sync.py`` / :func:`~tests.e2e.helpers.run_e2e_site_playbook` с ``ansible_tags="refresh"``.
+в ``conftest.py`` (:func:`~tests.e2e.toolkit.coord.e2e_compose_coord_paths`).
+Запекание вызывает ``bake_e2e_sut_image.sh``: полный ``site.yml`` (образ с нуля; чистка ``never+refresh`` при обычном прогоне не выполняется). Тег ``refresh`` для harness — ``wipe_sync.py`` / :func:`~tests.e2e.toolkit.ansible.run_e2e_site_playbook` с ``ansible_tags="refresh"``.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ try:
 except ImportError:
     DockerCompose = None  # type: ignore[misc, assignment]
 
-from .helpers import (
+from .toolkit import (
     COMPOSE_DIR,
     E2E_COMPOSE_FILE_NAME,
     E2E_PROJECT,

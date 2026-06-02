@@ -40,7 +40,7 @@ from .formal_reason_assertions import (
     assert_all_reasoning_gate_absent,
     tool_names_from_chat_body,
 )
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     MailflowScenarioSpec,
     REPO_ROOT,

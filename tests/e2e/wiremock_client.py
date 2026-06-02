@@ -16,7 +16,7 @@ WireMock — :func:`upsert_wiremock_mapping_directory` (``PUT /__admin/mappings/
 удаление non-bootstrap маппингов и сброс Store State — см. :func:`reset_non_bootstrap_wiremock_mappings`).
 Сам хук guard **не** оборачивают локами;
 межпроцессные ``FileLock`` (файл ``e2e_wiremock_admin_api.lock`` в
-:func:`~tests.e2e.helpers.e2e_compose_coord_dir`; захват — ``THRELIUM_E2E_WIREMOCK_ADMIN_API_LOCK_TIMEOUT``,
+:func:`~tests.e2e.toolkit.coord.e2e_compose_coord_dir`; захват — ``THRELIUM_E2E_WIREMOCK_ADMIN_API_LOCK_TIMEOUT``,
 по умолчанию 90 с, значение кэшируется на процесс) — :func:`_wiremock_admin_api_exclusive`: сериализация
 всех обращений к ``/__admin/…`` и тесно связанных ``__threlium/…`` на общем WireMock при ``pytest -n N``
 (в т.ч. unmatched GET, bootstrap upsert с фиксированными ``id``, ``matrix_rooms``). Чтение журнала по
@@ -69,13 +69,10 @@ from filelock import FileLock
 
 from tests.e2e.log import clip_log_body, log
 
-from .helpers import (
-    POLL_INTERVAL,
-    TIMEOUT_POLL_SHORT,
-    _compose_container,
-    e2e_compose_coord_dir,
-    poll_until,
-)
+from tests.e2e.toolkit.constants import POLL_INTERVAL, TIMEOUT_POLL_SHORT
+from tests.e2e.toolkit.coord import e2e_compose_coord_dir
+from tests.e2e.toolkit.poll import poll_until
+from tests.e2e.toolkit.runtime import _compose_container
 
 # Инфраструктура compose: ``compose_bootstrap/*.json`` — ``recordState``
 # (``000`` сид ``active``) и embeddings readiness для SMTP/IMAP probe (§TESTING).
@@ -1582,12 +1579,10 @@ def prepare_wiremock_scenario(
     
     # Clean up SUT messages from previous runs of the same test scenario
     try:
-        from .helpers import (
-            discover_live_e2e_project_name,
-            discover_runtime,
-            e2e_clean_sut_messages_for_test,
-            wait_for_sut_threlium_user_workers_idle,
-        )
+        from tests.e2e.toolkit.cleanup import e2e_clean_sut_messages_for_test
+        from tests.e2e.toolkit.compose_lifecycle import discover_live_e2e_project_name
+        from tests.e2e.toolkit.runtime import discover_runtime
+        from tests.e2e.toolkit.workers import wait_for_sut_threlium_user_workers_idle
         pn = discover_live_e2e_project_name()
         if pn:
             rt = discover_runtime(pn)

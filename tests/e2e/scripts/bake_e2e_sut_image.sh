@@ -5,7 +5,7 @@
 #
 # Переменные окружения (опционально):
 #   THRELIUM_E2E_BAKE_PROJECT     — имя compose-проекта (по умолчанию threlium_e2e_bake)
-#   THRELIUM_E2E_BAKE_IMAGE       — тег результирующего образа (по умолчанию threlium/e2e-sut:baked; совпадает с E2E_BAKED_SUT_IMAGE в tests/e2e/helpers.py)
+#   THRELIUM_E2E_BAKE_IMAGE       — тег результирующего образа (по умолчанию threlium/e2e-sut:baked; см. tests/e2e/toolkit/constants.py)
 #   THRELIUM_E2E_SUT_BOOTSTRAP_IMAGE — базовый образ для `compose up` при bake (по умолчанию geerlingguy/docker-ubuntu2404-ansible:latest), чтобы не зависеть от уже собранного baked-тега
 
 #

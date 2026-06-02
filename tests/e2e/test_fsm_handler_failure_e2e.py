@@ -12,7 +12,7 @@ from pathlib import Path
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     E2E_SUT_NOTMUCH_BASH_EXPORT,
     MailflowScenarioSpec,

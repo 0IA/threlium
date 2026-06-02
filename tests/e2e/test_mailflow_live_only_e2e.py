@@ -79,7 +79,7 @@ import smtplib
 from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     TIMEOUT_POLL_LIVE_MAIL,
     TIMEOUT_POLL_SHORT,

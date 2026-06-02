@@ -19,7 +19,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 from .mail_wire import e2e_smtp_send
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     TIMEOUT_POLL_SHORT,
     e2e_dense_threlium_ctx_body,

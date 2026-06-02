@@ -15,7 +15,7 @@ from tests.e2e.log import clip_log_body, log
 from threlium.types import FsmStage
 
 from .formal_reason_assertions import assert_all_reasoning_gate_absent
-from .helpers import (
+from .toolkit import (
     E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,

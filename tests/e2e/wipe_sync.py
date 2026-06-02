@@ -30,7 +30,7 @@ import os
 import pytest
 
 from .conftest import E2E_LEAVE_STACK_RUNNING_ENV
-from .helpers import REPO_ROOT, run_e2e_site_playbook
+from .toolkit import REPO_ROOT, run_e2e_site_playbook
 
 
 @pytest.mark.e2e
