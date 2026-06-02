@@ -55,4 +55,4 @@ Incoming message (canonical):
 Formulate the query so it also surfaces context useful for these subtasks.
 {% endif %}
 ## Output contract
-- Reply with ONLY the question text to send to the graph (no preamble, no markdown fences, no role-play).
+- Call the `enrich_query_plan` tool exactly once with `formulated_query` set to the question text to send to the graph (no assistant text outside tool_calls, no markdown fences, no role-play).

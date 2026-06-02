@@ -12,8 +12,8 @@ Where it fits the request, cover the phases the work needs (not every request ne
 Express each subtask's phase through its VERB, never a literal tag: discover → Find/Locate/Identify/Survey; verify → Confirm/Verify/Check/Prove; deliver → Draft/Write/Answer/Compose.
 
 ## Output contract
-- Output ONLY a JSON array of strings (the subtask texts), nothing else (no preamble, no markdown fences, no role-play).
-- Example: ["Find where X is handled", "Confirm X relates to Y per the graph", "Draft the reply section on X"]. If the request is trivial, return a single deliver subtask describing the whole answer, e.g. ["Answer the user's question about X"].
+- Call the `enrich_task_plan` tool exactly once with the `subtasks` array (no assistant text outside tool_calls, no markdown fences, no role-play).
+- Example subtasks: ["Find where X is handled", "Confirm X relates to Y per the graph", "Draft the reply section on X"]. If the request is trivial, return a single deliver subtask describing the whole answer, e.g. ["Answer the user's question about X"].
 
 `incoming_user_message` is post-distill canonical intent; do not re-import quoted prior thread from email forwards.
 

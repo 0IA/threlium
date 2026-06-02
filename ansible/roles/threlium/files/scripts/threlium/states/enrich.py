@@ -34,7 +34,16 @@ from threlium.context_budget import (
     solve_mckp,
 )
 from threlium.settings import ThreliumSettings
-from threlium.litellm_client import litellm_site_acompletion_text
+from threlium.enrich_tool_bridge import (
+    parse_enrich_query_plan_assistant,
+    parse_enrich_task_plan_assistant,
+)
+from threlium.litellm_required_tool import (
+    ainvoke_required_tool,
+    build_site_call,
+    invoke_required_tool,
+)
+from threlium.litellm_tool_spec import load_tool_spec
 from threlium.litellm_route_context import e2e_route_wire_tail, get_litellm_http_correlation
 from threlium.enrich_context import build_unified_email_messages, trim_context_text, UnifiedEmailContext
 from threlium.fsm_emit import build_fsm_plain_to_stage
@@ -47,7 +56,6 @@ from threlium.mime_reform import (
     build_enriched_multipart,
     concat_history_parts_text,
 )
-from threlium.litellm_client import litellm_site_completion_text
 from threlium.prompts import render_prompt
 from threlium.response.collect import collect_ops
 from threlium.response.state_summary import build_state_summary
@@ -108,12 +116,24 @@ def _query_param(cfg: ThreliumSettings) -> QueryParam:
 
 
 async def _enrich_llm_plan(cfg: ThreliumSettings, user_prompt: str) -> str:
-    """Один LLM-вызов для формулировки запроса к LightRAG (маршрутизация LiteLLM)."""
-    raw = await litellm_site_acompletion_text(
+    """Один tool-вызов ``enrich_query_plan`` для формулировки запроса к LightRAG."""
+    call = build_site_call(
         cfg,
         LitellmRoutingSite.ENRICH_PLAN,
         [LiteLlmChatMessage(role="user", content=user_prompt)],
     )
+    tool_spec = load_tool_spec(PromptPath.LIGHTRAG_ENRICH_QUERY_PLAN_TOOL_SPEC)
+    correlation = (
+        get_litellm_http_correlation() if cfg.e2e.litellm_route_correlation else None
+    )
+    assistant = await ainvoke_required_tool(
+        settings=cfg,
+        call=call,
+        tool_spec=tool_spec,
+        correlation_snap=correlation,
+        context="enrich_query_plan",
+    )
+    raw = parse_enrich_query_plan_assistant(assistant).formulated_query
     return LightragLiteLlmCompletionBody.parse(raw).value if raw else ""
 
 
@@ -193,28 +213,6 @@ def _collect_extra_parts(
     return parts
 
 
-def _parse_task_plan(raw: str) -> list[str]:
-    """LLM-вывод (JSON-массив строк, толерантно) → тексты подзадач (≤8)."""
-    s = raw.strip()
-    if not s:
-        return []
-    start = s.find("[")
-    end = s.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        try:
-            data = json.loads(s[start : end + 1])
-            if isinstance(data, list):
-                return [str(x).strip() for x in data if str(x).strip()][:8]
-        except (json.JSONDecodeError, ValueError):
-            pass
-    out: list[str] = []
-    for ln in raw.splitlines():
-        t = ln.strip().lstrip("-*0123456789.) \t").strip()
-        if t:
-            out.append(t)
-    return out[:8]
-
-
 def _build_task_parts(
     *,
     config: ThreliumSettings,
@@ -241,19 +239,33 @@ def _build_task_parts(
             for s in existing_ledger.subtasks
         ],
     )
+    call = build_site_call(
+        config,
+        LitellmRoutingSite.ENRICH_PLAN,
+        [LiteLlmChatMessage(role="user", content=plan_prompt)],
+    )
+    tool_spec = load_tool_spec(PromptPath.LIGHTRAG_ENRICH_TASK_PLAN_TOOL_SPEC)
+    correlation = (
+        get_litellm_http_correlation()
+        if config.e2e.litellm_route_correlation
+        else None
+    )
     try:
-        raw = litellm_site_completion_text(
-            config,
-            LitellmRoutingSite.ENRICH_PLAN,
-            [LiteLlmChatMessage(role="user", content=plan_prompt)],
+        assistant = invoke_required_tool(
+            settings=config,
+            call=call,
+            tool_spec=tool_spec,
+            correlation_snap=correlation,
+            context="enrich_task_plan",
         )
+        subtasks = parse_enrich_task_plan_assistant(assistant).subtasks
     except Exception as exc:  # noqa: BLE001 — fail-open: seed опционален, ledger не обязателен
         log.warning("task_plan_llm_failed", error=str(exc))
-        raw = ""
+        subtasks = []
 
     seen: set[str] = set()
     defs: list[TaskSubtaskDef] = []
-    for text_raw in _parse_task_plan(raw):
+    for text_raw in subtasks:
         try:
             text = TaskSubtaskText.require(name="enrich_task_plan.subtask", raw=text_raw)
         except ValueError:

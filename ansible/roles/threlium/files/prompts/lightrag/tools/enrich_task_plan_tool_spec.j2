@@ -1,0 +1,21 @@
+{#- tool_spec for enrich task-plan seed (tool_choice=required, score 1) — standalone -#}
+{
+  "type": "function",
+  "function": {
+    "name": "enrich_task_plan",
+    "description": "Tool-only: call once; no assistant text outside tool_calls. Decompose the user's request into a small ordered set (1-6) of concrete, verifiable subtasks for the durable task ledger. Return an empty array only when an existing ledger already covers everything and nothing new is needed.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "subtasks": {
+          "type": "array",
+          "description": "Subtask texts, English; each is one checkable action or outcome. Reuse existing ledger texts verbatim; add only genuinely new ones.",
+          "items": { "type": "string", "minLength": 1, "maxLength": 400 },
+          "maxItems": 8
+        }
+      },
+      "required": ["subtasks"],
+      "additionalProperties": false
+    }
+  }
+}
