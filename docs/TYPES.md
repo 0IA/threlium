@@ -65,7 +65,7 @@ class EmailStruct:
 
 **Стадии и `ThreliumSettings`:** демон **`threlium-engine`** (`python -m threlium.runners.engine`) вызывает `load_settings()` **один раз при старте** и передаёт снимок в `threlium.states.<stage>.main(..., settings=…)` in-process (keyword-only). Юнит **`threlium-work@`** (`Type=exec`) — только wire-клиент `python -m threlium.runners.engine_submit` (`EngineWireRequest` / `wire_io`); `load_settings()` в submit не вызывается. Перезагрузка конфигурации внутри одного процесса не поддерживается. В тестах — тот же `load_settings()` или узкий ручной `ThreliumSettings(...)`. Поля — уже загруженные и валидированные pydantic-модели или скаляры; `**.value` оставляют для границы с внешними API (HTTP-клиенты, subprocess, litellm, заголовки `EmailMessage`), а не для «раннего» снятия типа в середине доменной функции без необходимости.
 
-**Заголовки RFC822 на границе:** отдельный тип на смысл (`RfcFromWire`, `RfcSubjectWire`, `RfcDateWire`, `RfcSenderWire`, …), без одного «универсального заголовка» на разные роли.
+**Заголовки RFC822 на границе:** отдельный тип на смысл (`RfcFromWire`, `RfcSubjectWire`, `RfcDateWire`, `RfcSenderWire`, …), без одного «универсального заголовка» на разные роли. Байты ↔ письмо ↔ wire — только `threlium.mail` (`PARSE_RFC822`, `serialize_rfc822_for_wire`).
 
 **Matrix bridge→ingress и `Subject`:** имя комнаты из state **`m.room.name`** (CS API) — :class:`~threlium.types.bridges.MatrixRoomNameWire`; строка заголовка **`Subject:`** в синтетическом MIME — :class:`~threlium.types.rfc.RfcSubjectWire` после :func:`~threlium.bridges.matrix_room_name_to_ingress_subject_wire` (см. [MESSAGES.md](MESSAGES.md), §2.2.3).
 
@@ -79,7 +79,7 @@ class EmailStruct:
 
 **`X-Threlium-Irt-Hash` (sha256):** SHA256 hex от значения ``In-Reply-To`` — :class:`IrtHashWire` (фабрика ``from_irt_header_value``). Та же причина: base62-encoded MID (96+ символов local-part) отбрасывается Xapian. Запрос ``IrtHashWire.from_irt_header_value(irt).as_notmuch_index_term()`` — O(1) поиск по индексу. Модуль: [`types/irt_hash.py`](../ansible/roles/threlium/files/scripts/threlium/types/irt_hash.py).
 
-**`X-Threlium-Thread-Id` (только ingest-строка):** не пишется в Maildir; задаётся только в синтетическом RFC822 для `ainsert` (оболочка — `email.message.EmailMessage` + `policy.default`, тело — шаблон `lightrag/ingest_body.j2`, см. [`docs/adr/0001-lightrag-ingest-chunking-enrich.md`](adr/0001-lightrag-ingest-chunking-enrich.md)).
+**`X-Threlium-Thread-Id` (только ingest-строка):** не пишется в Maildir; задаётся только в синтетическом RFC822 для `ainsert` (сериализация — `threlium.mail.serialize_rfc822_for_wire` / `RFC822_FOR_INSERT`, тело — шаблон `lightrag/ingest_body.j2`, см. [`docs/adr/0001-lightrag-ingest-chunking-enrich.md`](adr/0001-lightrag-ingest-chunking-enrich.md)).
 
 **CLI intent payload:** `CliIntentPayload` — `argv`, опционально `cwd`, `privileged: bool` (default false). Политика `CliIntentPolicy`: `SANDBOX` | `PRIVILEGED`. Sandbox — `systemd-run --user --wait --pipe` с `ProtectSystem=strict`; privileged — `systemd-run --wait --pipe --uid=0` после HITL (если `cli.privileged_hitl_enabled`).
 
@@ -146,7 +146,7 @@ class RfcInReplyToWire(_OptionalStripEmpty):
 
 Union `NativeId = EmailNativeId | TelegramNativeId | MatrixNativeId`. Все каналы (email, telegram, matrix) строят канонический `<b62@localhost>` через **единый** путь `RfcMessageIdWire.from_native(native: NativeId)` → `msgspec.json.encode` → `base62.encodebytes`. Канонический `<b62@localhost>` далее может занять любую роль в FSM-заголовках: `Message-ID`, `In-Reply-To`, `References`.
 
-`NativeId` содержит **только identity-поля** — минимальный набор, уникально идентифицирующий сообщение на стороне канала. Checkpoint-данные (`update_id` для Telegram, `sync_batch` / `reply_to_event_id` для Matrix, `imap_uid` / `imap_uidvalidity` для email) — только в `TelegramIngressRoute` / `MatrixIngressRoute` / `EmailIngressRoute`, не в `NativeId`. Фабрика `.from_route(r)` извлекает identity из маршрута, отбрасывая checkpoint. Пара `(imap_uidvalidity, imap_uid)` email-моста опциональна (`int | None`): её ставит только IMAP-мост на ingress, у legacy / e2e писем ключи отсутствуют.
+`NativeId` содержит **только identity-поля** — минимальный набор, уникально идентифицирующий сообщение на стороне канала. Checkpoint-данные (`update_id` для Telegram, `sync_batch` / `reply_to_event_id` для Matrix, `imap_uid` / `imap_uidvalidity` для email) — только в `TelegramIngressRoute` / `MatrixIngressRoute` / `EmailIngressRoute`, не в `NativeId`. Фабрика `.from_route(r)` извлекает identity из маршрута, отбрасывая checkpoint. Пара `(imap_uidvalidity, imap_uid)` email-моста опциональна (`int | None`): её ставит только IMAP-мост на ingress, у legacy / e2e писем ключи отсутствуют. На границе IMAP FETCH (до checkpoint в route) — opaque `ImapFolderUid` (`NewType(int)`); аргумент для `imaplib`/`imap_tools` — только `imap_folder_uid_as_imaplib_arg`.
 
 **Контракт:** в `threlium.types` **нет** публичных функций `str → b62` / `b62 → str`. b62-кодек — только внутри VO-методов: `from_native` / `native_from_canonical_str` (для MID) и `from_ingress_route` / `to_ingress_route` (для route).
 

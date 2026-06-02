@@ -94,7 +94,7 @@
 
 ### 4.1 Идея
 
-Python (`threlium.delivery.run_fdm`) передаёт **одно** письмо на stdin команде **`fdm -m -a stdin fetch`**. Конфиг — **`~/.fdm.conf`** (из шаблона [`fdm.conf.j2`](../ansible/roles/threlium/templates/config/fdm.conf.j2)); account `stdin` disabled stdin. После цепочки `match … action "…"` fdm выполняет **одно терминирующее** действие — **`pipe`** на минимальный shell, который экспортирует `HOME`, `NOTMUCH_CONFIG`, `THRELIUM_STAGE` и выполняет **`notmuch insert --folder=<stage>/Maildir … && exec …/threlium-dispatch.sh`**. RFC822 на stdin этой команды — байты **`RFC822_FOR_INSERT`** из `mime_reform` (длинные однострочные заголовки на wire); внешний **`reformail` не используется**.
+Python (`threlium.delivery.run_fdm`) передаёт **одно** письмо на stdin команде **`fdm -m -a stdin fetch`**. Конфиг — **`~/.fdm.conf`** (из шаблона [`fdm.conf.j2`](../ansible/roles/threlium/templates/config/fdm.conf.j2)); account `stdin` disabled stdin. После цепочки `match … action "…"` fdm выполняет **одно терминирующее** действие — **`pipe`** на минимальный shell, который экспортирует `HOME`, `NOTMUCH_CONFIG`, `THRELIUM_STAGE` и выполняет **`notmuch insert --folder=<stage>/Maildir … && exec …/threlium-dispatch.sh`**. RFC822 на stdin этой команды — байты **`RFC822_FOR_INSERT`** из :mod:`threlium.mail` (длинные однострочные заголовки на wire); внешний **`reformail` не используется**.
 
 Атомарная запись в stage Maildir + индексация одной транзакцией notmuch (split-brain исключён: либо успех, либо команда `pipe` упала и fdm завершится с ошибкой). После успешного `pipe` для данного сообщения обработка в fdm для него заканчивается — никакой второй доставки в архив, никакого fan-out.
 
