@@ -17,7 +17,16 @@ class LightragRelationRecord(msgspec.Struct, frozen=True):
     relationship_description: str
 
 
-class ExtractKnowledgeGraphToolArgs(msgspec.Struct, frozen=True):
+class ExtractKnowledgeGraphEntityToolArgs(msgspec.Struct, frozen=True):
+    """Args первичного прохода ``extract_knowledge_graph`` (отдельный VO от gleaning)."""
+
+    entities: list[LightragEntityRecord]
+    relations: list[LightragRelationRecord]
+
+
+class ExtractKnowledgeGraphGleaningToolArgs(msgspec.Struct, frozen=True):
+    """Args повторного прохода ``extract_knowledge_graph_gleaning`` (пропущенное/исправленное)."""
+
     entities: list[LightragEntityRecord]
     relations: list[LightragRelationRecord]
 
@@ -36,7 +45,8 @@ class GenerateRagAnswerToolArgs(msgspec.Struct, frozen=True):
 
 
 __all__ = [
-    "ExtractKnowledgeGraphToolArgs",
+    "ExtractKnowledgeGraphEntityToolArgs",
+    "ExtractKnowledgeGraphGleaningToolArgs",
     "ExtractQueryKeywordsToolArgs",
     "GenerateRagAnswerToolArgs",
     "LightragEntityRecord",

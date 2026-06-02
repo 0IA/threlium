@@ -13,6 +13,7 @@ class LightragToolBridgeError(RuntimeError):
 
 class LightragToolFunctionName(StrEnum):
     EXTRACT_KNOWLEDGE_GRAPH = "extract_knowledge_graph"
+    EXTRACT_KNOWLEDGE_GRAPH_GLEANING = "extract_knowledge_graph_gleaning"
     SUMMARIZE_DESCRIPTIONS = "summarize_descriptions"
     EXTRACT_QUERY_KEYWORDS = "extract_query_keywords"
     GENERATE_RAG_ANSWER = "generate_rag_answer"

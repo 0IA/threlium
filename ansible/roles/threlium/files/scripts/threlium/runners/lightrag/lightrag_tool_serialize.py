@@ -6,7 +6,8 @@ import json
 import msgspec
 
 from threlium.types.lightrag_tool_args import (
-    ExtractKnowledgeGraphToolArgs,
+    ExtractKnowledgeGraphEntityToolArgs,
+    ExtractKnowledgeGraphGleaningToolArgs,
     ExtractQueryKeywordsToolArgs,
     GenerateRagAnswerToolArgs,
     SummarizeDescriptionsToolArgs,
@@ -34,12 +35,15 @@ def _title_case_name(name: str) -> str:
 
 
 def lightrag_extraction_delimiter_from_args(
-    args: ExtractKnowledgeGraphToolArgs,
+    args: ExtractKnowledgeGraphEntityToolArgs | ExtractKnowledgeGraphGleaningToolArgs,
     *,
     tuple_delimiter: LightragTupleDelimiterWire = _DEFAULT_TUPLE,
     completion_delimiter: LightragCompletionDelimiterWire = _DEFAULT_COMPLETION,
 ) -> LightragExtractionDelimiterText:
     """Serialize tool args to delimiter text for ``operate._process_extraction_result``.
+
+    Принимает оба VO фазы (entity / gleaning): общий wire-формат delimiter, различие —
+    только в типе входного Struct (DDD VO, см. ``docs/TYPES.md``).
 
     Empty ``entities`` and ``relations`` → only ``completion_delimiter`` (gleaning done);
     LightRAG accepts zero records when the delimiter is present.

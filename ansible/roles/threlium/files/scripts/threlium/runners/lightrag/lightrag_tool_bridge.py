@@ -12,7 +12,8 @@ from threlium.litellm_tool_spec import (
     validate_tool_args_json,
 )
 from threlium.types.lightrag_tool_args import (
-    ExtractKnowledgeGraphToolArgs,
+    ExtractKnowledgeGraphEntityToolArgs,
+    ExtractKnowledgeGraphGleaningToolArgs,
     ExtractQueryKeywordsToolArgs,
     GenerateRagAnswerToolArgs,
     SummarizeDescriptionsToolArgs,
@@ -70,7 +71,10 @@ def struct_to_lightrag_wire(
     | LightragEntitySummaryText
     | LightragRagAnswerText
 ):
-    if isinstance(args, ExtractKnowledgeGraphToolArgs):
+    if isinstance(
+        args,
+        (ExtractKnowledgeGraphEntityToolArgs, ExtractKnowledgeGraphGleaningToolArgs),
+    ):
         return lightrag_extraction_delimiter_from_args(args)
     if isinstance(args, SummarizeDescriptionsToolArgs):
         return lightrag_summary_from_args(args)

@@ -29,7 +29,13 @@ from threlium.litellm_route_context import (
     get_litellm_correlation_from_ctxvar,
     get_litellm_http_correlation,
 )
-from threlium.types import LitellmCallSite, MailHeaderName
+from threlium.types import MailHeaderName
+from threlium.types.litellm_call_site import (
+    LIGHTRAG_INDEX_CALL_SITES,
+    LitellmCallSite,
+)
+
+_REASONING_CALL_SITE = LitellmCallSite.REASONING.value
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
 _HDR_VALUE_MAX = 160
@@ -51,7 +57,7 @@ LitellmRequestKind = Literal["completion", "embedding", "rerank"]
 
 
 def _seq_storage_key(*, call_site_wire: str | None, kind: LitellmRequestKind) -> str:
-    indexer = call_site_wire == LitellmCallSite.LIGHTRAG_INDEX.value
+    indexer = call_site_wire in LIGHTRAG_INDEX_CALL_SITES
     if kind == "rerank":
         return _SEQ_INDEXER_RERANK if indexer else _SEQ_FSM_RERANK
     if kind == "embedding":
@@ -258,6 +264,47 @@ def _merge_litellm_extra_route_headers(
     return out
 
 
+def _single_tool_function_name(tools: object) -> str | None:
+    """``function.name`` ровно одного tool из payload (иначе ``None``)."""
+    if not isinstance(tools, list) or len(tools) != 1:
+        return None
+    spec = tools[0]
+    if not isinstance(spec, dict):
+        return None
+    func = spec.get("function")
+    if not isinstance(func, dict):
+        return None
+    name = func.get("name")
+    return name if isinstance(name, str) and name.strip() else None
+
+
+def _assert_single_tool_call_site(merged: dict[str, Any]) -> None:
+    """Инвариант e2e: при одном tool ``X-Threlium-Call-Site`` == ``function.name``.
+
+    Исключения: reasoning umbrella (``call_site == reasoning``; единственный chat-вызов
+    с переменным числом tools, в т.ч. одним response_finalize при budget-exhausted) и
+    не-tool вызовы (embedding / rerank — у них нет ``tools``).
+    """
+    name = _single_tool_function_name(merged.get("tools"))
+    if name is None:
+        return
+    extra = merged.get("extra_headers")
+    if not isinstance(extra, dict):
+        return
+    cs_key = LitellmCorrelationHeader.CALL_SITE.value
+    call_site = None
+    for k, v in extra.items():
+        if str(k).casefold() == cs_key.casefold():
+            call_site = str(v)
+            break
+    if call_site is None or call_site == name or call_site == _REASONING_CALL_SITE:
+        return
+    raise RuntimeError(
+        "litellm tool invariant: single-tool call_site mismatch — "
+        f"X-Threlium-Call-Site={call_site!r} != function.name={name!r}"
+    )
+
+
 def merge_litellm_call_kwargs_and_log(
     *,
     settings: ThreliumSettings,
@@ -276,6 +323,7 @@ def merge_litellm_call_kwargs_and_log(
         litellm_request_kind=litellm_request_kind,
         correlation_override=correlation_override,
     )
+    _assert_single_tool_call_site(merged)
     _log_e2e_litellm_correlation_outbound_and_wiremock_contexts(
         settings, merged, kind=log_kind, stream=stream
     )
@@ -355,78 +403,3 @@ def litellm_completion_sync(
     return litellm_completion(**merged, stream=stream)
 
 
-def _site_call_kwargs(
-    settings: ThreliumSettings,
-    site: LitellmRoutingSite,
-    messages: list["LiteLlmChatMessage"],
-) -> tuple["LlmEndpoint", dict[str, object]]:
-    """Build LiteLLM kwargs from routing *site* — shared by sync/async helpers."""
-    from threlium.types import (
-        LiteLlmAcompletionKwargs as _Kw,
-        lite_llm_acompletion_to_dict as _to_dict,
-    )
-
-    ep = resolve_llm_endpoint(settings.litellm, site)
-    mr = ep.max_retries if ep.max_retries is not None else settings.litellm.max_retries
-    log.info("litellm_routing", site=site.value, score=ep.score)
-
-    call = _Kw(
-        model=ep.model,
-        messages=list(messages),
-        timeout=float(ep.timeout),
-        max_retries=mr,
-        api_key=ep.api_key,
-        api_base=ep.api_base,
-        max_tokens=ep.max_tokens,
-        chat_template_kwargs=ep.chat_template_kwargs or None,
-    )
-    return ep, _to_dict(call)
-
-
-def _extract_completion_text(resp: object) -> str:
-    from threlium.litellm_wire import require_chat_model_response as _require
-
-    mr = _require(resp)
-    choice = mr.choices[0]
-    msg_obj = choice.message
-    if msg_obj is not None:
-        raw_c = msg_obj.content
-        if isinstance(raw_c, str) and raw_c.strip():
-            return raw_c.strip()
-    return ""
-
-
-def litellm_site_completion_text(
-    settings: ThreliumSettings,
-    site: LitellmRoutingSite,
-    messages: list["LiteLlmChatMessage"],
-    *,
-    correlation_override: dict[str, str] | None = None,
-) -> str:
-    """Sync: resolve endpoint for *site*, call LLM, return stripped text."""
-    _, kwargs = _site_call_kwargs(settings, site, messages)
-    resp = litellm_completion_sync(
-        settings=settings,
-        **kwargs,
-        stream=False,
-        correlation_override=correlation_override,
-    )
-    return _extract_completion_text(resp)
-
-
-async def litellm_site_acompletion_text(
-    settings: ThreliumSettings,
-    site: LitellmRoutingSite,
-    messages: list["LiteLlmChatMessage"],
-    *,
-    correlation_override: dict[str, str] | None = None,
-) -> str:
-    """Async: resolve endpoint for *site*, call LLM, return stripped text."""
-    _, kwargs = _site_call_kwargs(settings, site, messages)
-    resp = await litellm_acompletion(
-        settings=settings,
-        **kwargs,
-        stream=False,
-        correlation_override=correlation_override,
-    )
-    return _extract_completion_text(resp)

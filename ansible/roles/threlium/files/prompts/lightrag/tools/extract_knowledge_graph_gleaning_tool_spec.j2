@@ -1,15 +1,15 @@
-{#- tool_spec for LightRAG first-pass entity extraction -#}
+{#- tool_spec for LightRAG gleaning (continue/second pass) — fully standalone, no include -#}
 {
   "type": "function",
   "function": {
-    "name": "extract_knowledge_graph",
-    "description": "First-pass extraction: call once; no assistant text outside tool_calls; do not emit delimiter lines in message content. Extract every entity and relationship you can identify in the input text. Use an empty array only for a category that genuinely has no items.",
+    "name": "extract_knowledge_graph_gleaning",
+    "description": "Gleaning pass: call once; no assistant text outside tool_calls; do not emit delimiter lines in message content. Report ONLY items missed, truncated, or incorrectly formatted in the previous pass; do not repeat items already extracted correctly. Return empty arrays for both fields when nothing remains to add or fix (gleaning complete).",
     "parameters": {
       "type": "object",
       "properties": {
         "entities": {
           "type": "array",
-          "description": "All entities found in the input text on this first pass.",
+          "description": "Entities missed or corrected since the previous pass; empty when none remain.",
           "items": {
             "type": "object",
             "properties": {
@@ -23,7 +23,7 @@
         },
         "relations": {
           "type": "array",
-          "description": "All relationships found in the input text on this first pass.",
+          "description": "Relationships missed or corrected since the previous pass; empty when none remain.",
           "items": {
             "type": "object",
             "properties": {

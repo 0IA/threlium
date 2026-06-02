@@ -11,7 +11,7 @@ Based on the last extraction task, identify and extract any **missed or incorrec
     *   **Do NOT** re-output entities and relationships that were **correctly and fully** extracted in the last task.
     *   If an entity or relationship was **missed** in the last task, extract and output it now according to the system format.
     *   If an entity or relationship was **truncated, had missing fields, or was otherwise incorrectly formatted** in the last task, re-output the *corrected and complete* version in the specified format.
-3.  **Tool output:** Call only `extract_knowledge_graph`. Put missed or corrected items in `entities` / `relations`; omit items that were already correct in the last pass.
+3.  **Tool output:** Call only `extract_knowledge_graph_gleaning`. Put missed or corrected items in `entities` / `relations`; omit items that were already correct in the last pass.
 4.  **Completion:** When nothing remains to add or fix, return empty `entities` and `relations` arrays.
 5.  **Output Language:** Ensure the output language is {language}. Proper nouns (e.g., personal names, place names, organization names) must be kept in their original language and not translated.
 

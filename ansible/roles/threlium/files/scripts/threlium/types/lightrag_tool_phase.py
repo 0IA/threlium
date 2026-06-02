@@ -6,7 +6,8 @@ import msgspec
 
 from threlium.types.litellm_call_site import LitellmCallSite
 from threlium.types.lightrag_tool_args import (
-    ExtractKnowledgeGraphToolArgs,
+    ExtractKnowledgeGraphEntityToolArgs,
+    ExtractKnowledgeGraphGleaningToolArgs,
     ExtractQueryKeywordsToolArgs,
     GenerateRagAnswerToolArgs,
     SummarizeDescriptionsToolArgs,
@@ -25,31 +26,31 @@ class LightragToolPhaseSpec:
 
 _PHASES: tuple[LightragToolPhaseSpec, ...] = (
     LightragToolPhaseSpec(
-        call_site=LitellmCallSite.LIGHTRAG_INDEX_ENTITY,
+        call_site=LitellmCallSite.EXTRACT_KNOWLEDGE_GRAPH,
         tool_name=LightragToolFunctionName.EXTRACT_KNOWLEDGE_GRAPH,
         tool_spec_path=PromptPath.LIGHTRAG_EXTRACT_KNOWLEDGE_GRAPH_TOOL_SPEC,
-        args_type=ExtractKnowledgeGraphToolArgs,
+        args_type=ExtractKnowledgeGraphEntityToolArgs,
     ),
     LightragToolPhaseSpec(
-        call_site=LitellmCallSite.LIGHTRAG_INDEX_GLEANING,
-        tool_name=LightragToolFunctionName.EXTRACT_KNOWLEDGE_GRAPH,
-        tool_spec_path=PromptPath.LIGHTRAG_EXTRACT_KNOWLEDGE_GRAPH_TOOL_SPEC,
-        args_type=ExtractKnowledgeGraphToolArgs,
+        call_site=LitellmCallSite.EXTRACT_KNOWLEDGE_GRAPH_GLEANING,
+        tool_name=LightragToolFunctionName.EXTRACT_KNOWLEDGE_GRAPH_GLEANING,
+        tool_spec_path=PromptPath.LIGHTRAG_EXTRACT_KNOWLEDGE_GRAPH_GLEANING_TOOL_SPEC,
+        args_type=ExtractKnowledgeGraphGleaningToolArgs,
     ),
     LightragToolPhaseSpec(
-        call_site=LitellmCallSite.LIGHTRAG_INDEX_SUMMARIZE,
+        call_site=LitellmCallSite.SUMMARIZE_DESCRIPTIONS,
         tool_name=LightragToolFunctionName.SUMMARIZE_DESCRIPTIONS,
         tool_spec_path=PromptPath.LIGHTRAG_SUMMARIZE_DESCRIPTIONS_TOOL_SPEC,
         args_type=SummarizeDescriptionsToolArgs,
     ),
     LightragToolPhaseSpec(
-        call_site=LitellmCallSite.LIGHTRAG_QUERY_KEYWORDS,
+        call_site=LitellmCallSite.EXTRACT_QUERY_KEYWORDS,
         tool_name=LightragToolFunctionName.EXTRACT_QUERY_KEYWORDS,
         tool_spec_path=PromptPath.LIGHTRAG_EXTRACT_QUERY_KEYWORDS_TOOL_SPEC,
         args_type=ExtractQueryKeywordsToolArgs,
     ),
     LightragToolPhaseSpec(
-        call_site=LitellmCallSite.LIGHTRAG_QUERY_RESPONSE,
+        call_site=LitellmCallSite.GENERATE_RAG_ANSWER,
         tool_name=LightragToolFunctionName.GENERATE_RAG_ANSWER,
         tool_spec_path=PromptPath.LIGHTRAG_GENERATE_RAG_ANSWER_TOOL_SPEC,
         args_type=GenerateRagAnswerToolArgs,
@@ -78,17 +79,17 @@ def detect_lightrag_call_site_wire(
     """Гранулярный ``X-Threlium-Call-Site`` (перенос из ``_detect_lightrag_phase``)."""
     if base_call_site == LitellmCallSite.LIGHTRAG_QUERY.value:
         if keyword_extraction:
-            return LitellmCallSite.LIGHTRAG_QUERY_KEYWORDS.value
-        return LitellmCallSite.LIGHTRAG_QUERY_RESPONSE.value
+            return LitellmCallSite.EXTRACT_QUERY_KEYWORDS.value
+        return LitellmCallSite.GENERATE_RAG_ANSWER.value
 
     if keyword_extraction:
-        return LitellmCallSite.LIGHTRAG_QUERY_KEYWORDS.value
+        return LitellmCallSite.EXTRACT_QUERY_KEYWORDS.value
 
     if has_history:
-        return LitellmCallSite.LIGHTRAG_INDEX_GLEANING.value
+        return LitellmCallSite.EXTRACT_KNOWLEDGE_GRAPH_GLEANING.value
     if not has_system_prompt:
-        return LitellmCallSite.LIGHTRAG_INDEX_SUMMARIZE.value
-    return LitellmCallSite.LIGHTRAG_INDEX_ENTITY.value
+        return LitellmCallSite.SUMMARIZE_DESCRIPTIONS.value
+    return LitellmCallSite.EXTRACT_KNOWLEDGE_GRAPH.value
 
 
 __all__ = [
