@@ -4,7 +4,7 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "lightrag_index_gleaning"
+        "equalTo": "extract_knowledge_graph_gleaning"
       }
     },
     "bodyPatterns": [
@@ -45,7 +45,7 @@
                 "id": "call_lightrag_097_chat_lightrag_gleaning",
                 "type": "function",
                 "function": {
-                  "name": "extract_knowledge_graph",
+                  "name": "extract_knowledge_graph_gleaning",
                   "arguments": "{\"entities\": [], \"relations\": []}"
                 }
               }

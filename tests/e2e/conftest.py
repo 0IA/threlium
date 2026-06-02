@@ -99,9 +99,11 @@ from .helpers import (
 from .wiremock_client import (
     assert_wiremock_unmatched_journal_empty,
     assert_wiremock_zero_unmatched_requests,
+    reset_non_bootstrap_wiremock_mappings,
     reset_request_journal,
     upsert_wiremock_compose_bootstrap_stubs,
     wiremock_public_base,
+    wiremock_state_reset_all_contexts,
 )
 
 _ACTIVE_E2E_PROJECT: str | None = None
@@ -150,34 +152,21 @@ def _e2e_wiremock_journal_reset_once(
     session: pytest.Session,
     session_tmp: Path,
 ) -> None:
-    """Один раз за **инвокацию pytest** (все xdist-процессы): сброс журнала WireMock.
+    """Один раз за **инвокацию pytest** (все xdist-процессы): session cold reset SUT + WireMock.
 
-    Стабы, State-контексты и pipeline **не трогаются**. Изоляция между тестами
-    и между запусками обеспечивается ``state-matcher`` + ``composite_context_key``
-    (см. ``docs/E2E_ISOLATION.md``): каждый запуск генерирует уникальный
-    ``correlation_key`` (UUID в ``Message-ID``), поэтому стабы, контексты и
-    сообщения не пересекаются. Стале сообщения из прошлых запусков тихо
-    обрабатываются существующими стабами/контекстами без unmatched.
+    Под IPC-``FileLock`` лидер: stop user pipeline → полный flush Maildir/notmuch/LightRAG
+    и GreenMail → ``reset_request_journal`` + ``wiremock_state_reset_all_contexts`` +
+    ``reset_non_bootstrap_wiremock_mappings`` → bootstrap stubs → start pipeline → idle →
+    повторный сброс журнала. Между тестами pipeline **не** перезапускается; per-test
+    очистка «своих» прошлых писем — :func:`~tests.e2e.helpers.e2e_clean_sut_messages_for_test`
+    из :func:`~tests.e2e.wiremock_client.prepare_wiremock_scenario` (см. ``docs/E2E_ISOLATION.md`` §7).
 
-    Тяжёлая чистка (Maildir/notmuch/LightRAG/GreenMail/State) — только при
-    провижининге стека (``wipe_bake.py`` / ``wipe_sync.py``).
+  Изоляция WireMock между тестами: ``state-matcher`` + ``composite_context_key``
+    (уникальный ``correlation_key`` на запуск). В конце сессии pipeline **не** останавливается
+    (post-mortem); ``pytest_sessionfinish`` ждёт idle и проверяет пустой unmatched.
 
-    *session_tmp* уникален на каждый запуск pytest:
-
-    - **xdist worker:** ``getbasetemp().parent`` = ``/tmp/pytest-of-user/pytest-42/``
-      (``getbasetemp()`` = ``…/pytest-42/worker-gwN/``).
-    - **non-xdist:** ``getbasetemp()`` = ``/tmp/pytest-of-user/pytest-42/`` напрямую.
-
-    Маркер ``e2e_wm_journal_reset.done`` в этой директории физически не может
-    существовать от предыдущей сессии — новый запуск получает ``pytest-43/``.
-
-    При ``pytest -n N`` xdist-воркеры разделяют один ``session_tmp``
-    (``pytest-42/``), поэтому первый воркер, захвативший ``FileLock``, выполняет
-    сброс и создаёт маркер; остальные видят маркер и пропускают.
-
-    Порядок: ``DELETE /__admin/requests`` (журнал) →
-    :func:`~tests.e2e.wiremock_client.upsert_wiremock_compose_bootstrap_stubs`
-    (idempotent PUT по UUID).
+    *session_tmp* уникален на каждый запуск pytest (xdist: ``getbasetemp().parent``).
+    Маркер ``e2e_wm_journal_reset.done`` — только внутри одной инвокации pytest.
     """
     if session.config.stash.get(_THRELIUM_E2E_WM_JOURNAL_RESET_STASH, False):
         return
@@ -206,7 +195,12 @@ def _e2e_wiremock_journal_reset_once(
             e2e_flush_greenmail_inboxes(rt)
             wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
             reset_request_journal(wm)
+            wiremock_state_reset_all_contexts(wm)
+            reset_non_bootstrap_wiremock_mappings(wm)
             upsert_wiremock_compose_bootstrap_stubs(wm)
+            e2e_start_threlium_user_pipeline_services(rt)
+            wait_for_sut_threlium_user_workers_idle(pn, timeout=120.0)
+            reset_request_journal(wm)
         except Exception as e:
             log.warning(
                 "journal_reset_skipped",
@@ -329,17 +323,7 @@ def e2e_runtime(
         return
 
     rt = discover_runtime(project_name)
-    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    reset_request_journal(wm)
-    e2e_flush_sut_fsm_maildirs(rt)
-    e2e_flush_greenmail_inboxes(rt)
-    e2e_start_threlium_user_pipeline_services(rt)
-    wait_for_sut_threlium_user_workers_idle(project_name, timeout=120.0)
-    reset_request_journal(wm)
-    try:
-        yield discover_runtime(project_name)
-    finally:
-        e2e_stop_threlium_user_pipeline_services(rt)
+    yield rt
 
 
 @pytest.fixture(autouse=True, scope="function")
@@ -564,21 +548,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
                 drain_sec = float(os.environ.get("THRELIUM_E2E_SESSIONFINISH_DRAIN_SEC", "120"))
                 wait_for_sut_threlium_user_workers_idle(pn_fin, timeout=drain_sec)
                 assert_wiremock_zero_unmatched_requests(wm, wait_timeout_sec=drain_sec)
-                leave_running = os.environ.get(
-                    E2E_LEAVE_STACK_RUNNING_ENV, ""
-                ).strip().lower() in ("1", "true", "yes", "on")
-                if leave_running:
-                    # Изоляцию обеспечивает state-matcher + composite_context_key
-                    # (docs/E2E_ISOLATION.md). После прогона WireMock-журнал, State и
-                    # pipeline НЕ трогаем — контексты нужны для обработки стале сообщений
-                    # и для пост-mortem отладки.
-                    log.info("wiremock_sessionfinish_left_running")
-                else:
-                    # Pipeline останавливаем (освобождаем стек), но журнал/State WireMock
-                    # сохраняем — контексты обеспечивают изоляцию стале сообщений при
-                    # следующем запуске.
-                    e2e_stop_threlium_user_pipeline_services(rt)
-                    log.info("wiremock_sessionfinish_pipeline_stopped")
+                # Изоляцию обеспечивает state-matcher + composite_context_key
+                # (docs/E2E_ISOLATION.md). После прогона WireMock-журнал, State и
+                # pipeline НЕ трогаем — контексты нужны для обработки стале сообщений
+                # и для пост-mortem отладки.
+                log.info("wiremock_sessionfinish_left_running")
             except Exception as e:  # pragma: no cover
                 log.warning("wiremock_sessionfinish_reset_skipped", error=repr(e))
 

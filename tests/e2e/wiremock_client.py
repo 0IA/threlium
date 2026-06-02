@@ -205,17 +205,6 @@ _E2E_KEYWORDS_SYSTEM_PREFIX = "You are an expert keyword extractor"
 _MATRIX_AGENT_REPLY_BODY = "ok matrix wiremock live e2e"
 
 
-def _e2e_hay_matches_enrich_plan_contract(hay: str) -> bool:
-    """Семантика ``080_chat_enrich_plan.json`` без ``.*`` по всему телу (избегаем ReDoS на огромных JSON)."""
-    low = hay.casefold()
-    return (
-        ("formulate a retrieval question" in low or "knowledge graph" in low)
-        and "indexed email" in low
-        and "distilled history" in low
-        and "incoming message (canonical)" in low
-    )
-
-
 def _env_truthy(raw: str | None) -> bool:
     if raw is None:
         return False
@@ -375,6 +364,29 @@ def wiremock_state_length_recovery_enable(
     """
     with _wiremock_admin_api_exclusive(timeout=timeout):
         url = wiremock_e2e_state_length_recovery_post_url(public_base)
+        r = _wm_session().post(
+            url,
+            json={"correlation_key": correlation_key},
+            timeout=timeout,
+        )
+        r.raise_for_status()
+
+
+def wiremock_e2e_state_standard_tasks_ledger_post_url(public_base: str) -> str:
+    """Публичный URL стаба ``016_e2e_state_standard_tasks_ledger.json``."""
+    root = _normalize_wiremock_public_root(public_base)
+    return f"{root}/__threlium/e2e/state/standard_tasks_ledger"
+
+
+def wiremock_state_standard_tasks_ledger_enable(
+    public_base: str,
+    correlation_key: str,
+    *,
+    timeout: float = TIMEOUT_POLL_SHORT,
+) -> None:
+    """Стандартный reasoning-путь: ``phase_standard_tasks_ledger`` (не length-recovery)."""
+    with _wiremock_admin_api_exclusive(timeout=timeout):
+        url = wiremock_e2e_state_standard_tasks_ledger_post_url(public_base)
         r = _wm_session().post(
             url,
             json={"correlation_key": correlation_key},
@@ -1567,6 +1579,25 @@ def prepare_wiremock_scenario(
     :func:`wiremock_state_reset_all_contexts` в ``pytest_sessionfinish`` (см. ``docs/E2E_ISOLATION.md``).
     """
     ctx_key = composite_context_key(stub_tag, correlation_key)
+    
+    # Clean up SUT messages from previous runs of the same test scenario
+    try:
+        from .helpers import (
+            discover_live_e2e_project_name,
+            discover_runtime,
+            e2e_clean_sut_messages_for_test,
+            wait_for_sut_threlium_user_workers_idle,
+        )
+        pn = discover_live_e2e_project_name()
+        if pn:
+            rt = discover_runtime(pn)
+            e2e_clean_sut_messages_for_test(
+                rt, stub_tag, correlation_key=correlation_key
+            )
+            wait_for_sut_threlium_user_workers_idle(pn, timeout=30.0)
+    except Exception as cleanup_exc:
+        log.warning("sut_message_cleanup_failed", stub_tag=stub_tag, error=repr(cleanup_exc))
+
     with _wiremock_admin_api_exclusive(timeout=timeout):
         upsert_wiremock_mapping_directory(
             public_base,
@@ -1876,23 +1907,12 @@ def _e2e_openai_llm_coverage_missing(data: dict[str, Any], test_id: str) -> list
     if len(emb_posts) < 1:
         missing.append("POST /embeddings (≥1 с телом сценария)")
 
-    def _llm_body_has_correlation(hay: str) -> bool:
-        return (
-            test_id in hay
-            or "openai/threlium_e2e_l0" in hay
-            or '"model":"threlium_e2e_l0"' in hay
-            or '"model": "threlium_e2e_l0"' in hay
-        )
-
     def _post_has_reasoning(hay: str) -> bool:
         return (
             test_id in hay
             and "<envelope>" in hay
             and '"tools"' in hay
         )
-
-    def _post_has_enrich_plan(hay: str) -> bool:
-        return _llm_body_has_correlation(hay) and _e2e_hay_matches_enrich_plan_contract(hay)
 
     def _entry_has_call_site(entry: dict[str, Any], call_site: str) -> bool:
         req = entry.get("request")
@@ -1904,17 +1924,15 @@ def _e2e_openai_llm_coverage_missing(data: dict[str, Any], test_id: str) -> list
         missing.append(
             "reasoning (как 100_chat_reasoning_egress_tool.json: <envelope> + tools + test_id)"
         )
-    if not any(_post_has_enrich_plan(h) for h in chat_hays):
+    if not any(_entry_has_call_site(e, "enrich_query_plan") for e in chat_entries):
+        missing.append("enrich plan (X-Threlium-Call-Site: enrich_query_plan)")
+    if not any(_entry_has_call_site(e, "extract_query_keywords") for e in chat_entries):
         missing.append(
-            "enrich plan (как 080_chat_enrich_plan.json: regex formulate/kg × indexed email + корреляция модели)"
+            "lightrag keywords (X-Threlium-Call-Site: extract_query_keywords)"
         )
-    if not any(_entry_has_call_site(e, "lightrag_query_keywords") for e in chat_entries):
+    if not any(_entry_has_call_site(e, "extract_knowledge_graph") for e in chat_entries):
         missing.append(
-            "lightrag keywords (X-Threlium-Call-Site: lightrag_query_keywords)"
-        )
-    if not any(_entry_has_call_site(e, "lightrag_index_entity") for e in chat_entries):
-        missing.append(
-            "lightrag entity extraction (X-Threlium-Call-Site: lightrag_index_entity)"
+            "lightrag entity extraction (X-Threlium-Call-Site: extract_knowledge_graph)"
         )
     if not any(_entry_has_call_site(e, "ingress_distill") for e in chat_entries):
         missing.append("ingress_distill (X-Threlium-Call-Site: ingress_distill)")

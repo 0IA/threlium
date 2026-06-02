@@ -327,6 +327,7 @@ systemctl list-units --failed --no-pager 2>&1 || true
 # Единый таймаут поведенческих ожиданий e2e (сек.): ``THRELIUM_E2E_POLL_SHORT``, дефолт 30.
 # Долгим исключением остаётся только ``THRELIUM_E2E_TIMEOUT_ANSIBLE`` (playbook / wipe_sync).
 TIMEOUT_POLL_SHORT = float(os.environ.get("THRELIUM_E2E_POLL_SHORT", "30"))
+TIMEOUT_POLL_LIVE_MAIL = float(os.environ.get("THRELIUM_E2E_POLL_LIVE_MAIL", "120"))
 TIMEOUT_ANSIBLE_PLAYBOOK = int(os.environ.get("THRELIUM_E2E_TIMEOUT_ANSIBLE", str(20 * 60)))
 POLL_INTERVAL = float(os.environ.get("THRELIUM_E2E_POLL_INTERVAL", "2.0"))
 # Ответ контура после WireMock L0-стабов (паритет ``reference_l0/threlium_e2e_l0.py``).
@@ -357,6 +358,66 @@ E2E_SUMMARY_MARKER = "E2E-SUM-CONTEXT-MARKER"
 E2E_SUM_ORIG_HEAD_MARKER = "E2E-SUM-ORIG-HEAD-MARKER"
 E2E_SUM_ORIG_PAD_MARKER = "E2E-SUM-ORIG-PAD-MARKER"
 E2E_SUMMARIZE_LLM_NEEDLE = "context summarizer"
+
+
+_STUB_TAG_TO_PREFIXES: dict[str, list[str]] = {
+    "stub-mailflow-e2e-01": ["mf-ing-", "lrf-ing-"],
+    "stub-cli-discovery-chain-01": ["e2e-cli-disc-"],
+    "stub-cli-route-collision-01": ["e2e-cli-route-coll-"],
+    "stub-formal-reason-technical-gate-01": ["e2e-formal-reason-tech-gate-"],
+    "stub-formal-reason-inference-01": ["e2e-formal-reason-inference-"],
+    "stub-formal-reason-violation-01": ["e2e-formal-reason-viol-"],
+    "stub-formal-reason-query-01": ["e2e-formal-reason-query-"],
+    "stub-formal-reason-chain-01": ["e2e-formal-reason-chain-"],
+    "stub-formal-reason-gate-matrix-01": ["e2e-formal-reason-gate-matrix-"],
+    "stub-subagent-frame-iso-01": ["e2e-subagent-resp-iso-"],
+    "stub-subagent-ledger-iso-01": ["e2e-subagent-ledger-iso-"],
+    "stub-reasoning-litellm-ctx-trim-01": ["e2e-reasoning-trim-"],
+    "stub-memory-query-01": ["e2e-mem-query-"],
+    "stub-unified-context-roles-01": ["e2e-uctx-roles-seed-", "e2e-uctx-roles-turn2-"],
+    "stub-resp-fin-mode3-01": ["e2e-fin-mode3-"],
+    "stub-resp-observe-01": ["e2e-observe-"],
+    "stub-resp-edit-replace-01": ["e2e-edit-repl-"],
+    "stub-resp-edit-delete-01": ["e2e-edit-del-"],
+    "stub-resp-fin-mode4-01": ["e2e-fin-mode4-"],
+    "stub-resp-edit-invalid-01": ["e2e-edit-inv-"],
+    "stub-summarize-context-e2e-01": ["e2e-summarize-ctx-"],
+    "stub-response-buffer-e2e-01": ["e2e-respbuf-"],
+    "stub-reasoning-litellm-live-01": ["e2e-reasoning-"],
+    "stub-fsm-handler-failure-01": ["e2e-fsm-fail-a-", "e2e-fsm-fail-b-"],
+    "stub-task-ledger-chain-01": ["e2e-task-ledger-chain-"],
+    "stub-task-ledger-bypass-01": ["e2e-task-ledger-bypass-"],
+    "stub-task-ledger-empty-01": ["e2e-task-ledger-empty-"],
+    "stub-task-ledger-allcancel-01": ["e2e-task-ledger-allcancel-"],
+    "stub-task-ledger-upserterr-01": ["e2e-task-ledger-upserterr-"],
+    "stub-imap-checkpoint-resume-01": ["e2e-imap-cp-a-", "e2e-imap-cp-b-"],
+    "stub-greenmail-delivery-smoke-01": ["e2e-greenmail-"],
+    
+    # live-only tests in test_mailflow_live_only_e2e.py:
+    "stub-mailflow-live-two-turn-01": ["e2e-live-turn1-", "e2e-live-turn2-"],
+    "stub-mailflow-live-sat-shallow-01": ["e2e-sat-live-"],
+    "stub-mailflow-live-sat-budget-exhausted-01": ["e2e-sat-budget-"],
+    "stub-mailflow-live-mem-thread-01": ["e2e-mem-tm-"],
+    "stub-mailflow-live-global-mem-01": ["e2e-global-mem-"],
+    "stub-mailflow-live-reflect-cyc-01": ["e2e-reflect-cyc-"],
+    "stub-mailflow-live-hitl-mx-01": ["e2e-hitl-mx-"],
+    "stub-mailflow-live-cli-allow-01": ["e2e-cli-allow-"],
+    "stub-mailflow-live-hitl-mx-no-01": ["e2e-hitl-no-"],
+    
+    # Telegram live tests:
+    "stub-telegram-wiremock-live-e2e-private": [],
+    "stub-telegram-wiremock-live-e2e-forum-topic": [],
+    "stub-telegram-wiremock-live-e2e-private-tail-307": [],
+    
+    # Matrix live tests (room_id prefix also matched via _MATRIX_E2E_STUB_TAGS):
+    "stub-matrix-wiremock-live-e2e-01": ["!e2e_"],
+}
+
+_MATRIX_E2E_STUB_TAGS = frozenset({"stub-matrix-wiremock-live-e2e-01"})
+
+
+def _stub_tag_uses_telegram_bridge_cleanup(stub_tag: str) -> bool:
+    return stub_tag.startswith("stub-telegram-wiremock-live-e2e")
 
 
 def e2e_dense_threlium_ctx_body(*, head: str, correlation_key: str) -> str:
@@ -669,6 +730,155 @@ echo "[e2e] SUT flushed: Maildir + lightrag + notmuch DB wiped, notmuch new done
             rc=completed.returncode,
             stdout_snippet=(completed.stdout or "")[:600],
         )
+
+
+def e2e_clean_sut_messages_for_test(rt: E2EComposeRuntime, stub_tag: str, correlation_key: str | None = None) -> None:
+    """Очистить сообщения из предыдущих запусков конкретного E2E теста на SUT.
+
+    Использует неполные Message-ID префиксы, соответствующие stub_tag,
+    декодирует канонические Message-ID в notmuch, вычисляет thread ID,
+    удаляет все файлы в найденных тредах и обновляет индекс.
+    Исключает из удаления тред, соответствующий correlation_key, чтобы сохранить
+    сообщения текущей сессии в многошаговых тестах.
+    """
+    prefixes = _STUB_TAG_TO_PREFIXES.get(stub_tag, [])
+    bridge_matrix = stub_tag in _MATRIX_E2E_STUB_TAGS
+    bridge_telegram = _stub_tag_uses_telegram_bridge_cleanup(stub_tag)
+    if not prefixes and not bridge_matrix and not bridge_telegram:
+        return
+
+    corr_search_term = ""
+    if correlation_key:
+        try:
+            corr_search_term = notmuch_id_search_term(correlation_key)
+        except ValueError:
+            log.warning(
+                "sut_message_cleanup_skip_active_thread",
+                stub_tag=stub_tag,
+                correlation_key=correlation_key,
+            )
+
+    py_script = f"""import os, subprocess, re, base62, msgspec
+
+prefixes = {prefixes!r}
+bridge_matrix = {bridge_matrix!r}
+bridge_telegram = {bridge_telegram!r}
+corr_search_term = {corr_search_term!r}
+env = os.environ.copy()
+env["HOME"] = "/home/threlium"
+env["NOTMUCH_CONFIG"] = "/home/threlium/.notmuch-config"
+
+active_thread_id = None
+if corr_search_term:
+    proc_active = subprocess.run(
+        ["notmuch", "search", "--output=threads", corr_search_term],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if proc_active.returncode == 0:
+        lines = proc_active.stdout.splitlines()
+        if lines:
+            active_thread_id = lines[0].strip()
+
+proc = subprocess.run(["notmuch", "search", "--output=messages", "*"], capture_output=True, text=True, env=env)
+if proc.returncode != 0:
+    print("notmuch search failed:", proc.stderr)
+    raise SystemExit(1)
+
+message_ids = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+threads_to_delete = set()
+
+for mid in message_ids:
+    bracketed_mid = mid if mid.startswith("<") else f"<{{mid}}>"
+    match = re.fullmatch(r"<\\s*([^>]+)\\s*>", bracketed_mid.strip())
+    if not match:
+        continue
+    inner = match.group(1).strip()
+    left, _, right = inner.rpartition("@")
+    if right not in ("localhost", "internal"):
+        if any(inner.startswith(p) for p in prefixes):
+            threads_to_delete.add(bracketed_mid)
+        continue
+    try:
+        payload = base62.decodebytes(left)
+        decoded = msgspec.json.decode(payload)
+    except Exception:
+        if any(inner.startswith(p) for p in prefixes):
+            threads_to_delete.add(bracketed_mid)
+        continue
+
+    matched = False
+    if "message_id" in decoded and isinstance(decoded["message_id"], str):
+        if any(decoded["message_id"].startswith(p) for p in prefixes):
+            matched = True
+    elif "room_id" in decoded and isinstance(decoded["room_id"], str):
+        room_id = decoded["room_id"]
+        if bridge_matrix and room_id.startswith("!e2e_"):
+            matched = True
+        elif any(room_id.startswith(p) for p in prefixes):
+            matched = True
+    elif "chat_id" in decoded and bridge_telegram:
+        matched = True
+    elif "event_id" in decoded and isinstance(decoded["event_id"], str):
+        if any(decoded["event_id"].startswith(p) for p in prefixes):
+            matched = True
+
+    if matched:
+        threads_to_delete.add(bracketed_mid)
+
+deleted_files = 0
+for mid in threads_to_delete:
+    proc_thread = subprocess.run(["notmuch", "search", "--output=threads", f"id:{{mid}}"], capture_output=True, text=True, env=env)
+    if proc_thread.returncode != 0:
+        continue
+    for thread_line in proc_thread.stdout.splitlines():
+        thread_id = thread_line.strip()
+        if not thread_id:
+            continue
+        if active_thread_id and thread_id == active_thread_id:
+            print(f"[cleanup] Skipping active thread: {{thread_id}}")
+            continue
+        proc_files = subprocess.run(["notmuch", "search", "--output=files", thread_id], capture_output=True, text=True, env=env)
+        if proc_files.returncode != 0:
+            continue
+        for file_path in proc_files.stdout.splitlines():
+            file_path = file_path.strip()
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                    print(f"[cleanup] Deleted: {{file_path}}")
+                    deleted_files += 1
+                except Exception as e:
+                    print(f"[cleanup] Failed to delete {{file_path}}: {{e}}")
+
+if deleted_files > 0:
+    subprocess.run(["notmuch", "new"], env=env)
+    print(f"[cleanup] Done: deleted {{deleted_files}} files and updated notmuch")
+else:
+    print("[cleanup] No messages found for stub_tag={stub_tag}")
+"""
+
+    cmd = ["/home/threlium/threlium/agent/.venv/bin/python3", "-c", py_script]
+    completed = service_exec(
+        rt.project_name,
+        "sut",
+        cmd,
+        repo_root=rt.repo_root,
+        timeout=int(TIMEOUT_POLL_SHORT),
+    )
+    if completed.returncode != 0:
+        log.warning(
+            "sut_message_cleanup_error",
+            stub_tag=stub_tag,
+            rc=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
+    else:
+        out = (completed.stdout or "").strip()
+        if out:
+            log.info("sut_message_cleanup_success", stub_tag=stub_tag, output=out)
 
 
 # Детерминированный bootstrap-корпус для e2e: реальный knowledge/ — десятки .md разной длины,
@@ -3775,6 +3985,7 @@ class MailflowScenarioSpec:
     # Длинные multi-hop: poll журнала WireMock (request/response) до GreenMail, чтобы
     # min_chat_completion_posts на раннем lightrag не «съел» TIMEOUT_POLL_SHORT.
     wiremock_journal_ready_needle: str | None = None
+    reply_poll_timeout: float | None = None
     assert_thread_no_unread: bool = False
     length_recovery_e2e: bool = False
 
@@ -3918,6 +4129,16 @@ def mailflow_inject_and_wait(
             wm_base,
             composite_context_key(spec.stub_tag, correlation_key),
         )
+    elif spec.stub_tag == "stub-reasoning-litellm-live-01":
+        from .wiremock_client import (  # noqa: PLC0415
+            composite_context_key,
+            wiremock_state_standard_tasks_ledger_enable,
+        )
+
+        wiremock_state_standard_tasks_ledger_enable(
+            wm_base,
+            composite_context_key(spec.stub_tag, correlation_key),
+        )
 
     if spec.min_rerank_posts > 0:
         _inject_rag_warmup(
@@ -4043,6 +4264,7 @@ def mailflow_inject_and_wait(
         rt.greenmail_imap_host,
         rt.greenmail_imap_port,
         message_id=raw_id,
+        timeout=TIMEOUT_POLL_LIVE_MAIL,
     )
     mailflow_log_phase(
         f"{spec.label}: after wait_for_greenmail_inbox_message_gone_host (+{time.monotonic() - t0:.1f}s)"

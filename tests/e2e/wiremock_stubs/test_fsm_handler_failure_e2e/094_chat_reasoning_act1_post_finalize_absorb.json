@@ -1,0 +1,67 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Call-Site": {
+        "equalTo": "reasoning"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "<envelope>"
+      },
+      {
+        "contains": "\"tools\""
+      },
+      {
+        "contains": "E2E-FSM-HANDLER-FAILURE-BODY"
+      },
+      {
+        "doesNotContain": "E2E-FSM-HANDLER-FAILURE-RECOVERY"
+      }
+    ],
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-fsm-handler-failure-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasProperty": "phase_failure_act1_finalized"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-e2e-fsm-act1-post-finalize-absorb",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_e2e_fsm_act1_post_finalize_absorb",
+                "type": "function",
+                "function": {
+                  "name": "response_finalize",
+                  "arguments": "{\"reasoning\": \"e2e: absorb parallel act1 reasoning straggler after finalize\", \"subject\": \"Re: e2e reply\", \"verification_summary\": \"e2e: act1 straggler absorbed\", \"content\": \"e2e-fsm-handler-act1-settled\"}"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

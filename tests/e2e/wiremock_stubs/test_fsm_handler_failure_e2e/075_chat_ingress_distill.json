@@ -4,7 +4,7 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "fsm"
+        "equalTo": "ingress_distill"
       }
     },
     "bodyPatterns": [
@@ -16,6 +16,12 @@
       },
       {
         "contains": "ingress_distill"
+      },
+      {
+        "contains": "E2E-FSM-HANDLER-FAILURE-BODY"
+      },
+      {
+        "doesNotContain": "E2E-FSM-HANDLER-FAILURE-RECOVERY"
       }
     ],
     "customMatcher": {

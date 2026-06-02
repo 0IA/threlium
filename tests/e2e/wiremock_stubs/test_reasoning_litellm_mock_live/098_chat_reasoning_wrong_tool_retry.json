@@ -4,7 +4,7 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "fsm"
+        "equalTo": "reasoning"
       }
     },
     "bodyPatterns": [
@@ -22,7 +22,6 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-reasoning-litellm-live-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_length_recovery_e2e",
         "hasProperty": "phase_length_truncated_done",
         "hasNotProperty": "phase_tasks_ledger_done"
       }

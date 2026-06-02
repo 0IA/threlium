@@ -4,12 +4,12 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "summarize_context"
+        "equalTo": "summarize_thread_context"
       }
     },
     "bodyPatterns": [
       {
-        "contains": "context summarizer"
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -35,10 +35,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "E2E-SUM-CONTEXT-MARKER: fsm handler failure thread context summary."
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_summarize_thread_context_e2e",
+                "type": "function",
+                "function": {
+                  "name": "summarize_thread_context",
+                  "arguments": "{\"summary\": \"E2E-SUM-CONTEXT-MARKER: fsm handler failure thread context summary.\"}"
+                }
+              }
+            ]
           }
         }
       ]

@@ -4,7 +4,7 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "fsm"
+        "equalTo": "enrich_query_plan"
       }
     },
     "bodyPatterns": [
@@ -12,7 +12,7 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "Reply with ONLY the question text to send to the graph (no preamble"
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -38,10 +38,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "E2e formulated graph query for telegram wiremock live e2e (nonce {{randomValue length=16 type='ALPHANUMERIC'}})."
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_enrich_query_plan_e2e",
+                "type": "function",
+                "function": {
+                  "name": "enrich_query_plan",
+                  "arguments": "{\"formulated_query\": \"E2e formulated graph query for telegram wiremock live e2e (nonce {{randomValue length=16 type='ALPHANUMERIC'}}).\"}"
+                }
+              }
+            ]
           }
         }
       ]

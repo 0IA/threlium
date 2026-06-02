@@ -4,7 +4,7 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "fsm"
+        "equalTo": "reasoning"
       }
     },
     "bodyPatterns": [
@@ -19,6 +19,9 @@
       },
       {
         "contains": "E2E-FSM-HANDLER-FAILURE-BODY"
+      },
+      {
+        "doesNotContain": "E2E-FSM-HANDLER-FAILURE-RECOVERY"
       }
     ],
     "customMatcher": {

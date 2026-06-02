@@ -4,7 +4,7 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "fsm"
+        "equalTo": "summarize_response_buffer"
       }
     },
     "bodyPatterns": [
@@ -12,7 +12,7 @@
         "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
       },
       {
-        "contains": "response-state analyst"
+        "contains": "\"tools\""
       }
     ],
     "customMatcher": {
@@ -36,10 +36,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "**Buffer overview** — 1 live chunk, ~65 chars. The reply contains an e2e test content chunk.\n\n**Per-chunk summaries**\n- [0] E2E test chunk with observed content marker.\n\n**Structure & coherence** — Single chunk, coherent.\n\n**Completeness** — Appears complete for the test scenario.\n\n**Recommendations** — Ready to finalize."
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_summarize_response_buffer_e2e",
+                "type": "function",
+                "function": {
+                  "name": "summarize_response_buffer",
+                  "arguments": "{\"observation\": \"**Buffer overview** — 1 live chunk, ~65 chars. The reply contains an e2e test content chunk.\\n\\n**Per-chunk summaries**\\n- [0] E2E test chunk with observed content marker.\\n\\n**Structure & coherence** — Single chunk, coherent.\\n\\n**Completeness** — Appears complete for the test scenario.\\n\\n**Recommendations** — Ready to finalize.\"}"
+                }
+              }
+            ]
           }
         }
       ]

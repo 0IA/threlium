@@ -103,7 +103,7 @@ def _summarize_context_user_content_merged(
             req.get("headers"), "X-Threlium-Call-Site"
         )
         hay = _journal_request_anchor_haystack(entry)
-        if call_site != "summarize_context" and E2E_SUMMARIZE_LLM_NEEDLE not in hay:
+        if call_site != "summarize_thread_context" and E2E_SUMMARIZE_LLM_NEEDLE not in hay:
             continue
         body = _journal_chat_completion_user_content(entry)
         if body:

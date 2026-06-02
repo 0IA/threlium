@@ -1,0 +1,63 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Call-Site": {
+        "equalTo": "ingress_distill"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "\"tools\""
+      },
+      {
+        "contains": "ingress_distill"
+      },
+      {
+        "contains": "E2E-FSM-HANDLER-FAILURE-RECOVERY"
+      }
+    ],
+    "customMatcher": {
+      "name": "state-matcher",
+      "parameters": {
+        "hasContext": "stub-fsm-handler-failure-01::{{request.headers.[x-threlium-thread-root]}}"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "id": "chatcmpl-fsm_handler_failure-ingress-distill-recovery",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_ingress_distill_fsm_handler_failure_recovery",
+                "type": "function",
+                "function": {
+                  "name": "ingress_distill",
+                  "arguments": "{\"user_query\": \"E2E-FSM-HANDLER-FAILURE-RECOVERY: continue after handler failure.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill recovery for stub-fsm-handler-failure-01.\"]}"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

@@ -6,13 +6,12 @@
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "fsm"
+        "equalTo": "enrich_task_plan"
       }
     },
     "bodyPatterns": [
       {
-        "comment": "enrich task-ledger seed prompt (lightrag/enrich_task_plan.j2). Default: seed nothing so the ledger stays empty. Under fail-closed the response_finalize gate then blocks until the model records work via tasks_upsert (see test_task_ledger_empty_blocked_e2e). Per-test stubs with default priority (5) override this to seed real subtasks.",
-        "contains": "concrete, verifiable subtasks"
+        "contains": "\"tools\""
       }
     ]
   },
@@ -29,10 +28,20 @@
       "choices": [
         {
           "index": 0,
-          "finish_reason": "stop",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "[]"
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_enrich_task_plan_e2e",
+                "type": "function",
+                "function": {
+                  "name": "enrich_task_plan",
+                  "arguments": "{\"subtasks\": []}"
+                }
+              }
+            ]
           }
         }
       ]

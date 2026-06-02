@@ -30,7 +30,10 @@ from .helpers import (
     service_exec,
     smtp_inject_inbound,
     wait_for_greenmail_inbox_message_gone_host,
-    wait_for_sut_threlium_user_workers_idle,
+)
+from .wiremock_client import (
+    wiremock_public_base,
+    wiremock_unmatched_requests_count,
 )
 from .sut_user_systemd import E2E_THRELIUM_USER, e2e_threlium_user_unit_journalctl_bash
 
@@ -73,6 +76,7 @@ RECOVERY_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-fsm-handler-recovery-answer",
+    wiremock_journal_ready_needle="e2e-fsm-handler-recovery-answer",
 )
 
 
@@ -187,9 +191,18 @@ def test_fsm_handler_failure_then_recovery(e2e_runtime: E2EComposeRuntime) -> No
             _assert_journal_has_traceback(project, since=test_start_time)
             _assert_ingress_settled(project, nm_inner=nm_a)
             _wait_act1_reasoning_drained(project, nm_inner=nm_a)
-            # Act1 стабы закрывают тред через response_finalize → egress; дождаться
-            # завершения work@*, иначе act2 гоняется с хвостом act1 (reasoning new:1, нет reply).
-            wait_for_sut_threlium_user_workers_idle(project, timeout=TIMEOUT_POLL_SHORT)
+            # Не ждём глобальный idle: при ``pytest -n N`` чужие тесты держат work@* активными.
+            # Act1: drain reasoning unread + ноль unmatched (094 поглощает straggler reasoning).
+            wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+
+            def _act1_wiremock_quiet() -> bool:
+                return wiremock_unmatched_requests_count(wm) == 0
+
+            poll_until_backoff(
+                _act1_wiremock_quiet,
+                timeout=TIMEOUT_POLL_SHORT,
+                desc="act1: no WireMock unmatched before recovery inject",
+            )
 
             raw_b = f"{E2E_FSM_HANDLER_FAILURE_RECOVERY}-{uuid.uuid4().hex}@localhost"
             smtp_inject_inbound(

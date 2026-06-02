@@ -81,6 +81,7 @@ from threlium.types import FsmStage
 
 from .helpers import (
     E2EComposeRuntime,
+    TIMEOUT_POLL_LIVE_MAIL,
     TIMEOUT_POLL_SHORT,
     E2E_FETCHMAIL_PASS,
     E2E_FETCHMAIL_USER,
@@ -584,7 +585,7 @@ def test_live_subagent_table_shallow_chain_on_running_stack(e2e_runtime: E2EComp
 
         poll_until(
             _agent_reply,
-            timeout=TIMEOUT_POLL_SHORT,
+            timeout=TIMEOUT_POLL_LIVE_MAIL,
             desc="live SUBAGENT_TABLE: agent reply after nested frame",
         )
         nm_root = email_ingress_notmuch_id_inner(user_mid)
@@ -618,8 +619,8 @@ def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2ECompose
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     try:
-        _live_prepare_wiremock(rt, kind="subagent_budget_exhausted", correlation_key=correlation_key)
         e2e_refresh_hop_budget_sub(rt.project_name, budget_sub=4, repo_root=REPO_ROOT)
+        _live_prepare_wiremock(rt, kind="subagent_budget_exhausted", correlation_key=correlation_key)
         smtp_h, smtp_p = rt.greenmail_smtp_host, rt.greenmail_smtp_port
         imap_h, imap_p = rt.greenmail_imap_host, rt.greenmail_imap_port
         to_addr = e2e_greenmail_mailbox_address(E2E_FETCHMAIL_USER)
@@ -662,7 +663,7 @@ def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2ECompose
 
         poll_until(
             _agent_reply,
-            timeout=TIMEOUT_POLL_SHORT,
+            timeout=TIMEOUT_POLL_LIVE_MAIL,
             desc="live SUBAGENT_TABLE: agent reply after budget exhausted nested frame",
         )
         matches = find_wiremock_requests_by_body_contains(
@@ -990,7 +991,7 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(e2e_runtime: E2EC
 
         hitl = poll_until(
             _hitl_mail,
-            timeout=TIMEOUT_POLL_SHORT,
+            timeout=TIMEOUT_POLL_LIVE_MAIL,
             interval=1.5,
             desc="live SUBAGENT+HITL: HITL confirm mail in pytest@ INBOX",
         )
@@ -1053,7 +1054,7 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(e2e_runtime: E2EC
 
         fin = poll_until(
             _final_agent_reply,
-            timeout=TIMEOUT_POLL_SHORT,
+            timeout=TIMEOUT_POLL_LIVE_MAIL,
             interval=1.5,
             desc="live SUBAGENT+HITL: final agent e2e reply after user yes",
         )

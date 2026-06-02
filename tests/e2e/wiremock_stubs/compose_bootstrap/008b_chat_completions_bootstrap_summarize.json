@@ -8,7 +8,7 @@
         "equalTo": "e2e-bootstrap"
       },
       "X-Threlium-Call-Site": {
-        "equalTo": "lightrag_index_summarize"
+        "equalTo": "summarize_descriptions"
       }
     },
     "bodyPatterns": [
