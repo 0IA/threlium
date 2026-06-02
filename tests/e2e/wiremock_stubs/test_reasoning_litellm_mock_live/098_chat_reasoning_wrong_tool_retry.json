@@ -16,6 +16,9 @@
       },
       {
         "contains": "E2E-REASONING-LITELLM-BODY-MARKER"
+      },
+      {
+        "contains": "finish_reason=length"
       }
     ],
     "customMatcher": {
@@ -23,7 +26,8 @@
       "parameters": {
         "hasContext": "stub-reasoning-litellm-live-01::{{request.headers.[x-threlium-thread-root]}}",
         "hasProperty": "phase_length_truncated_done",
-        "hasNotProperty": "phase_tasks_ledger_done"
+        "hasNotProperty": "phase_tasks_ledger_done",
+        "hasNotProperty": "phase_standard_tasks_ledger"
       }
     }
   },

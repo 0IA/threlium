@@ -4035,6 +4035,7 @@ def _inject_rag_warmup(
     from .wiremock_client import (  # noqa: PLC0415
         composite_context_key,
         wiremock_state_seed_context,
+        wiremock_state_standard_tasks_ledger_enable,
     )
 
     cmd = [
@@ -4055,6 +4056,9 @@ def _inject_rag_warmup(
     warmup_corr = e2e_thread_root_mid_for_message_id(warmup_id)
     warmup_ctx = composite_context_key(stub_tag, warmup_corr)
     wiremock_state_seed_context(wm_base, warmup_ctx)
+    # Стандартный reasoning-путь (100_tasks → tasks_upsert → 100_egress): без
+    # phase_standard_tasks_ledger ни один reasoning-стаб не матчится → unmatched.
+    wiremock_state_standard_tasks_ledger_enable(wm_base, warmup_ctx)
 
     warmup_body = e2e_dense_threlium_ctx_body(
         head=body_head, correlation_key=warmup_corr
