@@ -7,21 +7,20 @@
   * план: ``render_prompt(PromptPath.LIGHTRAG_ENRICH_QUERY_PLAN)`` → один LLM →
     ``render_prompt(PromptPath.LIGHTRAG_ENRICH_AQUERY_USER)`` →
     ``run_rag_coroutine(rag.<query_api>(...), ...)`` (метод из ``settings.lightrag.query_api``);
-  * envelope-dict собирается в Python, JSON — через ``json.dumps`` для ``<graph-answer>``;
+  * envelope-dict собирается в Python; в ``<graph-answer>`` уходит **весь** envelope как
+    JSON (``msgspec`` indent=2, как Jinja ``| tojson(indent=2)``), не только ``llm_text``;
   * ``build_enriched_multipart`` — ``multipart/mixed`` с гранулярными MIME-частями по ``Content-ID``.
 """
 from __future__ import annotations
 
 import asyncio
 import copy
-import json
 import threading
-from collections.abc import AsyncIterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from email.message import EmailMessage
 from typing import Any
 
-from lightrag import QueryParam
+import msgspec
 
 from threlium import nm as nmlib
 from threlium.context_budget import (
@@ -33,22 +32,22 @@ from threlium.context_budget import (
     score_messages,
     solve_mckp,
 )
+from threlium.nm import require_fsm_message_id
 from threlium.settings import ThreliumSettings
 from threlium.enrich_tool_bridge import (
     parse_enrich_query_plan_assistant,
-    parse_enrich_task_hypotheses_assistant,
-    parse_enrich_task_plan_assistant,
 )
+from threlium.litellm_correlation_headers import fsm_correlation_snap
 from threlium.litellm_required_tool import (
     ainvoke_required_tool,
     build_site_call,
-    invoke_required_tool,
 )
 from threlium.litellm_tool_spec import load_tool_spec
 from threlium.litellm_route_context import e2e_route_wire_tail, get_litellm_http_correlation
 from threlium.enrich_context import build_unified_email_messages, trim_context_text, UnifiedEmailContext
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
+from threlium.ledger_context_parts import ledger_context_parts
 from threlium.logutil import logger
 from threlium.mail import email_message_from_path
 from threlium.mime_reform import (
@@ -56,11 +55,14 @@ from threlium.mime_reform import (
     EnrichPartId,
     build_enriched_multipart,
     concat_history_parts_text,
+    last_history_part_text,
 )
 from threlium.prompts import render_prompt
-from threlium.response.collect import collect_ops
-from threlium.response.state_summary import build_state_summary
-from threlium.runners.lightrag import daemon_lightrag, run_rag_coroutine
+from threlium.runners.lightrag.aquery import build_lightrag_query_param, run_lightrag_aquery
+from threlium.states.enrich_task_llm import (
+    invoke_task_hypothesis_subtasks,
+    invoke_task_plan_subtasks,
+)
 from threlium.task import (
     build_task_state_summary,
     collect_task_ops,
@@ -84,6 +86,8 @@ from threlium.types import (
     NotmuchMessageIdInner,
     PromptPath,
     RfcMessageIdWire,
+    SummarizeContextBatch,
+    SummarizeContextStagePayload,
     TaskLedger,
     TaskSubtaskContentId,
     TaskSubtaskText,
@@ -94,27 +98,6 @@ log = logger.bind(stage="enrich")
 
 _HDR = MailHeaderName
 
-_ALLOWED_QUERY_MODES = frozenset(
-    {"local", "global", "hybrid", "naive", "mix", "bypass"}
-)
-
-
-def _query_param(cfg: ThreliumSettings) -> QueryParam:
-    raw = (cfg.lightrag.query_mode or "hybrid").strip().lower()
-    mode = raw if raw in _ALLOWED_QUERY_MODES else "hybrid"
-    base = QueryParam()
-    return replace(
-        base,
-        mode=mode,  # type: ignore[arg-type]
-        top_k=cfg.lightrag.query_top_k,
-        chunk_top_k=cfg.lightrag.query_chunk_top_k,
-        max_total_tokens=cfg.lightrag.query_max_total_tokens,
-        max_entity_tokens=cfg.lightrag.query_max_entity_tokens,
-        max_relation_tokens=cfg.lightrag.query_max_relation_tokens,
-        response_type=cfg.lightrag.query_response_type,
-        enable_rerank=cfg.lightrag.enable_rerank,
-    )
-
 
 async def _enrich_llm_plan(cfg: ThreliumSettings, user_prompt: str) -> str:
     """Один tool-вызов ``enrich_query_plan`` для формулировки запроса к LightRAG."""
@@ -124,9 +107,7 @@ async def _enrich_llm_plan(cfg: ThreliumSettings, user_prompt: str) -> str:
         [LiteLlmChatMessage(role="user", content=user_prompt)],
     )
     tool_spec = load_tool_spec(PromptPath.LIGHTRAG_ENRICH_QUERY_PLAN_TOOL_SPEC)
-    correlation = (
-        get_litellm_http_correlation() if cfg.e2e.litellm_route_correlation else None
-    )
+    correlation = fsm_correlation_snap(None, cfg)
     assistant = await ainvoke_required_tool(
         settings=cfg,
         call=call,
@@ -185,6 +166,27 @@ def _build_lightrag_envelope(
     return envelope
 
 
+def _serialize_graph_answer(envelope: dict[str, Any]) -> str:
+    """``<graph-answer>`` = весь envelope-dict как JSON (CONTEXT_CONTRACT §4, TYPES).
+
+    Сериализация через ``msgspec`` (indent=2, как Jinja ``| tojson(indent=2)``), не только
+    ``llm_text``. Пусто, если ``ok=false`` или нет ни ``llm_text``, ни ``raw`` (сохраняет
+    прежнее budget-поведение «нет ответа графа»). При непредставимом ``lightrag.raw`` —
+    деградация до ``llm_text``, чтобы не валить критический путь enrich.
+    """
+    lr = envelope.get("lightrag", {})
+    llm_text = lr.get("llm_text") if isinstance(lr, dict) else None
+    llm_text_str = llm_text.strip() if isinstance(llm_text, str) and llm_text.strip() else ""
+    has_content = bool(llm_text_str or (isinstance(lr, dict) and lr.get("raw")))
+    if not envelope.get("ok") or not has_content:
+        return ""
+    try:
+        return msgspec.json.format(msgspec.json.encode(envelope), indent=2).decode("utf-8")
+    except (TypeError, ValueError, msgspec.MsgspecError) as exc:
+        log.warning("graph_answer_envelope_unserializable", error=str(exc))
+        return llm_text_str
+
+
 @dataclass(frozen=True)
 class EnrichResult:
     """Гранулярные компоненты enriched-контекста (заменяет монолитный payload)."""
@@ -193,25 +195,6 @@ class EnrichResult:
     unified_mail_context: EnrichUnifiedMailContextText | None
     thread_memory: EnrichThreadMemoryText | None
     global_memory: EnrichGlobalMemoryText | None
-
-
-def _collect_extra_parts(
-    inner: NotmuchMessageIdInner, limit: int
-) -> list[tuple[EnrichContentId, str]]:
-    """Пересчёт ``<response-state>`` из CRDT для полного enrich.
-
-    Carry-over relay-частей из E_prev убран: после унификации полный enrich обновляет
-    контекст через LightRAG + ``<unified-mail-context>`` (собранный из ``<history>``-частей
-    треда по :func:`message_has_history`), а не переносом хвоста E_prev. ``<task-state>``
-    enrich пересобирает детерминированно отдельно (как ``<response-state>``).
-    """
-    parts: list[tuple[EnrichContentId, str]] = []
-    ops = collect_ops(inner)
-    summary = build_state_summary(ops)
-    trimmed = trim_context_text(summary, limit)
-    if trimmed:
-        parts.append((EnrichContentId.from_part_id(EnrichPartId.RESPONSE_STATE), trimmed))
-    return parts
 
 
 def _parse_subtask_defs(
@@ -254,38 +237,11 @@ def _build_task_seed_defs(
     existing_ops = collect_task_ops(inner)
     existing_ledger = reduce_task_ops(existing_ops)
 
-    plan_prompt = render_prompt(
-        PromptPath.LIGHTRAG_ENRICH_TASK_PLAN,
-        incoming_user_message=user_message_text,
-        existing_subtasks=[
-            {"content_id": s.content_id.value, "text": s.text.value, "status": s.status.value}
-            for s in existing_ledger.subtasks
-        ],
+    subtasks = invoke_task_plan_subtasks(
+        config=config,
+        user_message_text=user_message_text,
+        existing_ledger=existing_ledger,
     )
-    call = build_site_call(
-        config,
-        LitellmRoutingSite.ENRICH_PLAN,
-        [LiteLlmChatMessage(role="user", content=plan_prompt)],
-    )
-    tool_spec = load_tool_spec(PromptPath.LIGHTRAG_ENRICH_TASK_PLAN_TOOL_SPEC)
-    correlation = (
-        get_litellm_http_correlation()
-        if config.e2e.litellm_route_correlation
-        else None
-    )
-    try:
-        assistant = invoke_required_tool(
-            settings=config,
-            call=call,
-            tool_spec=tool_spec,
-            correlation_snap=correlation,
-            context="enrich_task_plan",
-        )
-        subtasks = parse_enrich_task_plan_assistant(assistant).subtasks
-    except Exception as exc:  # noqa: BLE001 — fail-open: seed опционален, ledger не обязателен
-        log.warning("task_plan_llm_failed", error=str(exc))
-        subtasks = []
-
     seed_defs = _parse_subtask_defs(
         subtasks, name="enrich_task_plan.subtask", exclude_ids=frozenset()
     )
@@ -315,47 +271,17 @@ def _build_task_hypothesis_defs(
     Тот же каркас, что seed (другой site/prompt/tool). Гипотезы дедуплицируются против
     seed+существующих подзадач (``ledger_after_seed``). Fail-open: ошибка LLM → ``[]``.
     """
-    prompt = trim_context_text(
-        render_prompt(
-            PromptPath.LIGHTRAG_ENRICH_TASK_HYPOTHESES,
-            incoming_user_message=user_message_text,
-            graph_answer=result.graph_answer.value if result.graph_answer else "",
-            unified_mail_context=(
-                result.unified_mail_context.value if result.unified_mail_context else ""
-            ),
-            thread_memory=result.thread_memory.value if result.thread_memory else "",
-            global_memory=result.global_memory.value if result.global_memory else "",
-            existing_subtasks=[
-                {"content_id": s.content_id.value, "text": s.text.value, "status": s.status.value}
-                for s in ledger_after_seed.subtasks
-            ],
+    subtasks = invoke_task_hypothesis_subtasks(
+        config=config,
+        user_message_text=user_message_text,
+        graph_answer=result.graph_answer.value if result.graph_answer else "",
+        unified_mail_context=(
+            result.unified_mail_context.value if result.unified_mail_context else ""
         ),
-        config.enrich.context_max_chars,
+        thread_memory=result.thread_memory.value if result.thread_memory else "",
+        global_memory=result.global_memory.value if result.global_memory else "",
+        ledger_after_seed=ledger_after_seed,
     )
-    call = build_site_call(
-        config,
-        LitellmRoutingSite.ENRICH_TASK_HYPOTHESES,
-        [LiteLlmChatMessage(role="user", content=prompt)],
-    )
-    tool_spec = load_tool_spec(PromptPath.LIGHTRAG_ENRICH_TASK_HYPOTHESES_TOOL_SPEC)
-    correlation = (
-        get_litellm_http_correlation()
-        if config.e2e.litellm_route_correlation
-        else None
-    )
-    try:
-        assistant = invoke_required_tool(
-            settings=config,
-            call=call,
-            tool_spec=tool_spec,
-            correlation_snap=correlation,
-            context="enrich_task_hypotheses",
-        )
-        subtasks = parse_enrich_task_hypotheses_assistant(assistant).subtasks
-    except Exception as exc:  # noqa: BLE001 — fail-open: гипотезы опциональны
-        log.warning("task_hypotheses_llm_failed", error=str(exc))
-        return []
-
     hyp_defs = _parse_subtask_defs(
         subtasks,
         name="enrich_task_hypotheses.subtask",
@@ -376,6 +302,7 @@ def _finalize_task_mime_parts(
     existing_ops: list[TaskOp],
     fallback_ledger: TaskLedger,
     inner: NotmuchMessageIdInner,
+    limit: int,
 ) -> tuple[list[tuple[EnrichContentId, str]], TaskLedger]:
     """Один ``<task-init>`` (seed + late-гипотезы) + детерминированный ``<task-state>``.
 
@@ -401,8 +328,13 @@ def _finalize_task_mime_parts(
     else:
         combined = fallback_ledger
 
+    # <task-state> усекается симметрично <response-state> (CONTEXT_CONTRACT §4/§6):
+    # детерминированный recompute не должен переполнять бюджет extra-части.
     parts.append(
-        (EnrichContentId.from_part_id(EnrichPartId.TASK_STATE), build_task_state_summary(combined))
+        (
+            EnrichContentId.from_part_id(EnrichPartId.TASK_STATE),
+            trim_context_text(build_task_state_summary(combined), limit),
+        )
     )
     log.info(
         "task_finalize",
@@ -526,53 +458,25 @@ async def _enrich_async(
     system_prompt = render_prompt(
         LightragPromptLibraryKey.RAG_RESPONSE.prompt_path(), scope=scope
     )
-    rag = daemon_lightrag()
-    if rag is None:
-        raise RuntimeError("enrich: LightRAG daemon is not running (start_rag_loop_thread)")
-
-    qparam = _query_param(cfg)
     api = cfg.lightrag.query_api
+    qparam = build_lightrag_query_param(cfg)
 
-    async def _rag_query(q: str) -> dict[str, Any] | str | None:
-        if api == "aquery":
-            raw = await rag.aquery(
-                q,
-                param=qparam,
-                system_prompt=system_prompt,
-            )
-            if isinstance(raw, AsyncIterator):
-                raise RuntimeError("enrich: streaming LightRAG aquery is not supported")
-            if raw is None:
-                return None
-            if not isinstance(raw, str):
-                raise RuntimeError(
-                    f"enrich: unexpected aquery return type {type(raw).__name__!r}"
-                )
-            return raw.strip() or None
-        elif api == "aquery_data":
-            return await rag.aquery_data(
-                q,
-                param=qparam,
-            )
-        elif api == "aquery_llm":
-            return await rag.aquery_llm(
-                q,
-                param=qparam,
-                system_prompt=system_prompt,
-            )
-        else:
-            raise RuntimeError(f"enrich: unknown query_api {api!r}")
-
-    raw_result = run_rag_coroutine(
-        _rag_query(aquery_question), settings=cfg, correlation=rag_correlation
+    raw_result = run_lightrag_aquery(
+        aquery_question,
+        settings=cfg,
+        correlation=rag_correlation,
+        system_prompt=system_prompt,
     )
 
     retried = False
     if _is_empty_rag_result(raw_result, api):
         log.info("enrich_rag_retry", reason="empty_first_attempt", formulated=formulated)
         retry_query = question if formulated != question else f"key facts about: {question}"
-        raw_result = run_rag_coroutine(
-            _rag_query(retry_query), settings=cfg, correlation=rag_correlation
+        raw_result = run_lightrag_aquery(
+            retry_query,
+            settings=cfg,
+            correlation=rag_correlation,
+            system_prompt=system_prompt,
         )
         retried = True
         if _is_empty_rag_result(raw_result, api):
@@ -592,11 +496,7 @@ async def _enrich_async(
         ok=lightrag_envelope.get("ok"),
     )
 
-    llm_text = lightrag_envelope.get("lightrag", {}).get("llm_text")
-    if llm_text and isinstance(llm_text, str) and llm_text.strip():
-        graph_answer_raw = llm_text.strip()
-    else:
-        graph_answer_raw = ""
+    graph_answer_raw = _serialize_graph_answer(lightrag_envelope)
 
     _preview = cfg.enrich.tier_preview_chars
     _tier1 = cfg.enrich.tier1_full
@@ -792,7 +692,15 @@ def _emit_summarize_overflow(
             "overflow summarize: no messages with non-empty <history> in batch"
         )
 
-    payload = json.dumps({"summarize": {"mids": mids, "bodies": bodies}}, ensure_ascii=False)
+    # Канонический ход пользователя (последняя <history> входящего) едет неизменным по циклу
+    # summarize: re-trigger enrich обязан повторить тот же user message (CONTEXT_CONTRACT §5).
+    user_query = last_history_part_text(msg)
+    payload = msgspec.json.encode(
+        SummarizeContextStagePayload(
+            summarize=SummarizeContextBatch(mids=mids, bodies=bodies),
+            user_query=user_query,
+        )
+    ).decode("utf-8")
     log.info(
         "overflow_to_summarize",
         candidate_count=len(mids),
@@ -810,8 +718,7 @@ def _emit_summarize_overflow(
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
-    mid_w = RfcMessageIdWire.parse_present_from_email(msg, _HDR.MESSAGE_ID)
-    inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
+    _mid_w, inner = require_fsm_message_id(msg, "enrich")
     tid_vo = nmlib.thread_id_for_optional_message_id(inner)
     if tid_vo is None:
         raise RuntimeError("enrich: notmuch has no thread_id for this message (is it indexed yet?)")
@@ -862,7 +769,7 @@ def main(
             snap_keys=sorted(snap.keys()) if snap else [],
             route_header_present=bool(snap and route_k in snap),
             route_tail=e2e_route_wire_tail(rt),
-            message_id=mid_w.value if mid_w else None,
+            message_id=_mid_w.value if _mid_w else None,
         )
         rag_correlation = dict(snap) if snap else None
         if rag_correlation is not None:
@@ -873,7 +780,7 @@ def main(
             "asyncio_run_starting",
             fsm_thread=th.name,
             ident=threading.get_ident(),
-            message_id=mid_w.value if mid_w else None,
+            message_id=_mid_w.value if _mid_w else None,
         )
     mckp_capacity = max(0, limit - budget_user - budget_extra)
 
@@ -943,9 +850,10 @@ def main(
             existing_ops=existing_task_ops,
             fallback_ledger=ledger_after_seed,
             inner=inner,
+            limit=budget_extra,
         )
 
-    extra_parts = _collect_extra_parts(inner, budget_extra) if inner is not None else []
+    extra_parts = ledger_context_parts(inner, budget_extra) if inner is not None else []
     extra_parts.extend(task_parts)
 
     enriched = build_enriched_multipart(

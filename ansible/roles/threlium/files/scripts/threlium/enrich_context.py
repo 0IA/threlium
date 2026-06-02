@@ -12,7 +12,7 @@ from threlium.logutil import logger
 from threlium.settings import ThreliumSettings
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.mail import email_message_from_path
-from threlium.mime_reform import iter_history_parts, message_has_history
+from threlium.mime_reform import EnrichContentId, iter_history_parts, message_has_history
 from threlium.types import (
     FsmStage,
     MailHeaderName,
@@ -123,7 +123,7 @@ def build_unified_email_messages(
     # Лист (текущий ingress→enrich) включаем: distill-метаданные в unified с первого хода;
     # ``user_query`` может кратко дублировать ``<user-message>`` (последняя history).
     _summarized_tag = NotmuchTag.CONTEXT_SUMMARIZED.value
-    seen_cids: set[str] = set()
+    seen_cids: set[EnrichContentId] = set()
     seen_mids: set[str] = set()
     kept: list[EmailMessage] = []
     for snap in reversed(tail_snaps):
@@ -139,7 +139,11 @@ def build_unified_email_messages(
         except OSError as exc:
             log.warning("unified_load_path_skipped", path=str(snap.path), exc_msg=str(exc))
             continue
-        cids = {cid.value for cid, _part in iter_history_parts(m)}
+        # Содержательность — строго предикат message_has_history (≥1 непустая <history>),
+        # без get_body / «первый text/plain» (CONTEXT_CONTRACT §5).
+        if not message_has_history(m):
+            continue
+        cids = {cid for cid, _part in iter_history_parts(m)}
         if not cids:
             continue
         if cids <= seen_cids:

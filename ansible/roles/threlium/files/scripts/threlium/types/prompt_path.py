@@ -76,6 +76,9 @@ class PromptPath(StrEnum):
     REFLECT_CONTINUE = "reflect/continue.j2"
     REFLECT_FINAL = "reflect/final.j2"
 
+    THREAD_MEMORY_BASE = "thread_memory/base.j2"
+    GLOBAL_MEMORY_BASE = "global_memory/base.j2"
+
     REASONING_USER = "reasoning/user.j2"
     REASONING_SYSTEM = "reasoning/system.j2"
     REASONING_LENGTH_RECOVERY_SYSTEM = "reasoning/length_recovery_system.j2"
