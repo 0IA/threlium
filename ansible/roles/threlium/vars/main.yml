@@ -187,6 +187,8 @@ threlium_required_prompts:
   - lightrag/tools/enrich_query_plan_tool_spec.j2
   - reflect/continue.j2
   - reflect/final.j2
+  - thread_memory/base.j2
+  - global_memory/base.j2
   - cli_intent/invalid.j2
   - cli_intent/invalid_subject.j2
   - cli_intent/denied.j2
