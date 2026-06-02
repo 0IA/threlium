@@ -49,7 +49,7 @@ domain) — поэтому пара «команда + её history-копия»
   >1 части → `RuntimeError` (инвариант «payload только в `<system>`»). Это замена
   `extract_plain_body` для всех внутренних чтений payload.
 - **Не релеится и не индексируется**: `system` не входит в `RELAY_FAMILIES`; LightRAG-drain
-  его игнорирует (память несёт парная `<history>`-копия, §7).
+  его игнорирует (память несёт парную `<history>`-копию через **request_echo** на исходящем L_M2, §7–§8).
 - Создаётся `build_fsm_step_to_stage(..., system=...)` или legacy `build_fsm_plain_to_stage`
   (тоже оборачивает body в `<system>`).
 - **Внешняя граница**: мост (`bridge`) на входе извлекает тело внешнего письма
@@ -145,8 +145,8 @@ flowchart LR
 | Стадия | To: | echo | resp | sys | Роль |
 |---|---|:--:|:--:|:--:|---|
 | `subagent_end` | `ingress` | — | релей | релей | Возврат результата субагента (preserving). `<history>`-финализация субагента пробрасывается и видна родителю на границе фрейма (симметрично request-echo в `subagent_intent`). |
-| `summarize_context` | `summarize_memory` | — | да | — | Сводка хвоста контекста → `<history>` (durable, переживает дренаж). |
-| `summarize_memory` | `enrich` | — | — | да | Дренаж сводки в полный enrich (`<system>`). |
+| `summarize_context` | `summarize_memory` | — | да | да | Сводка хвоста → `<history>` (durable, переживает дренаж) + канонический `user_query` релеем в `<system>`. |
+| `summarize_memory` | `enrich` | — | да | — | Дренаж в полный enrich: `user_query` из `<system>` → `<history>` (re-trigger повторяет тот же ход; сводку enrich видит из unified, §5). |
 | `egress_router` | `egress_*` / `subagent_end` | — | релей | релей | Маршрутизация по каналам; части письма не меняет. |
 | `egress_email` / `egress_telegram` / `egress_matrix` | — (терминал) | — | — | читает | Строят внешнее письмо **только из `<system>`** (`system_part_text`); ничего не эмитят. |
 | `archive` | — (терминал) | — | — | — | Оседает в Maildir/union-index; ничего не эмитит. |
@@ -272,6 +272,14 @@ batch = первые `summarize_batch_max_messages` писем из `ctx.all_mes
 `test_summarize_overflow_full_pipeline` — **3 prior-хода + main**, накопление unified под cap
 distill, overflow на enrich главного хода (брифинг:
 `docs/briefing/summarize_context_overflow_e2e_briefing.md`).
+
+**Цикл user_query.** Суммаризация не меняет ход пользователя, поэтому канонический `user_query`
+(последняя `<history>` входящего enrich) едет неизменным по `enrich → summarize_context →
+summarize_memory → enrich`: enrich кладёт его в `SummarizeContextStagePayload.user_query`,
+`summarize_context` релеит его в `<system>` (рядом со сводкой в `<history>`), `summarize_memory`
+возвращает его enrich как `<history>`. Re-trigger enrich читает тот же `user_query` через
+`last_history_text` и не переполняется снова (оригиналы помечены `context_summarized`, сводка
+уже в unified).
 
 Код: `states/ingress.py` (`_emit_to_enrich`), `ingress_distill.py`, `types/ingress_distill.py`,
 `prompts/lightrag/enrich_incoming_user_text.j2`, `enrich_context.py`, `states/enrich.py`.
