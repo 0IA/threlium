@@ -613,7 +613,7 @@ def test_live_subagent_table_shallow_chain_on_running_stack(e2e_runtime: E2EComp
 
 
 def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2EComposeRuntime) -> None:
-    """L1 ``subagent_intent`` when hop budget exhausted → ingress notice (``budget_exhausted.j2``)."""
+    """L1 ``subagent_intent`` when hop budget exhausted → enrich notice (``budget_exhausted.j2``)."""
     rt = e2e_runtime
     user_mid = f"e2e-sat-budget-{uuid.uuid4().hex}@localhost"
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)

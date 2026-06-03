@@ -8,8 +8,8 @@
 - observe: append → observe → finalize (buffer)
 - edit_replace: append → edit(replace) → finalize
 - edit_delete: append×2 → edit(delete) → finalize
-- finalize_mode4: пустой finalize → ingress loop → recovery finalize
-- edit_invalid_position: append → edit(position=999) → ingress → recovery finalize
+- finalize_mode4: пустой finalize → enrich loop → recovery finalize
+- edit_invalid_position: append → edit(position=999) → enrich → recovery finalize
 """
 from __future__ import annotations
 
@@ -279,7 +279,7 @@ def test_response_edit_delete_chunk(
 
 
 # ---------------------------------------------------------------------------
-# Scenario: response_finalize Mode 4 (empty → ingress recovery loop)
+# Scenario: response_finalize Mode 4 (empty → enrich recovery loop)
 # ---------------------------------------------------------------------------
 
 E2E_FIN_MODE4_BODY_MARKER = "E2E-RESP-FIN-MODE4-MARKER"
@@ -310,7 +310,7 @@ FINALIZE_MODE4_SPEC = MailflowScenarioSpec(
 def test_response_finalize_mode4_ingress_recovery(
     e2e_runtime: E2EComposeRuntime,
 ) -> None:
-    """RESPONSE_TABLE: response_finalize(Mode 4: empty) → ingress → recovery finalize."""
+    """RESPONSE_TABLE: response_finalize(Mode 4: empty) → enrich → recovery finalize."""
     with mailflow_inject_and_wait(FINALIZE_MODE4_SPEC, e2e_runtime.project_name) as (
         project,
         raw_id,
@@ -337,7 +337,7 @@ def test_response_finalize_mode4_ingress_recovery(
 
 
 # ---------------------------------------------------------------------------
-# Scenario: response_edit (invalid position → ingress recovery)
+# Scenario: response_edit (invalid position → enrich recovery)
 # ---------------------------------------------------------------------------
 
 E2E_EDIT_INVALID_BODY_MARKER = "E2E-RESP-EDIT-INVALID-MARKER"
@@ -372,7 +372,7 @@ EDIT_INVALID_SPEC = MailflowScenarioSpec(
 def test_response_edit_invalid_position_recovery(
     e2e_runtime: E2EComposeRuntime,
 ) -> None:
-    """RESPONSE_TABLE: response_edit(position=999) → ingress (graceful) → recovery finalize."""
+    """RESPONSE_TABLE: response_edit(position=999) → enrich (graceful) → recovery finalize."""
     with mailflow_inject_and_wait(EDIT_INVALID_SPEC, e2e_runtime.project_name) as (
         project,
         raw_id,

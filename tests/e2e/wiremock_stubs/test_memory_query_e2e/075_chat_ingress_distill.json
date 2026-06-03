@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_query\": \"E2E-MEMORY-QUERY-BODY: run memory_query retrieval and verify marker in embedding pipeline.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-memory-query-01.\"]}"
+                  "arguments": "{\"user_intent\": \"E2E-MEMORY-QUERY-BODY: run memory_query retrieval and verify marker in embedding pipeline.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-memory-query-01.\"]}"
                 }
               }
             ]

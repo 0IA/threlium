@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_query\": \"E2E-TASK-LEDGER-ALLCANCEL-BODY: task ledger all cancelled guard.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-task-ledger-allcancel-01.\"]}"
+                  "arguments": "{\"user_intent\": \"E2E-TASK-LEDGER-ALLCANCEL-BODY: task ledger all cancelled guard.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-task-ledger-allcancel-01.\"]}"
                 }
               }
             ]

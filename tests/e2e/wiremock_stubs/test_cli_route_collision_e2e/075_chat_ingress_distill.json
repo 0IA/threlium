@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_query\":\"E2E-CLI-ROUTE-COLLISION-BODY: memory_query argv triggers CliRouteCollision enrich_fast relay, not cli_exec.\",\"user_reply_language\":\"English\",\"open_gaps\":[],\"step_back_notes\":[\"Cli route collision e2e.\"]}"
+                  "arguments": "{\"user_intent\":\"E2E-CLI-ROUTE-COLLISION-BODY: memory_query argv triggers CliRouteCollision enrich_fast relay, not cli_exec.\",\"user_reply_language\":\"English\",\"open_gaps\":[],\"step_back_notes\":[\"Cli route collision e2e.\"]}"
                 }
               }
             ]

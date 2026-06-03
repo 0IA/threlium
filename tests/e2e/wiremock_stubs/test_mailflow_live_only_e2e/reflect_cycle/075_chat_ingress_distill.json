@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_query\": \"MEMORY_TABLE §3 live body reflect-cyc-01\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-mailflow-live-reflect-cyc-01.\"]}"
+                  "arguments": "{\"user_intent\": \"MEMORY_TABLE §3 live body reflect-cyc-01\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-mailflow-live-reflect-cyc-01.\"]}"
                 }
               }
             ]

@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_query\":\"E2E subagent response buffer frame isolation: verify L0 response_append buffer does not leak into L1 finalize reasoning prompt.\",\"user_reply_language\":\"English\",\"open_gaps\":[],\"step_back_notes\":[\"Subagent IrtSubagentMarker frame isolation smoke.\"]}"
+                  "arguments": "{\"user_intent\":\"E2E subagent response buffer frame isolation: verify L0 response_append buffer does not leak into L1 finalize reasoning prompt.\",\"user_reply_language\":\"English\",\"open_gaps\":[],\"step_back_notes\":[\"Subagent IrtSubagentMarker frame isolation smoke.\"]}"
                 }
               }
             ]
