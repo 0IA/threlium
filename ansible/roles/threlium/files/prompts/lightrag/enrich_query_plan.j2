@@ -27,7 +27,7 @@ query pull what the next reasoning step needs to verify, not a restatement of th
 {% if subject_skeleton %}
 --- thread timeline ({{ subject_skeleton | length }} older messages, subjects only) ---
 {% for entry in subject_skeleton %}
-{{ entry.date }} | {{ entry.from }} | {{ entry.subject }}
+{{ entry.date }} | {{ entry.from_hdr }} | {{ entry.subject }}
 {% endfor %}
 
 {% endif %}
@@ -35,11 +35,11 @@ query pull what the next reasoning step needs to verify, not a restatement of th
 --- recent messages (last {{ recent_messages | length }}, distilled history) ---
 {% for msg in recent_messages %}
 --- message ---
-From: {{ msg.get('From', '') }}
-To: {{ msg.get('To', '') }}
-Date: {{ msg.get('Date', '') }}
-Subject: {{ msg.get('Subject', '') }}
-{{ msg | history_text }}
+From: {{ msg.from_hdr }}
+To: {{ msg.to_hdr }}
+Date: {{ msg.date }}
+Subject: {{ msg.subject }}
+{{ msg.history_text }}
 
 {% endfor %}
 {% endif %}

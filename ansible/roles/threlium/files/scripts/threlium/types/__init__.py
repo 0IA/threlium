@@ -148,6 +148,10 @@ from .lightrag_tool_wire import (
 )
 from .cli_hitl_tool_args import ConfirmCliHitlToolArgs
 from .cli_hitl_tool_function import CliHitlBridgeError, CliHitlToolFunctionName
+from .enrich import (
+    EnrichQueryPlanRecentMessageEntry,
+    EnrichQueryPlanThreadSkeletonEntry,
+)
 from .enrich_tool_args import (
     EnrichQueryPlanToolArgs,
     EnrichTaskHypothesesToolArgs,
@@ -296,6 +300,8 @@ __all__ = [
     "EmailIngressRoute",
     "EmailNativeId",
     "EnrichLightragQuestionSubjectLine",
+    "EnrichQueryPlanRecentMessageEntry",
+    "EnrichQueryPlanThreadSkeletonEntry",
     "EnrichQueryPlanToolArgs",
     "EnrichTaskHypothesesToolArgs",
     "EnrichTaskPlanToolArgs",

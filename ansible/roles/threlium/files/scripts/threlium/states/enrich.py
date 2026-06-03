@@ -73,6 +73,8 @@ from threlium.task.ops import TaskInitOp, TaskOp, TaskSubtaskDef
 from threlium.types import (
     EnrichGlobalMemoryText,
     EnrichGraphAnswerText,
+    EnrichQueryPlanRecentMessageEntry,
+    EnrichQueryPlanThreadSkeletonEntry,
     EnrichThreadMemoryText,
     EnrichUnifiedMailContextText,
     FsmTransitionPlainBody,
@@ -97,6 +99,15 @@ from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 log = logger.bind(stage="enrich")
 
 _HDR = MailHeaderName
+
+# Level-1 MCKP: полезность варианта бакета (``solve_mckp`` максимизирует value × priority).
+_MCKP_VALUE_NONE = 0.0
+_MCKP_UNIFIED_VALUE_FULL = 1.0
+_MCKP_UNIFIED_VALUE_MEDIUM = 0.6
+_MCKP_UNIFIED_VALUE_COMPACT = 0.3
+_MCKP_BUCKET_SIGNAL_PRESENT = 1.0
+_MCKP_BUCKET_SIGNAL_ABSENT = 0.0
+_MCKP_BUCKET_MEDIUM_VALUE_RATIO = 0.5
 
 
 async def _enrich_llm_plan(cfg: ThreliumSettings, user_prompt: str) -> str:
@@ -424,20 +435,20 @@ async def _enrich_async(
     _plan_recent_n = cfg.enrich.plan_recent_n
     _recent_msgs = ctx.all_messages[-_plan_recent_n:] if ctx.all_messages else []
     _older_msgs = ctx.all_messages[:-_plan_recent_n] if len(ctx.all_messages) > _plan_recent_n else []
-    _subject_skeleton = [
-        {
-            "date": m.get("Date", ""),
-            "from": m.get("From", ""),
-            "subject": m.get("Subject", ""),
-        }
+    subject_skeleton = [
+        EnrichQueryPlanThreadSkeletonEntry.from_email(m).for_query_plan_jinja()
         for m in _older_msgs
+    ]
+    recent_messages = [
+        EnrichQueryPlanRecentMessageEntry.from_email(m).for_query_plan_jinja()
+        for m in _recent_msgs
     ]
     plan_prompt = render_prompt(
         PromptPath.LIGHTRAG_ENRICH_QUERY_PLAN,
         incoming_user_message=question,
         scope=scope,
-        recent_messages=_recent_msgs,
-        subject_skeleton=_subject_skeleton,
+        recent_messages=recent_messages,
+        subject_skeleton=subject_skeleton,
         subtasks=subtask_texts,
     )
     plan_prompt = trim_context_text(plan_prompt, mckp_capacity)
@@ -513,20 +524,26 @@ async def _enrich_async(
     unified_configs = [
         BucketConfig(bucket=EnrichPartId.UNIFIED_MAIL_CONTEXT, tier=BucketConfigTier.FULL,
                      weight=estimate_unified_weight(scored, _tier1, _tier2, _preview) if scored else 0,
-                     value=1.0, tier1_count=_tier1, tier2_count=_tier2),
+                     value=_MCKP_UNIFIED_VALUE_FULL, tier1_count=_tier1, tier2_count=_tier2),
         BucketConfig(bucket=EnrichPartId.UNIFIED_MAIL_CONTEXT, tier=BucketConfigTier.MEDIUM,
                      weight=estimate_unified_weight(scored, _tier1_med, _tier2_med, _preview) if scored else 0,
-                     value=0.6, tier1_count=_tier1_med, tier2_count=_tier2_med),
+                     value=_MCKP_UNIFIED_VALUE_MEDIUM, tier1_count=_tier1_med, tier2_count=_tier2_med),
         BucketConfig(bucket=EnrichPartId.UNIFIED_MAIL_CONTEXT, tier=BucketConfigTier.COMPACT,
                      weight=estimate_unified_weight(scored, _tier1, 0, _preview) if scored else 0,
-                     value=0.3, tier1_count=_tier1, tier2_count=0),
+                     value=_MCKP_UNIFIED_VALUE_COMPACT, tier1_count=_tier1, tier2_count=0),
         BucketConfig(bucket=EnrichPartId.UNIFIED_MAIL_CONTEXT, tier=BucketConfigTier.EMPTY,
-                     weight=0, value=0.0, tier1_count=0, tier2_count=0),
+                     weight=0, value=_MCKP_VALUE_NONE, tier1_count=0, tier2_count=0),
     ]
 
-    graph_signal = 1.0 if graph_answer_raw.strip() else 0.0
-    thread_signal = 1.0 if ctx.thread_memory_msgs else 0.0
-    global_signal = 1.0 if ctx.global_memory_msgs else 0.0
+    graph_signal = (
+        _MCKP_BUCKET_SIGNAL_PRESENT if graph_answer_raw.strip() else _MCKP_BUCKET_SIGNAL_ABSENT
+    )
+    thread_signal = (
+        _MCKP_BUCKET_SIGNAL_PRESENT if ctx.thread_memory_msgs else _MCKP_BUCKET_SIGNAL_ABSENT
+    )
+    global_signal = (
+        _MCKP_BUCKET_SIGNAL_PRESENT if ctx.global_memory_msgs else _MCKP_BUCKET_SIGNAL_ABSENT
+    )
 
     graph_full_weight = len(graph_answer_raw)
     graph_medium_weight = graph_full_weight // 2
@@ -545,11 +562,13 @@ async def _enrich_async(
         ]
         if medium_weight > 0 and medium_weight < full_weight:
             configs.append(BucketConfig(bucket=bucket, tier=BucketConfigTier.MEDIUM,
-                                        weight=medium_weight, value=0.5 * signal,
+                                        weight=medium_weight,
+                                        value=_MCKP_BUCKET_MEDIUM_VALUE_RATIO * signal,
                                         tier1_count=0, tier2_count=0))
         if allow_empty:
             configs.append(BucketConfig(bucket=bucket, tier=BucketConfigTier.EMPTY,
-                                        weight=0, value=0.0, tier1_count=0, tier2_count=0))
+                                        weight=0, value=_MCKP_VALUE_NONE,
+                                        tier1_count=0, tier2_count=0))
         return configs
 
     bucket_configs_map: dict[EnrichPartId, list[BucketConfig]] = {
