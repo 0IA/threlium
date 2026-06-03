@@ -43,7 +43,7 @@ class FileLoc:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[3]
+    return Path(__file__).resolve().parents[1]
 
 
 def _default_product_root() -> Path:

@@ -6,7 +6,7 @@ A self-hosted AI agent built from Unix primitives: Maildir, systemd, **fdm**, no
 
 ## Features
 
-- **~11k lines of Python (SLOC)** — FSM handlers and runners (`threlium/`, without `types/`); configs, prompts, and Ansible instead of frameworks
+- **~11.3k lines of Python (SLOC, 11,282)** — FSM handlers and runners (`threlium/`, without `types/`); configs, prompts, and Ansible instead of frameworks
 - **FSM on Maildirs** — each event is an RFC 5322 message; each stage is `stages/<stage>/Maildir/`
 - **Union notmuch index** — one database over all stage maildirs; durable history in `cur/`, no separate legacy archive tree
 - **Orchestration via systemd --user** — `fdm` → `notmuch insert` → `threlium-dispatch.sh` → `threlium-work@` / `threlium-engine`
