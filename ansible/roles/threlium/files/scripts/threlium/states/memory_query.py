@@ -13,7 +13,7 @@ from threlium.prompts import render_prompt
 
 from threlium.runners.lightrag.aquery import build_lightrag_query_param, run_lightrag_aquery
 from threlium.settings import ThreliumSettings
-from threlium.types import FsmStage, LitellmCallSite, PromptPath
+from threlium.types import EnrichCalleeHistoryText, EnrichRequestEchoText, FsmStage, LitellmCallSite, PromptPath
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
 
@@ -60,7 +60,7 @@ def main(
     return emit_to_enrich_fast(
         msg,
         stage,
-        history=observation,
-        request_echo=payload.query,
+        history=EnrichCalleeHistoryText.parse(observation),
+        request_echo=EnrichRequestEchoText.parse(payload.query),
         settings=config,
     )

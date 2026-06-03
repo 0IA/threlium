@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 
-from threlium.enrich_user_query import require_enrich_user_query_for_reenrich
 from threlium.fsm_emit_semantic import (
     emit_enrich_validation_error,
     emit_preserving_to_enrich_fast,
@@ -24,7 +23,6 @@ def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
     mid_w, inner = require_fsm_message_id(msg, "response_edit")
-    user_query = require_enrich_user_query_for_reenrich(msg, stage_label="response_edit")
 
     body_raw = system_part_text(msg).strip()
     payload = parse_response_edit_stage_payload(body_raw)
@@ -34,7 +32,6 @@ def main(
             msg,
             from_stage=stage,
             settings=config,
-            user_query=user_query,
             prompt_path=PromptPath.RESPONSE_EDIT_ERROR_INVALID_BODY,
             exc=f"not a valid edit payload: {body_raw[:120]!r}",
         )
@@ -54,7 +51,6 @@ def main(
             msg,
             from_stage=stage,
             settings=config,
-            user_query=user_query,
             prompt_path=PromptPath.RESPONSE_EDIT_ERROR_INVALID_POSITION,
             position=target_position,
             new_content=payload.new_content,

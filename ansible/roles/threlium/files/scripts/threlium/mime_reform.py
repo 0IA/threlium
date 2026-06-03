@@ -588,8 +588,6 @@ def attach_user_query_part(
 
     if not isinstance(user_query, EnrichUserQueryText):
         raise TypeError("attach_user_query_part: expected EnrichUserQueryText")
-    if not user_query.value.strip():
-        raise ValueError("attach_user_query_part: empty EnrichUserQueryText")
     out.attach(
         _make_inline_text_part(EnrichPartId.USER_QUERY, user_query.value)
     )
@@ -615,7 +613,7 @@ def require_enrich_user_query_text(msg: EmailMessage) -> "EnrichUserQueryText":
         raise RuntimeError(
             f"FSM-инвариант: ожидалась ровно одна <user-query>-часть, найдено {len(found)}"
         )
-    return EnrichUserQueryText.require_value(name="user-query", raw=found[0])
+    return EnrichUserQueryText.require(name="user-query", raw=found[0])
 
 
 @dataclass(frozen=True)

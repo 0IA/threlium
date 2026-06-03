@@ -20,6 +20,7 @@ from threlium.response.state_summary import build_state_data
 from threlium.settings import ThreliumSettings
 from threlium.summarize_tool_bridge import parse_summarize_response_buffer_assistant
 from threlium.types import (
+    EnrichCalleeHistoryText,
     FsmStage,
     LiteLlmChatMessage,
     LitellmRoutingSite,
@@ -94,6 +95,6 @@ def main(
     return emit_to_enrich_fast(
         msg,
         stage,
-        history=observation,
+        history=EnrichCalleeHistoryText.parse(observation),
         settings=config,
     )

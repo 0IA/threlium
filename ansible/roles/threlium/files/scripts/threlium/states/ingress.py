@@ -87,6 +87,7 @@ def _emit_bridge_distill_to_enrich(
         msg,
         stage,
         user_query=distill_body,
+        original_user_message=user_query,
         settings=config,
         distill_parts=result.parts,
     )

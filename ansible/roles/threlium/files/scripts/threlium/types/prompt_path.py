@@ -35,6 +35,7 @@ class PromptPath(StrEnum):
     INGRESS_DISTILL_HISTORY_STEP_BACK_NOTES = "ingress/distill_history_step_back_notes.j2"
     INGRESS_DISTILL_HISTORY_OPEN_GAPS = "ingress/distill_history_open_gaps.j2"
     INGRESS_DISTILL_HISTORY_USER_QUERY = "ingress/distill_history_user_query.j2"
+    INGRESS_DISTILL_HISTORY_ORIGINAL_USER = "ingress/distill_history_original_user.j2"
 
     CLI_EXEC_OBSERVATION = "cli_exec/observation.j2"
 

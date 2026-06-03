@@ -2,7 +2,6 @@
 """subagent_end@localhost → enrich@localhost: маркер завершения субагента."""
 from email.message import EmailMessage
 
-from threlium.enrich_user_query import require_enrich_user_query_for_reenrich
 from threlium.settings import ThreliumSettings
 from threlium.fsm_emit import irt_wire_from_incoming_message_id
 from threlium.fsm_emit_semantic import emit_to_enrich
@@ -11,8 +10,9 @@ from threlium.irt_subagent_classifier import (
     hop_from_intent_parent,
 )
 from threlium.logutil import logger
+from threlium.mime_reform import system_part_text
 from threlium.nm import require_fsm_message_id
-from threlium.types import FsmStage, MailHeaderName
+from threlium.types import EnrichUserQueryText, FsmStage, MailHeaderName
 
 log = logger.bind(stage="subagent_end")
 
@@ -32,7 +32,8 @@ def main(
 
     log.info("transition_to_enrich", hop=hop.value, message_id=mid_w.value if mid_w else None)
 
-    user_query = require_enrich_user_query_for_reenrich(msg, stage_label="subagent_end")
+    result_text = system_part_text(msg).strip()
+    user_query = EnrichUserQueryText.require(name="subagent result", raw=result_text)
     return emit_to_enrich(
         msg,
         stage,

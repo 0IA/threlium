@@ -13,7 +13,7 @@ from threlium.types import EnrichUserQueryText, FsmStage
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
-    user_query = EnrichUserQueryText.require_value(
+    user_query = EnrichUserQueryText.require(
         name="summarize user_query", raw=system_part_text(msg)
     )
     return emit_to_enrich(

@@ -14,7 +14,7 @@ from threlium.fsm_emit_semantic import emit_to_enrich_fast
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
-from threlium.types import FsmStage, PromptPath
+from threlium.types import EnrichRequestEchoText, FsmStage, PromptPath
 
 _MEMORY_BASE_BY_STAGE: dict[FsmStage, PromptPath] = {
     FsmStage.THREAD_MEMORY: PromptPath.THREAD_MEMORY_BASE,
@@ -34,6 +34,6 @@ def emit_memory_note_to_enrich_fast(
     return emit_to_enrich_fast(
         msg,
         stage,
-        request_echo=echo_body,
+        request_echo=EnrichRequestEchoText.parse(echo_body),
         settings=config,
     )

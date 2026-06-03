@@ -83,7 +83,7 @@ class EnrichObservationNoteText(_OptionalStripEmpty):
     """Текст MIME-части <observation-note> (formal_reason / memory_query → enrich_fast)."""
 
 
-class EnrichUserQueryText(_OptionalStripEmpty):
+class EnrichUserQueryText(_RequiredNonEmpty):
     """Канонический сырой user turn в ``<user-query>`` CID на ``To: enrich@``.
 
     Не путать с :class:`~threlium.types.reasoning.ReasoningUserMessageText` — тот про
@@ -92,12 +92,11 @@ class EnrichUserQueryText(_OptionalStripEmpty):
 
     @classmethod
     def require_value(cls, *, name: str, raw: str | None) -> Self:
-        req = _RequiredNonEmpty.require(name=name, raw=raw)
-        return cls.parse(req.value)
+        return cls.require(name=name, raw=raw)
 
     @classmethod
     def from_external_body(cls, body: IngressExternalBodyText) -> Self:
-        return cls.parse(body.value)
+        return cls.require(name="bridge system", raw=body.value)
 
 
 class EnrichCalleeHistoryText(_OptionalStripEmpty):

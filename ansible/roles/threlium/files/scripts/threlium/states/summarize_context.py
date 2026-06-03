@@ -22,6 +22,7 @@ from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
 from threlium.summarize_tool_bridge import parse_summarize_thread_context_assistant
 from threlium.types import (
+    EnrichUserQueryText,
     FsmStage,
     LiteLlmChatMessage,
     LitellmCallSite,
@@ -31,10 +32,11 @@ from threlium.types import (
     PromptPath,
     SummarizeContextStagePayload,
     SummarizeToolBridgeError,
+    validated_user_query,
 )
 
 
-def _parse_payload(text: str) -> tuple[list[str], list[str], str] | None:
+def _parse_payload(text: str) -> tuple[list[str], list[str], EnrichUserQueryText] | None:
     """payload → ``(mids, bodies, user_query)``.
 
     Через msgspec (TYPES § stage payload), без ``json.loads`` + ручного ``dict``.
@@ -49,7 +51,11 @@ def _parse_payload(text: str) -> tuple[list[str], list[str], str] | None:
     batch = payload.summarize
     if not batch.mids:
         return None
-    return (list(batch.mids), list(batch.bodies), payload.user_query)
+    try:
+        user_query = validated_user_query(payload)
+    except ValueError:
+        return None
+    return (list(batch.mids), list(batch.bodies), user_query)
 
 
 log = logger.bind(stage="summarize_context")
@@ -121,6 +127,6 @@ def main(
         to_addr=FsmStage.SUMMARIZE_MEMORY,
         from_stage=stage,
         history=summary,
-        system=user_query,
+        system=user_query.value,
         settings=config,
     )

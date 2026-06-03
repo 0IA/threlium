@@ -26,7 +26,7 @@ _HDR = MailHeaderName
 
 
 class IngressDistillHistoryPartKind(StrEnum):
-    """Порядок attach на ingress→enrich: metadata first, ``USER_INTENT`` перед request_echo."""
+    """Порядок attach на ingress→enrich: metadata first, ``USER_INTENT`` в ``<history>``."""
 
     USER_REPLY_LANGUAGE = "user_reply_language"
     STEP_BACK_NOTES = "step_back_notes"
@@ -85,7 +85,7 @@ class IngressDistillEnvelope(msgspec.Struct, frozen=True, kw_only=True):
 
 
 class IngressDistillResult(msgspec.Struct, frozen=True, kw_only=True):
-    """Набор history-частей distill (metadata + user intent); user query — request_echo."""
+    """Набор history-частей distill (metadata + user intent); user query — ``<user-query>`` CID (не в parts)."""
 
     parts: tuple[IngressDistillHistoryPart, ...]
 

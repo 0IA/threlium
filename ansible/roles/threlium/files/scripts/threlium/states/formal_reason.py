@@ -17,7 +17,9 @@ from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
 from threlium.types import (
+    EnrichCalleeHistoryText,
     EnrichObservationNoteText,
+    EnrichRequestEchoText,
     FormalReasonDerivedErrorText,
     FormalReasonDerivedTtlText,
     FormalReasonErrorKind,
@@ -26,6 +28,7 @@ from threlium.types import (
     FormalReasonQueryResultText,
     FormalReasonResultPayload,
     FsmStage,
+    FsmTransitionPlainBody,
     PromptPath,
 )
 
@@ -94,13 +97,13 @@ def main(
         has_query_error=query_err_vo is not None,
         query_error=query_err_vo.value if query_err_vo is not None else "",
     )
-    note = EnrichObservationNoteText.parse(observation).value
+    note = EnrichObservationNoteText.parse(observation)
 
     return emit_to_enrich_fast(
         msg,
         stage,
-        history=note,
-        request_echo=request_payload,
-        system=system_json,
+        history=EnrichCalleeHistoryText.parse(note.value),
+        request_echo=EnrichRequestEchoText.parse(request_payload),
+        system=FsmTransitionPlainBody.parse(system_json),
         settings=config,
     )

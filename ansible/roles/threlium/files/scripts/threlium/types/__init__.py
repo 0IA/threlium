@@ -166,6 +166,7 @@ from .summarize_tool_args import (
     SummarizeContextStagePayload,
     SummarizeResponseBufferToolArgs,
     SummarizeThreadContextToolArgs,
+    validated_user_query,
 )
 from .summarize_tool_function import (
     SummarizeToolBridgeError,
@@ -314,6 +315,7 @@ __all__ = [
     "SummarizeContextStagePayload",
     "SummarizeResponseBufferToolArgs",
     "SummarizeThreadContextToolArgs",
+    "validated_user_query",
     "SummarizeToolBridgeError",
     "SummarizeToolFunctionName",
     "EngineWireError",

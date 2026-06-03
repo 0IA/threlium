@@ -14,7 +14,7 @@ from threlium.logutil import logger
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
-from threlium.types import FsmStage, PromptPath
+from threlium.types import EnrichCalleeHistoryText, FsmStage, FsmTransitionPlainBody, PromptPath
 
 log = logger.bind(stage="cli_exec")
 
@@ -87,11 +87,12 @@ def main(
     if not cli:
         log.warning("no_parseable_payload")
         body = render_prompt(PromptPath.CLI_EXEC_OBSERVATION, cmd_line="", prior=prior)
+        note = EnrichCalleeHistoryText.parse(body)
         return emit_to_enrich_fast(
             msg,
             stage,
-            history=body,
-            system=body,
+            history=note,
+            system=FsmTransitionPlainBody.parse(body),
             settings=config,
         )
 
@@ -136,10 +137,11 @@ def main(
         mode=mode,
         privileged=privileged,
     )
+    note = EnrichCalleeHistoryText.parse(body)
     return emit_to_enrich_fast(
         msg,
         stage,
-        history=body,
-        system=body,
+        history=note,
+        system=FsmTransitionPlainBody.parse(body),
         settings=config,
     )

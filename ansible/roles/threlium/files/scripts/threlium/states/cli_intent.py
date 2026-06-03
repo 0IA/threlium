@@ -23,6 +23,7 @@ from threlium.types import (
     CliExecDecision,
     CliIntentPolicy,
     CliRouteCollision,
+    EnrichCalleeHistoryText,
     FsmStage,
     FsmTransitionPlainBody,
     PromptPath,
@@ -38,7 +39,9 @@ def main(
         return emit_to_enrich_fast(
             msg,
             stage,
-            history=render_prompt(PromptPath.CLI_INTENT_INVALID, prior=body).strip(),
+            history=EnrichCalleeHistoryText.parse(
+                render_prompt(PromptPath.CLI_INTENT_INVALID, prior=body).strip()
+            ),
             settings=config,
         )
 
@@ -52,7 +55,7 @@ def main(
             return emit_to_enrich_fast(
                 msg,
                 stage,
-                history=note,
+                history=EnrichCalleeHistoryText.parse(note),
                 settings=config,
             )
         case CliExecDecision(policy=CliIntentPolicy.SANDBOX):

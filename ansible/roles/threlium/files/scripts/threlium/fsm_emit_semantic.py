@@ -31,6 +31,7 @@ from threlium.types import (
     EnrichRequestEchoText,
     EnrichUserQueryText,
     FsmStage,
+    FsmTransitionPlainBody,
     FsmTransitionPlainSubjectLine,
     HopBudgetLine,
     IngressDistillHistoryPart,
@@ -128,10 +129,11 @@ def emit_bridge_distill_to_enrich(
     from_stage: FsmStage,
     *,
     user_query: EnrichUserQueryText,
+    original_user_message: EnrichUserQueryText,
     settings: ThreliumSettings,
     distill_parts: tuple[IngressDistillHistoryPart, ...],
 ) -> EmailMessage:
-    """ingress (bridge-only): distill ``<history>`` + ``<user-query>`` from bridge system → enrich."""
+    """ingress (bridge-only): original user + distill ``<history>`` + ``<user-query>`` → enrich."""
     out = _build_history_only_envelope(
         incoming,
         to_addr=FsmStage.ENRICH,
@@ -140,6 +142,17 @@ def emit_bridge_distill_to_enrich(
     )
     attach_user_query_part(out, user_query)
     score = ThreliumContentScoreWire.from_score(settings.history.score_for(from_stage))
+    original_history = render_prompt(
+        PromptPath.INGRESS_DISTILL_HISTORY_ORIGINAL_USER,
+        original_user_message=original_user_message.value,
+    ).strip()
+    out.attach(
+        _make_inline_text_part(
+            EnrichContentId.from_history_body(original_history),
+            original_history,
+            score=score,
+        )
+    )
     for hp in distill_parts:
         out.attach(
             _make_inline_text_part(
@@ -156,9 +169,9 @@ def emit_to_enrich_fast(
     from_stage: FsmStage,
     *,
     settings: ThreliumSettings,
-    history: str | None = None,
-    request_echo: str | None = None,
-    system: str | None = None,
+    history: EnrichCalleeHistoryText | None = None,
+    request_echo: EnrichRequestEchoText | None = None,
+    system: FsmTransitionPlainBody | None = None,
     subject_line: FsmTransitionPlainSubjectLine | None = None,
 ) -> EmailMessage:
     """Единый choke-point перехода tool-callee → ``enrich_fast@`` (CONTEXT §3)."""
@@ -166,9 +179,9 @@ def emit_to_enrich_fast(
         incoming,
         to_addr=FsmStage.ENRICH_FAST,
         from_stage=from_stage,
-        history=history,
-        request_echo=request_echo,
-        system=system,
+        history=history.value if history is not None else None,
+        request_echo=request_echo.value if request_echo is not None else None,
+        system=system.value if system is not None else None,
         subject_line=subject_line,
         settings=settings,
     )
@@ -194,17 +207,16 @@ def emit_enrich_validation_error(
     *,
     from_stage: FsmStage,
     settings: ThreliumSettings,
-    user_query: EnrichUserQueryText,
     prompt_path: PromptPath,
     **template_vars: object,
 ) -> EmailMessage:
-    """Validation-ошибка mutator-стадии → ``enrich@`` с notice в ``<history>``."""
+    """Validation-ошибка mutator-стадии → ``enrich@``; notice = ``<user-query>`` turn."""
     body = render_prompt(prompt_path, **template_vars).strip()
+    user_query = EnrichUserQueryText.require(name="validation error", raw=body)
     return emit_to_enrich(
         incoming,
         from_stage,
         user_query=user_query,
-        callee_history=EnrichCalleeHistoryText.parse(body),
         settings=settings,
     )
 

@@ -29,6 +29,7 @@ from threlium.settings import ThreliumSettings
 from threlium.types import (
     CliHitlBridgeError,
     ConfirmCliHitlToolArgs,
+    EnrichCalleeHistoryText,
     FsmStage,
     FsmTransitionPlainBody,
     FsmTransitionPlainSubjectLine,
@@ -50,15 +51,17 @@ def _emit_user_not_confirmed(
     config: ThreliumSettings,
     interpretation: str | None = None,
 ) -> EmailMessage:
-    note = render_prompt(
-        PromptPath.CLI_RESUME_NOT_CONFIRMED,
-        interpretation=interpretation or "",
-    ).strip()
+    note = EnrichCalleeHistoryText.parse(
+        render_prompt(
+            PromptPath.CLI_RESUME_NOT_CONFIRMED,
+            interpretation=interpretation or "",
+        ).strip()
+    )
     return emit_to_enrich_fast(
         msg,
         stage,
         history=note,
-        system=note,
+        system=FsmTransitionPlainBody.parse(note.value),
         subject_line=FsmTransitionPlainSubjectLine.parse("CLI command not confirmed"),
         settings=config,
     )
@@ -137,7 +140,7 @@ def main(
     _mid_w, inner = require_fsm_message_id(msg, "cli_resume")
     intent_path = find_cli_intent_maildir_path_from_in_reply_to_ancestors(inner)
     if intent_path is None:
-        note = (
+        note = EnrichCalleeHistoryText.parse(
             "Threlium cli_resume: could not find a CLI intent message along In-Reply-To ancestors "
             "(notmuch). Ensure the chain is indexed and a prior cli_intent step exists on this branch."
         )
@@ -145,7 +148,7 @@ def main(
             msg,
             stage,
             history=note,
-            system=note,
+            system=FsmTransitionPlainBody.parse(note.value),
             subject_line=FsmTransitionPlainSubjectLine.parse("CLI resume: intent not found"),
             settings=config,
         )
@@ -159,12 +162,14 @@ def main(
         intent_payload_text = ""
     payload = parse_cli_intent_payload(intent_payload_text)
     if not payload:
-        note = "Threlium cli_resume: could not parse stored CLI intent JSON in thread."
+        note = EnrichCalleeHistoryText.parse(
+            "Threlium cli_resume: could not parse stored CLI intent JSON in thread."
+        )
         return emit_to_enrich_fast(
             msg,
             stage,
             history=note,
-            system=note,
+            system=FsmTransitionPlainBody.parse(note.value),
             subject_line=FsmTransitionPlainSubjectLine.parse("CLI resume: bad intent"),
             settings=config,
         )
