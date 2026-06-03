@@ -179,6 +179,8 @@ class PromptPath(StrEnum):
     LIGHTRAG_ENRICH_INCOMING_USER_TEXT = "lightrag/enrich_incoming_user_text.j2"
     LIGHTRAG_ENRICH_AQUERY_USER = "lightrag/enrich_aquery_user.j2"
     LIGHTRAG_MAIL_CONTEXT = "lightrag/mail_context.j2"
+    LIGHTRAG_GRAPH_ANSWER = "lightrag/graph_answer.j2"
+    LIGHTRAG_GRAPH_ANSWER_ANSWER_ONLY = "lightrag/graph_answer_answer_only.j2"
     LIGHTRAG_ENTITY_EXTRACTION_SYSTEM_PROMPT = (
         f"lightrag/{LightragPromptLibraryKey.ENTITY_EXTRACTION_SYSTEM_PROMPT.value}.j2"
     )

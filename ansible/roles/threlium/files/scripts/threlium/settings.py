@@ -652,6 +652,26 @@ class EnrichSettings(BaseModel):
         description="Делитель tier1_full для MEDIUM-варианта unified MCKP (tier1_med = tier1_full // ratio).",
     )
 
+    graph_answer_max_entities: int = Field(
+        default=40,
+        ge=0,
+        description="Макс. сущностей в prose <graph-answer> (после strict parse aquery data).",
+    )
+    graph_answer_max_relations: int = Field(
+        default=60,
+        ge=0,
+        description="Макс. связей в prose <graph-answer>.",
+    )
+    graph_answer_desc_max_chars: int = Field(
+        default=200,
+        ge=0,
+        description="Усечение description entity/relation в <graph-answer>.",
+    )
+    graph_answer_include_mermaid: bool = Field(
+        default=True,
+        description="Включать блок mermaid в prose <graph-answer> при непустом subgraph.",
+    )
+
     summarize_enabled: bool = Field(default=True, description="Включить LLM-суммаризацию при overflow unified.")
     summarize_batch_max_messages: int = Field(
         default=10, ge=1,

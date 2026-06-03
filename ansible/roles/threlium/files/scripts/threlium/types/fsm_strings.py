@@ -56,7 +56,7 @@ class IngressRouterResolvedChannelSlug(_OptionalStripEmpty):
 
 
 class EnrichGraphAnswerText(_OptionalStripEmpty):
-    """JSON envelope из LightRAG aquery для MIME-части ``<graph-answer>``."""
+    """Prose-сэмпл LightRAG (``lightrag/graph_answer*.j2``) для MIME-части ``<graph-answer>``."""
 
 
 class EnrichUnifiedMailContextText(_OptionalStripEmpty):

@@ -19,9 +19,11 @@ from threlium.logutil import logger
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
 from threlium.types import (
+    EnrichTaskHypothesesPromptContext,
     LiteLlmChatMessage,
     LitellmRoutingSite,
     PromptPath,
+    ReasoningUserMessageText,
     TaskLedger,
 )
 
@@ -75,7 +77,7 @@ def _existing_subtasks_kw(ledger: TaskLedger) -> list[dict[str, str]]:
 def invoke_task_plan_subtasks(
     *,
     config: ThreliumSettings,
-    user_message_text: str,
+    incoming_user_message: ReasoningUserMessageText,
     existing_ledger: TaskLedger,
 ) -> list[str]:
     """Early seed (LLM до LightRAG): ``enrich_task_plan`` tool."""
@@ -86,7 +88,7 @@ def invoke_task_plan_subtasks(
         tool_spec_path=PromptPath.LIGHTRAG_ENRICH_TASK_PLAN_TOOL_SPEC,
         context="enrich_task_plan",
         prompt_kwargs={
-            "incoming_user_message": user_message_text,
+            "incoming_user_message": incoming_user_message.value,
             "existing_subtasks": _existing_subtasks_kw(existing_ledger),
         },
         parse_assistant=parse_enrich_task_plan_assistant,
@@ -96,11 +98,7 @@ def invoke_task_plan_subtasks(
 def invoke_task_hypothesis_subtasks(
     *,
     config: ThreliumSettings,
-    user_message_text: str,
-    graph_answer: str,
-    unified_mail_context: str,
-    thread_memory: str,
-    global_memory: str,
+    prompt_context: EnrichTaskHypothesesPromptContext,
     ledger_after_seed: TaskLedger,
 ) -> list[str]:
     """Late hypotheses (LLM после RAG): ``enrich_task_hypotheses`` tool."""
@@ -111,11 +109,7 @@ def invoke_task_hypothesis_subtasks(
         tool_spec_path=PromptPath.LIGHTRAG_ENRICH_TASK_HYPOTHESES_TOOL_SPEC,
         context="enrich_task_hypotheses",
         prompt_kwargs={
-            "incoming_user_message": user_message_text,
-            "graph_answer": graph_answer,
-            "unified_mail_context": unified_mail_context,
-            "thread_memory": thread_memory,
-            "global_memory": global_memory,
+            **prompt_context.for_jinja(),
             "existing_subtasks": _existing_subtasks_kw(ledger_after_seed),
         },
         parse_assistant=parse_enrich_task_hypotheses_assistant,

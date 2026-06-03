@@ -163,6 +163,8 @@ threlium_required_prompts:
   - lightrag/enrich_incoming_user_text.j2
   - lightrag/enrich_aquery_user.j2
   - lightrag/mail_context.j2
+  - lightrag/graph_answer.j2
+  - lightrag/graph_answer_answer_only.j2
   - ingress/orphan_notice.j2
   - runners/lightrag/addon_params.j2
   - lightrag/entity_extraction_system_prompt.j2

@@ -154,6 +154,8 @@ from .cli_hitl_tool_function import CliHitlBridgeError, CliHitlToolFunctionName
 from .enrich import (
     EnrichQueryPlanRecentMessageEntry,
     EnrichQueryPlanThreadSkeletonEntry,
+    EnrichTaskHypothesesPromptContext,
+    optional_enrich_part_for_jinja,
 )
 from .enrich_tool_args import (
     EnrichQueryPlanToolArgs,
@@ -306,6 +308,8 @@ __all__ = [
     "EnrichLightragQuestionSubjectLine",
     "EnrichQueryPlanRecentMessageEntry",
     "EnrichQueryPlanThreadSkeletonEntry",
+    "EnrichTaskHypothesesPromptContext",
+    "optional_enrich_part_for_jinja",
     "EnrichQueryPlanToolArgs",
     "EnrichTaskHypothesesToolArgs",
     "EnrichTaskPlanToolArgs",

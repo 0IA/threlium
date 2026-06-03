@@ -7,8 +7,8 @@
   * план: ``render_prompt(PromptPath.LIGHTRAG_ENRICH_QUERY_PLAN)`` → один LLM →
     ``render_prompt(PromptPath.LIGHTRAG_ENRICH_AQUERY_USER)`` →
     ``run_rag_coroutine(rag.<query_api>(...), ...)`` (метод из ``settings.lightrag.query_api``);
-  * envelope-dict собирается в Python; в ``<graph-answer>`` уходит **весь** envelope как
-    JSON (``msgspec`` indent=2, как Jinja ``| tojson(indent=2)``), не только ``llm_text``;
+  * envelope-dict собирается в Python; в ``<graph-answer>`` уходит **prose** (Jinja
+    ``lightrag/graph_answer*.j2`` через ``format_graph_answer_part``), не JSON-envelope;
   * ``build_enriched_multipart`` — ``multipart/mixed`` с гранулярными MIME-частями по ``Content-ID``.
 """
 from __future__ import annotations
@@ -45,6 +45,7 @@ from threlium.litellm_required_tool import (
 from threlium.litellm_tool_spec import load_tool_spec
 from threlium.litellm_route_context import e2e_route_wire_tail, get_litellm_http_correlation
 from threlium.enrich_context import build_unified_email_messages, trim_context_text, UnifiedEmailContext
+from threlium.graph_answer_view import format_graph_answer_part
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
 from threlium.ledger_context_parts import ledger_context_parts
@@ -75,8 +76,10 @@ from threlium.types import (
     EnrichGraphAnswerText,
     EnrichQueryPlanRecentMessageEntry,
     EnrichQueryPlanThreadSkeletonEntry,
+    EnrichTaskHypothesesPromptContext,
     EnrichThreadMemoryText,
     EnrichUnifiedMailContextText,
+    ReasoningUserMessageText,
     FsmTransitionPlainBody,
     LightragPromptLibraryKey,
     LitellmCallSite,
@@ -99,6 +102,15 @@ from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 log = logger.bind(stage="enrich")
 
 _HDR = MailHeaderName
+
+
+def _require_rendered_user_message(text: str) -> ReasoningUserMessageText:
+    """Отрендеренный ``<user-message>`` для task-plan / hypotheses (не ``EnrichUserQueryText``)."""
+    vo = ReasoningUserMessageText.parse_present_optional(text)
+    if vo is None:
+        raise RuntimeError("enrich: empty user message for task LLM prompt")
+    return vo
+
 
 # Level-1 MCKP: полезность варианта бакета (``solve_mckp`` максимизирует value × priority).
 _MCKP_VALUE_NONE = 0.0
@@ -137,7 +149,7 @@ def _build_lightrag_envelope(
     query_mode: str,
     formulated_query: str,
 ) -> dict[str, Any]:
-    """Envelope dict for Jinja ``| tojson(indent=2)``; no ``json.dumps`` in Python."""
+    """Envelope dict для ``format_graph_answer_part`` / strict parse ``lightrag.raw``."""
     envelope: dict[str, Any] = {
         "query_api": query_api,
         "query_mode": query_mode,
@@ -175,27 +187,6 @@ def _build_lightrag_envelope(
         envelope["lightrag"]["llm_text"] = llm_resp.get("content")
     envelope["lightrag"]["raw"] = sanitized
     return envelope
-
-
-def _serialize_graph_answer(envelope: dict[str, Any]) -> str:
-    """``<graph-answer>`` = весь envelope-dict как JSON (CONTEXT_CONTRACT §4, TYPES).
-
-    Сериализация через ``msgspec`` (indent=2, как Jinja ``| tojson(indent=2)``), не только
-    ``llm_text``. Пусто, если ``ok=false`` или нет ни ``llm_text``, ни ``raw`` (сохраняет
-    прежнее budget-поведение «нет ответа графа»). При непредставимом ``lightrag.raw`` —
-    деградация до ``llm_text``, чтобы не валить критический путь enrich.
-    """
-    lr = envelope.get("lightrag", {})
-    llm_text = lr.get("llm_text") if isinstance(lr, dict) else None
-    llm_text_str = llm_text.strip() if isinstance(llm_text, str) and llm_text.strip() else ""
-    has_content = bool(llm_text_str or (isinstance(lr, dict) and lr.get("raw")))
-    if not envelope.get("ok") or not has_content:
-        return ""
-    try:
-        return msgspec.json.format(msgspec.json.encode(envelope), indent=2).decode("utf-8")
-    except (TypeError, ValueError, msgspec.MsgspecError) as exc:
-        log.warning("graph_answer_envelope_unserializable", error=str(exc))
-        return llm_text_str
 
 
 @dataclass(frozen=True)
@@ -250,7 +241,7 @@ def _build_task_seed_defs(
 
     subtasks = invoke_task_plan_subtasks(
         config=config,
-        user_message_text=user_message_text,
+        incoming_user_message=_require_rendered_user_message(user_message_text),
         existing_ledger=existing_ledger,
     )
     seed_defs = _parse_subtask_defs(
@@ -284,13 +275,13 @@ def _build_task_hypothesis_defs(
     """
     subtasks = invoke_task_hypothesis_subtasks(
         config=config,
-        user_message_text=user_message_text,
-        graph_answer=result.graph_answer.value if result.graph_answer else "",
-        unified_mail_context=(
-            result.unified_mail_context.value if result.unified_mail_context else ""
+        prompt_context=EnrichTaskHypothesesPromptContext(
+            incoming_user_message=_require_rendered_user_message(user_message_text),
+            graph_answer=result.graph_answer,
+            unified_mail_context=result.unified_mail_context,
+            thread_memory=result.thread_memory,
+            global_memory=result.global_memory,
         ),
-        thread_memory=result.thread_memory.value if result.thread_memory else "",
-        global_memory=result.global_memory.value if result.global_memory else "",
         ledger_after_seed=ledger_after_seed,
     )
     hyp_defs = _parse_subtask_defs(
@@ -393,7 +384,11 @@ def _is_empty_rag_result(raw_result: dict[str, Any] | str | None, api: str) -> b
                     return True
         if api == "aquery_data":
             data = raw_result.get("data", {})
-            if not data or (not data.get("entities") and not data.get("chunks")):
+            if not data:
+                return True
+            if not data.get("entities") and not data.get("relationships") and not data.get(
+                "chunks"
+            ):
                 return True
     return False
 
@@ -507,7 +502,7 @@ async def _enrich_async(
         ok=lightrag_envelope.get("ok"),
     )
 
-    graph_answer_raw = _serialize_graph_answer(lightrag_envelope)
+    graph_prose = format_graph_answer_part(lightrag_envelope, cfg.enrich)
 
     _preview = cfg.enrich.tier_preview_chars
     _tier1 = cfg.enrich.tier1_full
@@ -536,7 +531,7 @@ async def _enrich_async(
     ]
 
     graph_signal = (
-        _MCKP_BUCKET_SIGNAL_PRESENT if graph_answer_raw.strip() else _MCKP_BUCKET_SIGNAL_ABSENT
+        _MCKP_BUCKET_SIGNAL_PRESENT if graph_prose else _MCKP_BUCKET_SIGNAL_ABSENT
     )
     thread_signal = (
         _MCKP_BUCKET_SIGNAL_PRESENT if ctx.thread_memory_msgs else _MCKP_BUCKET_SIGNAL_ABSENT
@@ -545,7 +540,7 @@ async def _enrich_async(
         _MCKP_BUCKET_SIGNAL_PRESENT if ctx.global_memory_msgs else _MCKP_BUCKET_SIGNAL_ABSENT
     )
 
-    graph_full_weight = len(graph_answer_raw)
+    graph_full_weight = len(graph_prose) if graph_prose else 0
     graph_medium_weight = graph_full_weight // 2
 
     thread_medium_msgs = ctx.thread_memory_msgs[len(ctx.thread_memory_msgs) // 2:]
@@ -574,7 +569,7 @@ async def _enrich_async(
     bucket_configs_map: dict[EnrichPartId, list[BucketConfig]] = {
         EnrichPartId.GRAPH_ANSWER: _make_bucket_configs(
             EnrichPartId.GRAPH_ANSWER, graph_full_weight, graph_medium_weight, graph_signal,
-            allow_empty=not bool(graph_answer_raw.strip())),
+            allow_empty=graph_prose is None),
         EnrichPartId.UNIFIED_MAIL_CONTEXT: unified_configs,
         EnrichPartId.THREAD_MEMORY: _make_bucket_configs(
             EnrichPartId.THREAD_MEMORY,
@@ -608,12 +603,12 @@ async def _enrich_async(
         final_unified = ""
 
     chosen_graph = allocation.get(EnrichPartId.GRAPH_ANSWER)
-    if chosen_graph and chosen_graph.tier == BucketConfigTier.FULL:
-        final_graph = graph_answer_raw
-    elif chosen_graph and chosen_graph.tier == BucketConfigTier.MEDIUM:
-        final_graph = _truncate_at_paragraph(graph_answer_raw)
+    if graph_prose and chosen_graph and chosen_graph.tier == BucketConfigTier.FULL:
+        final_graph: str | None = graph_prose
+    elif graph_prose and chosen_graph and chosen_graph.tier == BucketConfigTier.MEDIUM:
+        final_graph = _truncate_at_paragraph(graph_prose) or None
     else:
-        final_graph = ""
+        final_graph = None
 
     chosen_thread = allocation.get(EnrichPartId.THREAD_MEMORY)
     if chosen_thread and chosen_thread.tier == BucketConfigTier.FULL:
@@ -647,8 +642,6 @@ async def _enrich_async(
     else:
         final_global = ""
 
-    graph_answer_vo = EnrichGraphAnswerText.parse(final_graph)
-
     log.info(
         "budget_allocation",
         capacity=mckp_capacity,
@@ -660,10 +653,12 @@ async def _enrich_async(
     )
 
     return EnrichResult(
-        graph_answer=graph_answer_vo if graph_answer_vo.value else None,
-        unified_mail_context=EnrichUnifiedMailContextText.parse(final_unified) if final_unified else None,
-        thread_memory=EnrichThreadMemoryText.parse(final_thread) if final_thread else None,
-        global_memory=EnrichGlobalMemoryText.parse(final_global) if final_global else None,
+        graph_answer=EnrichGraphAnswerText.parse_present_optional(final_graph),
+        unified_mail_context=EnrichUnifiedMailContextText.parse_present_optional(
+            final_unified
+        ),
+        thread_memory=EnrichThreadMemoryText.parse_present_optional(final_thread),
+        global_memory=EnrichGlobalMemoryText.parse_present_optional(final_global),
     )
 
 
@@ -711,8 +706,9 @@ def _emit_summarize_overflow(
             "overflow summarize: no messages with non-empty <history> in batch"
         )
 
-    # Канонический ход пользователя (последняя <history> входящего) едет неизменным по циклу
-    # summarize: re-trigger enrich обязан повторить тот же user message (CONTEXT_CONTRACT §5).
+    # Канонический ход = <user-query> CID текущего enrich-листа (не последняя <history>);
+    # суммаризация его не меняет — тот же текст по enrich → summarize_context (<system>)
+    # → summarize_memory → re-trigger enrich (CONTEXT_CONTRACT §5).
     user_query = require_enrich_user_query_text(msg).value
     payload = msgspec.json.encode(
         SummarizeContextStagePayload(
