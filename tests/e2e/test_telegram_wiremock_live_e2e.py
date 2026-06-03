@@ -530,19 +530,51 @@ def test_live_telegram_wiremock_private_tail_307_second_message(
                 pass
 
 
-def _wait_bridge_telegram_duplicate_skip(project: str, *, message_id: int) -> None:
-    jc = e2e_threlium_user_unit_journalctl_bash(
-        "threlium-bridge@telegram.service", 120, shell_redirect="2>/dev/null"
-    )
-    inner = (
-        "if "
-        + jc
-        + f" | grep -q 'duplicate_skip' && {jc} | grep -q 'message_id={message_id}'; then echo OK; fi"
-    )
+def _wait_telegram_correlation_indexed(project: str, *, correlation_key: str) -> None:
+    """Дождаться, что первое сообщение telegram-бриджа проиндексировано в notmuch."""
+    inner = correlation_key.strip().strip("<>")
 
     def _probe() -> bool | None:
-        r = service_exec(project, "sut", ["bash", "-lc", inner], repo_root=REPO_ROOT, timeout=30)
+        r = service_exec(
+            project,
+            "sut",
+            [
+                "bash",
+                "-lc",
+                "export HOME=/home/threlium NOTMUCH_CONFIG=/home/threlium/.notmuch-config; "
+                f'notmuch search --output=messages "id:{inner}" 2>/dev/null | grep -q . && echo OK',
+            ],
+            repo_root=REPO_ROOT,
+            timeout=int(TIMEOUT_POLL_SHORT),
+        )
         return True if r.returncode == 0 and "OK" in (r.stdout or "") else None
+
+    poll_until(
+        _probe,
+        timeout=TIMEOUT_POLL_SHORT,
+        desc=f"telegram first delivery indexed for {correlation_key!r}",
+    )
+
+
+def _wait_bridge_telegram_duplicate_skip(project: str, *, message_id: int) -> None:
+    journal_cmd = e2e_threlium_user_unit_journalctl_bash(
+        "threlium-bridge@telegram.service", 400, transport_journal=False
+    )
+    needle = f'"message_id": {int(message_id)}'
+
+    def _probe() -> bool | None:
+        r = service_exec(
+            project,
+            "sut",
+            ["bash", "-lc", journal_cmd],
+            repo_root=REPO_ROOT,
+            timeout=int(TIMEOUT_POLL_SHORT),
+        )
+        text = (r.stdout or "") + (r.stderr or "")
+        for line in text.splitlines():
+            if "duplicate_skip" in line and needle in line:
+                return True
+        return None
 
     poll_until(
         _probe,
@@ -583,14 +615,7 @@ def test_live_telegram_bridge_duplicate_skip_on_running_stack(
                 text="e2e telegram duplicate_skip probe",
                 message_thread_id=mtid,
             )
-            poll_until(
-                lambda: True
-                if journal_has_compose_bootstrap_request(base, method="GET", url_contains="getUpdates")
-                else None,
-                timeout=TIMEOUT_POLL_SHORT,
-                interval=2.0,
-                desc="telegram getUpdates after first register",
-            )
+            _wait_telegram_correlation_indexed(rt.project_name, correlation_key=correlation_key)
             wiremock_telegram_register_update(
                 base,
                 update_id=update_id,

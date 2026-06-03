@@ -191,19 +191,30 @@ def test_live_matrix_wiremock_full_contour_on_running_stack(
 
 
 def _wait_bridge_matrix_duplicate_skip(project: str, *, event_id: str) -> None:
-    jc = e2e_threlium_user_unit_journalctl_bash(
-        "threlium-bridge@matrix.service", 120, shell_redirect="2>/dev/null"
+    journal_cmd = e2e_threlium_user_unit_journalctl_bash(
+        "threlium-bridge@matrix.service", 400, transport_journal=False
     )
-    inner = (
-        "if "
-        + jc
-        + f" | grep -q 'duplicate_skip' && {jc} | grep -q {event_id!r}; then echo OK; fi"
-    )
-    def _probe() -> bool | None:
-        r = service_exec(project, "sut", ["bash", "-lc", inner], repo_root=REPO_ROOT, timeout=30)
-        return True if r.returncode == 0 and "OK" in (r.stdout or "") else None
+    needle = str(event_id)
 
-    poll_until(_probe, timeout=TIMEOUT_POLL_SHORT, desc=f"matrix bridge duplicate_skip for {event_id!r}")
+    def _probe() -> bool | None:
+        r = service_exec(
+            project,
+            "sut",
+            ["bash", "-lc", journal_cmd],
+            repo_root=REPO_ROOT,
+            timeout=int(TIMEOUT_POLL_SHORT),
+        )
+        text = (r.stdout or "") + (r.stderr or "")
+        for line in text.splitlines():
+            if "duplicate_skip" in line and needle in line:
+                return True
+        return None
+
+    poll_until(
+        _probe,
+        timeout=TIMEOUT_POLL_SHORT,
+        desc=f"matrix bridge duplicate_skip for {event_id!r}",
+    )
 
 
 def test_live_matrix_bridge_duplicate_skip_on_running_stack(
