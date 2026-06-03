@@ -62,6 +62,7 @@ RESPONSE_ISO_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-subagent-frame-iso-verified",
+    wiremock_journal_ready_needle="call_e2e_iso_l0_finalize",
 )
 
 LEDGER_ISO_SPEC = MailflowScenarioSpec(
@@ -87,6 +88,7 @@ LEDGER_ISO_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-subagent-frame-iso-verified",
+    wiremock_journal_ready_needle="call_e2e_iso_l0_finalize",
 )
 
 

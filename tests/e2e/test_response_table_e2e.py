@@ -106,6 +106,7 @@ OBSERVE_SPEC = MailflowScenarioSpec(
     body_head=f"{E2E_OBSERVE_BODY_MARKER}\ne2e response observe test body",
     min_chat_completion_posts=4,
     min_embedding_posts=1,
+    wiremock_journal_ready_needle="call_e2e_observe_finalize",
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
         FsmStage.ENRICH.value,
@@ -167,6 +168,7 @@ EDIT_REPLACE_SPEC = MailflowScenarioSpec(
     body_head=f"{E2E_EDIT_REPLACE_BODY_MARKER}\ne2e response edit replace test body",
     min_chat_completion_posts=4,
     min_embedding_posts=1,
+    wiremock_journal_ready_needle="call_e2e_edit_replace_finalize",
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
         FsmStage.ENRICH.value,
@@ -348,6 +350,7 @@ EDIT_INVALID_SPEC = MailflowScenarioSpec(
     body_head=f"{E2E_EDIT_INVALID_BODY_MARKER}\ne2e response edit invalid position test body",
     min_chat_completion_posts=5,
     min_embedding_posts=1,
+    wiremock_journal_ready_needle="call_e2e_edit_invalid_recovery",
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
         FsmStage.ENRICH.value,
