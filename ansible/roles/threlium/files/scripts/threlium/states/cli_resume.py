@@ -23,7 +23,7 @@ from threlium.litellm_tool_response import LiteLlmToolResponseError
 from threlium.litellm_tool_spec import load_tool_spec
 from threlium.logutil import clip_log_text, logger
 from threlium.mime_reform import system_part_text, system_part_text_from_path
-from threlium.nm import require_inner_message_id_from_fsm_email
+from threlium.nm import require_fsm_message_id
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
 from threlium.types import (
@@ -134,9 +134,8 @@ def main(
         log.info("cli_hitl_empty_reply")
         return _emit_user_not_confirmed(msg, stage, config=config)
 
-    intent_path = find_cli_intent_maildir_path_from_in_reply_to_ancestors(
-        require_inner_message_id_from_fsm_email(msg)
-    )
+    _mid_w, inner = require_fsm_message_id(msg, "cli_resume")
+    intent_path = find_cli_intent_maildir_path_from_in_reply_to_ancestors(inner)
     if intent_path is None:
         note = (
             "Threlium cli_resume: could not find a CLI intent message along In-Reply-To ancestors "

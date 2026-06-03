@@ -8,8 +8,8 @@ from email.message import EmailMessage
 from email.utils import make_msgid
 from pathlib import Path
 
-import threlium.nm as nm
 from threlium.delivery import run_fdm
+from threlium.nm import require_fsm_message_id
 from threlium.settings import ThreliumSettings
 from threlium.egress_self_archive import (
     build_egress_sent_record_to_archive,
@@ -77,7 +77,7 @@ def main(
         _run_msmtp_stdin(smtp_bytes)
         return None
 
-    leaf_inner = nm.require_inner_message_id_from_fsm_email(msg)
+    _mid_w, leaf_inner = require_fsm_message_id(msg, "egress_email")
     nat = RfcMessageIdWire.native_from_canonical_str(
         leaf_inner.as_angle_bracket_header(), native_type=EmailNativeId
     )
