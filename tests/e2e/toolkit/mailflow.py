@@ -432,6 +432,7 @@ def _mailflow_wait_wiremock_journal_ready_if_configured(
     *,
     project: str,
     stub_tag: str,
+    correlation_key: str,
 ) -> None:
     needle = spec.wiremock_journal_ready_needle
     if not needle:
@@ -444,7 +445,12 @@ def _mailflow_wait_wiremock_journal_ready_if_configured(
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     mailflow_log_phase(f"{spec.label}: wait wiremock journal needle={needle!r}")
-    wait_for_wiremock_stub_journal_contains(wm, stub_tag=stub_tag, needle=needle)
+    wait_for_wiremock_stub_journal_contains(
+        wm,
+        stub_tag=stub_tag,
+        needle=needle,
+        anchor_needle=correlation_key,
+    )
 
 
 def assert_full_mailflow_pipeline(
@@ -465,9 +471,6 @@ def assert_full_mailflow_pipeline(
     wait_for_notmuch_message(project, message_id=nm_inner, repo_root=REPO_ROOT)
     mailflow_log_phase(f"{spec.label}: notmuch OK (+{time.monotonic() - t0:.1f}s)")
     mailflow_pipeline_diag(project, anchor_message_id=nm_inner, repo_root=REPO_ROOT)
-    _mailflow_wait_wiremock_journal_ready_if_configured(
-        spec, project=project, stub_tag=stub_tag
-    )
     assert_wiremock_mailflow_received_chat_completion_posts(
         project,
         stub_tag=stub_tag,
@@ -490,6 +493,9 @@ def assert_full_mailflow_pipeline(
         )
     # Multi-hop: ответ пользователю только после egress; для длинных контуров см.
     # ``wiremock_journal_ready_needle`` (poll finalize-стаба до GreenMail).
+    _mailflow_wait_wiremock_journal_ready_if_configured(
+        spec, project=project, stub_tag=stub_tag, correlation_key=correlation_key
+    )
     wait_for_greenmail_user_reply(
         project,
         raw_id=raw_id,

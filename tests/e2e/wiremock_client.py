@@ -1119,24 +1119,33 @@ def wait_for_wiremock_stub_journal_contains(
     *,
     stub_tag: str,
     needle: str,
+    anchor_needle: str | None = None,
     wait_timeout_sec: float | None = None,
     diag_callback: Callable[[], None] | None = None,
 ) -> None:
-    """Poll журнала: запись с ``stub_tag`` содержит ``needle`` в request/response."""
+    """Poll журнала: запись с ``stub_tag`` содержит ``needle`` в request/response.
+
+    ``anchor_needle`` — canonical thread-root MID текущего прогона (как у
+    :func:`assert_wiremock_stub_received_min_chat_completions`); без него на shared
+    WireMock needle может совпасть со stale-записями предыдущих тестов с тем же ``stub_tag``.
+    """
     w = float(TIMEOUT_POLL_SHORT) if wait_timeout_sec is None else float(wait_timeout_sec)
 
     def _probe() -> bool:
         for entry in journal_entries_for_stub_tag(
             public_base, stub_tag=stub_tag, timeout=w
         ):
+            if anchor_needle is not None:
+                if anchor_needle not in _journal_request_anchor_haystack(entry):
+                    continue
             if journal_entry_request_or_response_contains(entry, needle):
                 return True
         return False
 
     def _msg() -> str:
         return (
-            f"expected WireMock journal (stub_tag={stub_tag!r}) to contain {needle!r} "
-            f"in request or response within {w}s"
+            f"expected WireMock journal (stub_tag={stub_tag!r}, anchor={anchor_needle!r}) "
+            f"to contain {needle!r} in request or response within {w}s"
         )
 
     _poll_wiremock_with_tenacity(
