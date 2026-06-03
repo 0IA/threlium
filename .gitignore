@@ -1,4 +1,6 @@
 # Секреты и локальное окружение (см. INSTALL_CONTRACT)
+.cursorignore
+.vscode/
 vendor/
 audit_bundle.txt
 audit.sh
@@ -9,6 +11,7 @@ audit.sh
 ansible/inventory/th-agent.yml
 ansible/host_vars/th-agent.yml
 ansible/artifacts/
+test-runs/
 tests/e2e/__pycache__/
 tests/e2e/litellm-mock-server/
 **/__pycache__/
