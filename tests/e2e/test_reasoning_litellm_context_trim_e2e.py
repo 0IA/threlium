@@ -39,12 +39,18 @@ REASONING_CTX_TRIM_SPEC = MailflowScenarioSpec(
     stub_tag="stub-reasoning-litellm-ctx-trim-01",
     body_head=f"{REASONING_E2E_BODY_MARKER}\ne2e reasoning context trim inbound",
     oversized_trim_body=True,
-    warmup_body_extra=E2E_CTX_TRIM_TAIL_MARKER,
+    # Каждый distill-бриф под cap (distill_max_chars=8000); 3 prior + main → overflow.
+    summarize_overflow_prior_turns=3,
     min_chat_completion_posts=2,
     min_embedding_posts=1,
+    # Как test_summarize_overflow: без RAG-warmup (default min_rerank_posts=1), prior-turn
+    # укладывается в 30s greenmail poll.
+    min_rerank_posts=0,
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
         FsmStage.ENRICH.value,
+        FsmStage.SUMMARIZE_CONTEXT.value,
+        FsmStage.SUMMARIZE_MEMORY.value,
         FsmStage.REASONING.value,
         FsmStage.TASKS_UPSERT.value,
         FsmStage.RESPONSE_FINALIZE.value,
