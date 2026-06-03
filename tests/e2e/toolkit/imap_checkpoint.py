@@ -42,7 +42,7 @@ def email_ingress_imap_checkpoint_from_notmuch(
 
 def restart_email_bridge_service(project: str, *, repo_root: Path | None = None) -> None:
     """``systemctl --user restart threlium-bridge@email`` на SUT."""
-    from .sut_user_systemd import E2E_THRELIUM_USER
+    from tests.e2e.sut_user_systemd import E2E_THRELIUM_USER
 
     root = repo_root or REPO_ROOT
     cmd = [
