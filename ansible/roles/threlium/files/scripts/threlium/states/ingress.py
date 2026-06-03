@@ -16,8 +16,11 @@ Fail-fast матрица (`docs/INDEX.md` §8):
 from email.message import EmailMessage
 
 from threlium.settings import ThreliumSettings
-from threlium.fsm_emit import build_fsm_step_to_stage
-from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
+from threlium.fsm_emit import build_fsm_step_to_stage, emit_transition_preserving_payload
+from threlium.fsm_emit_semantic import (
+    emit_transition_simple_step_preserving_payload,
+    managed_patch_simple_fsm_step,
+)
 from threlium.ingress_distill import ingress_distill_llm
 from threlium.logutil import logger
 from threlium.mime_reform import (
@@ -81,11 +84,13 @@ def _emit_to_enrich(
     # <history> для следующего enrich (см. MEMORY_TABLE §3, stub reflect_cycle/ingress_distill).
     if message_has_history(msg):
         relay = email_without_system_parts(msg) if message_has_system(msg) else msg
-        return emit_transition_simple_step_preserving_payload(
+        # IRT из MID входа ingress (THREAD_MODEL §3); relay после strip @system
+        # не несёт конверт — managed_patch на relay терял In-Reply-To (SUBAGENT_TABLE §4).
+        return emit_transition_preserving_payload(
             relay,
             to_addr=FsmStage.ENRICH,
             from_stage=stage,
-            settings=config,
+            managed_headers=managed_patch_simple_fsm_step(msg, config),
         )
 
     body_vo = ingress_external_body_text(msg)
