@@ -16,17 +16,14 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "E2E-RESPONSE-BUFFER-BODY"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-response-buffer-e2e-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_standard_tasks_ledger"
+        "hasProperty": "phase_standard_tasks_ledger",
+        "hasNotProperty": "phase_tasks_ledger_done"
       }
     }
   },
@@ -36,7 +33,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-response-buffer-reasoning-1",
+      "id": "chatcmpl-e2e-response-buffer-warmup-tasks-ledger",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -49,11 +46,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_response_append_1",
+                "id": "call_e2e_response_buffer_warmup_tasks_ledger",
                 "type": "function",
                 "function": {
-                  "name": "response_append",
-                  "arguments": "{\"reasoning\": \"e2e: appending next section to response buffer\", \"content\": \"E2E-CHUNK-FIRST: The beginning of an incremental response from the reasoning stage.\"}"
+                  "name": "tasks_upsert",
+                  "arguments": "{\"reasoning\": \"e2e: rag warmup task ledger before vectordb indexing\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
                 }
               }
             ]
@@ -68,7 +65,7 @@
       "parameters": {
         "context": "stub-response-buffer-e2e-01::{{request.headers.[x-threlium-thread-root]}}",
         "state": {
-          "phase_append_1": "1"
+          "phase_tasks_ledger_done": "1"
         }
       }
     }

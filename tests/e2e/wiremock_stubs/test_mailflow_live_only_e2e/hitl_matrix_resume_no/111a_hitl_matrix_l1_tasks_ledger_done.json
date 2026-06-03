@@ -16,17 +16,14 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "E2E-RESPONSE-BUFFER-BODY"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-response-buffer-e2e-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_standard_tasks_ledger"
+        "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasProperty": "live_hitl_h01",
+        "hasNotProperty": "live_hitl_h01_tasks_done"
       }
     }
   },
@@ -36,7 +33,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-response-buffer-reasoning-1",
+      "id": "chatcmpl-e2e-hitl-l1-tasks",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -49,11 +46,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_response_append_1",
+                "id": "call_hitl_l1_tasks",
                 "type": "function",
                 "function": {
-                  "name": "response_append",
-                  "arguments": "{\"reasoning\": \"e2e: appending next section to response buffer\", \"content\": \"E2E-CHUNK-FIRST: The beginning of an incremental response from the reasoning stage.\"}"
+                  "name": "tasks_upsert",
+                  "arguments": "{\"reasoning\": \"e2e L1: record task completion before L2 delegate\",\"new_subtasks\": [{\"text\": \"Complete the nested subtask\",\"status\": \"done\"}]}"
                 }
               }
             ]
@@ -66,9 +63,9 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-response-buffer-e2e-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
         "state": {
-          "phase_append_1": "1"
+          "live_hitl_h01_tasks_done": "1"
         }
       }
     }

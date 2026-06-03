@@ -16,17 +16,14 @@
       },
       {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "E2E-RESPONSE-BUFFER-BODY"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-response-buffer-e2e-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_standard_tasks_ledger"
+        "hasProperty": "phase_tasks_ledger_done",
+        "hasNotProperty": "phase_append_1"
       }
     }
   },
@@ -36,7 +33,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-response-buffer-reasoning-1",
+      "id": "chatcmpl-e2e-response-buffer-warmup-egress",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -49,11 +46,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_response_append_1",
+                "id": "call_e2e_response_buffer_warmup_finalize",
                 "type": "function",
                 "function": {
-                  "name": "response_append",
-                  "arguments": "{\"reasoning\": \"e2e: appending next section to response buffer\", \"content\": \"E2E-CHUNK-FIRST: The beginning of an incremental response from the reasoning stage.\"}"
+                  "name": "response_finalize",
+                  "arguments": "{\"reasoning\": \"e2e: rag warmup finalize for vectordb seed\",\"subject\": \"e2e reply\", \"verification_summary\": \"e2e: warmup path complete\", \"content\": \"ok from rag warmup stub\"}"
                 }
               }
             ]
@@ -61,16 +58,5 @@
         }
       ]
     }
-  },
-  "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "stub-response-buffer-e2e-01::{{request.headers.[x-threlium-thread-root]}}",
-        "state": {
-          "phase_append_1": "1"
-        }
-      }
-    }
-  ]
+  }
 }
