@@ -162,7 +162,7 @@ flowchart LR
 | Content-ID | Источник |
 |---|---|
 | `<user-message>` | canonical user text (§4.1: `enrich_incoming_user_text.j2` + `<user-query>` CID) |
-| `<graph-answer>` | JSON-envelope `rag.aquery` |
+| `<graph-answer>` | Prose-сэмпл LightRAG (`graph_answer*.j2`: query + subgraph + answer) |
 | `<unified-mail-context>` | хронология треда + memory из `<history>`-частей (`message_has_history`) |
 | `<thread-memory>` / `<global-memory>` | memory-письма (намеренное дублирование маркеров) |
 | `<response-state>` | детерминированный пересчёт CRDT-буфера |

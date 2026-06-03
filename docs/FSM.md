@@ -410,7 +410,7 @@ def emit_transition_preserving_payload(
 | Content-ID | Источник | Примечание |
 |---|---|---|
 | `<user-message>` | `lightrag/enrich_incoming_user_text.j2` | ВСЕГДА. Canonical user message. |
-| `<graph-answer>` | JSON envelope из `_build_lightrag_envelope` | Если RAG не пуст. Внутри `threlium.formulated_query`. |
+| `<graph-answer>` | Prose из `lightrag/graph_answer*.j2` (`format_graph_answer_part`) | Если RAG не пуст. Query + subgraph + answer; `formulated_query` в тексте. |
 | `<unified-mail-context>` | `lightrag/mail_context.j2` по `ctx.all_messages` | Полная хронология треда + memory-письма. |
 | `<thread-memory>` | `lightrag/mail_context.j2` по `ctx.thread_memory_msgs` | Только `to:thread_memory@localhost` текущего треда. |
 | `<global-memory>` | `lightrag/mail_context.j2` по `ctx.global_memory_msgs` | `to:global_memory@localhost` из ВСЕХ тредов. |
@@ -439,7 +439,11 @@ Subject: Help with report
 ...
 
 <graph-answer>
-{"query_api": "aquery", "ok": true, ...}
+Graph query: ...
+## Entities
+...
+## Answer
+...
 
 <unified-mail-context>
 --- message 1 ---
