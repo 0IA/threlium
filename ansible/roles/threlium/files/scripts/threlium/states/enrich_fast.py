@@ -1,10 +1,12 @@
-"""enrich_fast@localhost → reasoning@localhost.
+"""enrich_fast@localhost → reasoning@localhost (или enrich@ при переполнении backpack).
 
 Быстрый цикл обратной связи: берёт предыдущий enriched-контекст ``E_prev``
 (multipart/mixed с MIME-частями по Content-ID), пересобирает ``<response-state>``
 и ``<task-state>`` из CRDT и **аддитивно** дописывает ``<history>`` и ``<system>`` из
 окна-дельты (всё, что появилось с прошлого ``To: reasoning`` до листа; старые
-``@system`` из ``E_prev`` не копируются) — возвращает в reasoning без повторного RAG.
+``@system`` из ``E_prev`` не копируются). Если spliced-backpack превышает
+``reasoning_effective_budget`` по токенам — ``emit_to_enrich`` (полный enrich);
+иначе — reasoning без повторного RAG.
 
 Контент-адресные CID ``<{sha256(body)}@history>`` дают автоматический дедуп по телу:
 оригинал и его relay-копии схлопываются в одну часть. Origin (стадия-источник) — единственная
@@ -18,10 +20,15 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from email.message import EmailMessage
 
-from threlium.enrich_context import collect_unified_delta_msgs
+from threlium.context_token_count import (
+    backpack_token_total,
+    build_tokenizer,
+    reasoning_effective_budget,
+)
+from threlium.enrich_context import collect_unified_delta_msgs, resolve_canonical_user_query
 from threlium.formal_reason_gate import assert_formal_reason_relay_after_splice
 from threlium.fsm_emit import emit_transition_preserving_payload
-from threlium.fsm_emit_semantic import managed_patch_simple_fsm_step
+from threlium.fsm_emit_semantic import emit_to_enrich, managed_patch_simple_fsm_step
 from threlium.logutil import logger
 from threlium.mail import email_message_from_path
 from threlium.mime_reform import (
@@ -132,6 +139,26 @@ def main(
         skipped_duplicate_cids=[cid.value for cid in spliced.skipped] or None,
         message_id=mid_w.value if mid_w else None,
     )
+
+    tokenizer = build_tokenizer(config)
+    total = backpack_token_total(spliced.message, tokenizer)
+    budget = reasoning_effective_budget(config)
+    log.info(
+        "token_ledger",
+        total_tokens=total,
+        effective_budget=budget,
+        excess=total - budget,
+    )
+    if total > budget:
+        user_query = resolve_canonical_user_query(inner, e_prev=e_prev)
+        log.info("relay_overflow_to_enrich", total_tokens=total, effective_budget=budget)
+        return emit_to_enrich(
+            msg,
+            FsmStage.ENRICH_FAST,
+            user_query=user_query,
+            settings=config,
+            managed_headers=managed_patch_simple_fsm_step(msg, config),
+        )
 
     return emit_transition_preserving_payload(
         spliced.message,

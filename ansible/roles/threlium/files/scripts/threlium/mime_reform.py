@@ -396,6 +396,19 @@ def _leaf_part_text(part: EmailMessage) -> str:
     return "" if raw is None else str(raw)
 
 
+def iter_backpack_leaf_texts(msg: EmailMessage) -> list[str]:
+    """Непустые тела всех leaf-частей с ``Content-ID`` (порядок MIME walk).
+
+    Для token-ledger enrich_fast на собранном spliced-backpack.
+    """
+    out: list[str] = []
+    for _cid, part in _iter_relay_leaf_parts(msg):
+        text = _leaf_part_text(part).strip()
+        if text:
+            out.append(text)
+    return out
+
+
 def _iter_relay_leaf_parts(msg: EmailMessage) -> list[tuple[EnrichContentId, EmailMessage]]:
     """Leaf-части с ``Content-ID`` как ``(EnrichContentId, part)`` в порядке walk.
 

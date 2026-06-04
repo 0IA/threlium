@@ -134,7 +134,6 @@ threlium_enrich:
   enrich_task_hypotheses_overhead_tokens: 100
   reasoning_overhead_tokens: 200
   summarize_overhead_tokens: 100
-  summarize_enabled: true
 
 # knowledge: e2e trim-сценарий observation-note
 threlium_knowledge:

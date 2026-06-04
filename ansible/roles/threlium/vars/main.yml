@@ -135,7 +135,6 @@ _threlium_enrich_base:
   enrich_task_hypotheses_overhead_tokens: 2000
   reasoning_overhead_tokens: 4000
   summarize_overhead_tokens: 2000
-  summarize_enabled: true
 
 # Эффективная конфигурация = base ⊕ пользовательские overrides (host_vars / group_vars / -e).
 # Отдельные имена (*_effective) принципиальны: при запуске `ansible-playbook … -e @host_vars/<host>.yml`

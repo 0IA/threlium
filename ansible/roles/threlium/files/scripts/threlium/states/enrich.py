@@ -36,6 +36,7 @@ from threlium.context_token_count import (
 )
 from threlium.enrich_context import (
     build_unified_email_messages,
+    message_inner_from_email,
     trim_context_text,
     UnifiedEmailContext,
 )
@@ -103,17 +104,6 @@ def _require_rendered_user_message(text: str) -> ReasoningUserMessageText:
     if vo is None:
         raise RuntimeError("enrich: empty user message for task LLM prompt")
     return vo
-
-
-def _message_inner(msg: EmailMessage) -> NotmuchMessageIdInner | None:
-    """``Message-ID`` письма → notmuch inner mid (для summarize ``source_mid``)."""
-    raw = msg.get(_HDR.MESSAGE_ID)
-    if not raw:
-        return None
-    w = RfcMessageIdWire.parse_present_optional(str(raw))
-    if w is None:
-        return None
-    return NotmuchMessageIdInner.from_optional_wire(w)
 
 
 def _build_lightrag_envelope(
@@ -466,7 +456,7 @@ def _collect_history_units(
     """Все ``<history>`` leaf-части unified, oldest→newest, с подсчётом токенов."""
     units: list[_HistoryUnit] = []
     for m in ctx.all_messages:
-        m_inner = _message_inner(m)
+        m_inner = message_inner_from_email(m)
         for cid, part in iter_history_parts(m):
             text = history_part_text(part).strip()
             if not text:
@@ -681,7 +671,7 @@ def main(
     )
 
     # --- Шаг 10: overflow X > 0 → summarize самых старых history CID ---
-    if config.enrich.summarize_enabled and excess > 0:
+    if excess > 0:
         return _emit_summarize_overflow(
             msg, stage, config=config, history_units=history_units, excess_tokens=excess,
         )

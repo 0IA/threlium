@@ -12,19 +12,65 @@ from threlium.logutil import logger
 from threlium.settings import ThreliumSettings
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.mail import email_message_from_path
-from threlium.mime_reform import EnrichContentId, iter_history_parts, message_has_history
+from threlium.mime_reform import (
+    EnrichContentId,
+    EnrichPartId,
+    extract_part_by_content_id,
+    iter_history_parts,
+    message_has_history,
+    require_enrich_user_query_text,
+)
 from threlium.types import (
+    EnrichUserQueryText,
     FsmStage,
     MailHeaderName,
     NotmuchMessageIdInner,
     NotmuchQueryConnective,
     NotmuchQueryField,
     NotmuchTag,
+    RfcMessageIdWire,
 )
 
 log = logger.bind(stage="enrich_context")
 
 _HDR = MailHeaderName
+
+
+def message_inner_from_email(msg: EmailMessage) -> NotmuchMessageIdInner | None:
+    """``Message-ID`` письма → notmuch inner mid (summarize ``source_mid``, unified)."""
+    raw = msg.get(_HDR.MESSAGE_ID)
+    if not raw:
+        return None
+    w = RfcMessageIdWire.parse_present_optional(str(raw))
+    if w is None:
+        return None
+    return NotmuchMessageIdInner.from_optional_wire(w)
+
+
+def resolve_canonical_user_query(
+    inner: NotmuchMessageIdInner,
+    *,
+    e_prev: EmailMessage | None = None,
+) -> EnrichUserQueryText:
+    """Canonical ``<user-query>`` для re-trigger enrich (overflow enrich_fast / summarize)."""
+    for snap in iter_irt_ancestors_filtered(inner):
+        if not snap.is_addressed_to_fsm_stage(FsmStage.ENRICH):
+            continue
+        try:
+            m = email_message_from_path(snap.path)
+        except OSError:
+            continue
+        try:
+            return require_enrich_user_query_text(m)
+        except RuntimeError:
+            continue
+    if e_prev is not None:
+        raw = extract_part_by_content_id(e_prev, EnrichPartId.USER_MESSAGE)
+        if raw and raw.strip():
+            return EnrichUserQueryText.require(name="user-message", raw=raw)
+    raise RuntimeError(
+        "resolve_canonical_user_query: no <user-query> in IRT chain and no <user-message> in E_prev"
+    )
 
 
 def _sort_email_messages_oldest_first(msgs: list[EmailMessage]) -> list[EmailMessage]:

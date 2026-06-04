@@ -695,8 +695,6 @@ class EnrichSettings(BaseModel):
         description="Включать блок mermaid в prose <graph-answer> при непустом subgraph.",
     )
 
-    summarize_enabled: bool = Field(default=True, description="Включить LLM-суммаризацию при overflow unified.")
-
     # Базовый вес сообщения теперь — X-Threlium-Content-Score его <history>-части
     # (скоринг отправителя), оператор настраивает через HistorySettings.score_by_stage.
     # Прежние per-type веса (ContextMessageType) удалены вместе с SERVICE-классификацией.
