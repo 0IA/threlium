@@ -19,13 +19,13 @@
       },
       {
         "comment": "enrich_fast накапливает relay-части: observation от formal_reason (hop1) НЕ затёрта observation от memory_query (hop2). Оба маркера обязаны присутствовать в промпте 3-го reasoning.",
-        "matches": "(?i)conforms:\\s*true"
+        "contains": "conforms: True"
       },
       {
         "contains": "SHACL-SPARQL reference after successful validation"
       },
       {
-        "comment": "unified-delta durability: дельта 1-го цикла (вход formal_reason, ex:PositiveAgeShape) перенесена в E_prev через части прошлого enrich_fast и видна в промпте 3-го reasoning вместе с дельтой 2-го цикла (вход memory_query).",
+        "comment": "unified-delta durability: дельта 1-го цикла (вход formal_reason, ex:PositiveAgeShape) перенесена в E_prev через части прошлого enrich_fast и видна в промпте 4-го reasoning (finalize) вместе с дельтой 2-го цикла (вход memory_query).",
         "contains": "ex:PositiveAgeShape"
       }
     ],

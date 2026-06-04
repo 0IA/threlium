@@ -72,6 +72,8 @@ FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
     stub_tag="stub-formal-reason-chain-01",
     body_head=f"{E2E_FORMAL_REASON_BODY_MARKER}\ne2e formal_reason chain validation test body",
     min_chat_completion_posts=4,
+    # reasoning #1 logic, #2 query; #3 tasks_upsert — позже, отдельный journal needle.
+    min_reasoning_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
@@ -88,7 +90,8 @@ FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-formal-reason-verified-answer",
-    wiremock_journal_ready_needle="call_e2e_response_finalize_logic",
+    # После tasks_upsert (ledger open_count=0) — короткое окно до finalize/egress в GreenMail poll.
+    wiremock_journal_ready_needle="call_e2e_tasks_ledger_phase_query_done_ledger_done",
 )
 
 
@@ -132,6 +135,8 @@ def test_formal_reason_chain_full_pipeline(
         correlation_key,
     ):
         try:
+            rt = discover_runtime(project, repo_root=REPO_ROOT)
+            wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
             assert_full_mailflow_pipeline(
                 FORMAL_REASON_CHAIN_SPEC,
                 project=project,
@@ -141,8 +146,6 @@ def test_formal_reason_chain_full_pipeline(
                 correlation_key=correlation_key,
             )
             _assert_unified_delta_in_reasoning_journal(project, stub_tag)
-            rt = discover_runtime(project, repo_root=REPO_ROOT)
-            wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
             assert_all_reasoning_gate_absent(wm_base, stub_tag)
             mq_matches = find_wiremock_requests_by_body_contains(
                 wm_base, E2E_MEMORY_QUERY_REASONING_MARKER, stub_tag=stub_tag

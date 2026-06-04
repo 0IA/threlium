@@ -18,7 +18,7 @@
         "contains": "\"tools\""
       },
       {
-        "matches": "(?i)conforms:\\s*true"
+        "contains": "conforms: True"
       },
       {
         "comment": "unified-delta: вход reasoning -> formal_reason (полный shapes_ttl) попадает в промпт 2-го reasoning через <conversation_delta>. Маркер ex:PositiveAgeShape есть только во входе стадии, не в observation-note (та опускает shapes/facts_ttl).",
