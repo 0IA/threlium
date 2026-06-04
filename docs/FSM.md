@@ -410,7 +410,7 @@ def emit_transition_preserving_payload(
 | Content-ID | Источник | Примечание |
 |---|---|---|
 | `<user-message>` | `lightrag/enrich_incoming_user_text.j2` | ВСЕГДА. Canonical user message. |
-| `<graph-answer>` | Prose из `lightrag/graph_answer*.j2` (`format_graph_answer_part`) | Если RAG не пуст. Один проход `lightrag_query.j2` → один `aquery` (без отдельного plan-LLM). |
+| `<graph-answer>` | Prose из `lightrag/graph_answer*.j2` (`format_graph_answer_part`) | Если RAG не пуст. Один проход `lightrag_query.j2` → один `aquery` (без отдельного plan-LLM). Парсинг `lightrag.raw` толерантен к типам полей LightRAG (`LightragQueryData.from_wire`, все поля `str`); часть опциональна. |
 | `<{sha256(body)}@history>` × N | Гранулярные `<history>` leaf-части из `ctx.all_messages` | Unified-история едет отдельными CID (как `enrich_fast` splice), не merged блобом; reducible под overflow-by-X. |
 | `<task-init>` / `<task-state>` | `_finalize_task_mime_parts` (seed + late hypotheses) | Шаг 7–8; mandatory. |
 | `<thread-memory>` | `lightrag/mail_context.j2` по `ctx.thread_memory_msgs` | Только `to:thread_memory@localhost` текущего треда. |

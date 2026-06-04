@@ -617,7 +617,8 @@ query = render_prompt(
 query = trim_from_end_tokens(build_tokenizer(config), query, lightrag_query_budget(config))
 raw_result = await rag.aquery(query, param=QueryParam(...), system_prompt=...)  # один проход
 envelope = _build_lightrag_envelope(raw_result=raw_result, ...)
-graph_answer = EnrichGraphAnswerText.parse(json.dumps(envelope, indent=2))
+graph_prose = format_graph_answer_part(lightrag_envelope, config.enrich)
+graph_answer = EnrichGraphAnswerText.parse_present_optional(graph_prose)
 # Шаг 7: late hypotheses на полном контексте (graph → memory → existing_subtasks → unified), тоже token-capped.
 # Backpack: granular <history> CID (не merged unified) + <graph-answer> + <task-init> + memory.
 backpack = build_context_backpack_multipart(msg, user_message_text=..., graph_answer=graph_answer, history_parts=..., ...)
