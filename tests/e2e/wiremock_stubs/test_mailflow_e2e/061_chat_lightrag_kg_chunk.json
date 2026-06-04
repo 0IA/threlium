@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-mailflow-e2e-01::{{request.headers.[x-threlium-thread-root]}}"
+        "hasContext": "stub-mailflow-e2e-01::{{request.headers.[X-Threlium-Thread-Root]}}"
       }
     }
   },

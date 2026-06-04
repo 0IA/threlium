@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-reasoning-litellm-live-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-reasoning-litellm-live-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_length_truncated_done",
         "hasNotProperty": "phase_tasks_ledger_done",
         "hasNotProperty": "phase_standard_tasks_ledger"
@@ -67,7 +67,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-reasoning-litellm-live-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-reasoning-litellm-live-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_tasks_ledger_done": "1"
         }

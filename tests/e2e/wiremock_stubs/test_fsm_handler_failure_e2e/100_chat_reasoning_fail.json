@@ -27,7 +27,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-fsm-handler-failure-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-fsm-handler-failure-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "active",
         "hasNotProperty": "phase_failure_seen"
       }
@@ -49,7 +49,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-fsm-handler-failure-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-fsm-handler-failure-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_failure_seen": "1"
         }

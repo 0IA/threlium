@@ -19,14 +19,18 @@
       },
       {
         "contains": "E2E-FORMAL-REASON-CHAIN-BODY"
+      },
+      {
+        "comment": "Повторные completion в том же _decide после recordState phase_formal_reason_done у 100_: тело без conforms, фаза уже выставлена.",
+        "doesNotContain": "conforms: True"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-formal-reason-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_formal_reason_done"
+        "hasProperty": "phase_formal_reason_done",
+        "hasNotProperty": "phase_query_done"
       }
     }
   },
@@ -39,7 +43,7 @@
       "response-template"
     ],
     "jsonBody": {
-      "id": "chatcmpl-e2e-formal-reason-reasoning-1",
+      "id": "chatcmpl-e2e-formal-reason-reasoning-1-retry",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -64,16 +68,5 @@
         }
       ]
     }
-  },
-  "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "stub-formal-reason-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_formal_reason_done": "1"
-        }
-      }
-    }
-  ]
+  }
 }

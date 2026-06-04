@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-cli-discovery-chain-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-cli-discovery-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_cli_intent_done_ledger_done",
         "hasNotProperty": "phase_finalize_done"
       }
@@ -69,7 +69,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-cli-discovery-chain-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-cli-discovery-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_finalize_done": "1"
         }

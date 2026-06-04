@@ -18,7 +18,7 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "conforms: True"
+        "matches": "(?i)conforms:\\s*true"
       },
       {
         "comment": "unified-delta: вход reasoning -> formal_reason (полный shapes_ttl) попадает в промпт 2-го reasoning через <conversation_delta>. Маркер ex:PositiveAgeShape есть только во входе стадии, не в observation-note (та опускает shapes/facts_ttl).",
@@ -28,7 +28,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-formal-reason-chain-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-formal-reason-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_formal_reason_done",
         "hasNotProperty": "phase_query_done"
       }
@@ -73,7 +73,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-formal-reason-chain-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-formal-reason-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_query_done": "1"
         }

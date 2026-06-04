@@ -5,7 +5,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-telegram-wiremock-live-e2e-private-tail-307::{{request.headers.[x-threlium-thread-root]}}"
+        "hasContext": "stub-telegram-wiremock-live-e2e-private-tail-307::{{request.headers.[X-Threlium-Thread-Root]}}"
       }
     }
   },

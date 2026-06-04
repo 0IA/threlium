@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-resp-edit-delete-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-resp-edit-delete-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_append_1",
         "hasNotProperty": "phase_append_2"
       }
@@ -66,7 +66,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-resp-edit-delete-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-resp-edit-delete-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_append_2": "1"
         }

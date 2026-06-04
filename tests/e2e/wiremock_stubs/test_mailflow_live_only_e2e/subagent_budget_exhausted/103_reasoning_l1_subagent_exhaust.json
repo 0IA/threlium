@@ -21,7 +21,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_l1_tasks_ledger_done",
         "hasNotProperty": "phase_l1_subagent_attempted"
       }
@@ -63,7 +63,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-mailflow-live-sat-budget-exhausted-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_l1_subagent_attempted": "1"
         }

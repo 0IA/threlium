@@ -10,7 +10,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-mailflow-live-hitl-mx-no-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "live_hitl_h03_reject"
       }
     }

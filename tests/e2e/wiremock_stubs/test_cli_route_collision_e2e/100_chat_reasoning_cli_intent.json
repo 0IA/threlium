@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-cli-route-collision-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-cli-route-collision-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "active",
         "hasNotProperty": "phase_cli_intent_done"
       }
@@ -69,7 +69,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-cli-route-collision-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-cli-route-collision-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_cli_intent_done": "1"
         }

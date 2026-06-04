@@ -21,7 +21,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-subagent-frame-iso-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-subagent-frame-iso-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_parent_resume_ledger_done",
         "hasNotProperty": "phase_parent_resume_done"
       }
@@ -63,7 +63,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-subagent-frame-iso-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-subagent-frame-iso-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_parent_resume_done": "1"
         }

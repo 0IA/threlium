@@ -21,7 +21,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-mailflow-live-hitl-mx-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-mailflow-live-hitl-mx-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "live_hitl_h01",
         "hasNotProperty": "live_hitl_h01_tasks_done"
       }
@@ -63,7 +63,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-mailflow-live-hitl-mx-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-mailflow-live-hitl-mx-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "live_hitl_h01_tasks_done": "1"
         }

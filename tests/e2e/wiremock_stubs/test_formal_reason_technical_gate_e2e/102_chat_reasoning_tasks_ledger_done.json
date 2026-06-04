@@ -27,7 +27,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-formal-reason-technical-gate-01::{{request.headers.[x-threlium-thread-root]}}",
+        "hasContext": "stub-formal-reason-technical-gate-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_tech_retry_done",
         "hasNotProperty": "phase_tech_ledger_done"
       }
@@ -69,7 +69,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-formal-reason-technical-gate-01::{{request.headers.[x-threlium-thread-root]}}",
+        "context": "stub-formal-reason-technical-gate-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_tech_ledger_done": "1"
         }
