@@ -113,7 +113,7 @@ flowchart LR
 | `unified_mail_context` в `enrich_task_hypotheses.j2` | rendered full thread text (`mail_context.j2`), не часть backpack |
 | `enrich_task_plan` / `enrich_task_hypotheses` | единственные enrich task LLM call sites |
 | WireMock `081_*` / `083_*` | seed plan / late hypotheses |
-| `tier_preview_chars` | preview в `_render_mail_context_full` (hypotheses only) |
+| `mail_context.j2` | полный body каждого письма (`history_text`), без MCKP tier 2/3 |
 | `_LEGACY_UNIFIED_MAIL_CONTEXT_CID` в `mime_reform.py` | только чтобы **не копировать** старый blob в `enrich_fast` splice |
 
 ---
@@ -227,5 +227,4 @@ pytest tests/e2e/test_unified_context_roles_e2e.py tests/e2e/test_summarize_cont
 ## Открытые хвосты
 
 1. **Bake + e2e** на свежем SUT после удаления `scipy` и смены enrich/reasoning.
-2. **`mail_context.j2` tier 2/3** — ветки не используются (`tier_assignments={}`); можно упростить отдельным PR.
-3. **`scripts/migrate_wiremock_call_sites.py`** — `enrich_plan` в имени файла мапится на `enrich_task_plan` (legacy migration helper).
+2. **`scripts/migrate_wiremock_call_sites.py`** — `enrich_plan` в имени файла мапится на `enrich_task_plan` (legacy migration helper).
