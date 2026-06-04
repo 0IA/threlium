@@ -1,0 +1,29 @@
+{
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/state/reset_formal_reason_phases"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "context": "{{jsonPath request.body '$.correlation_key'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{jsonPath request.body '$.correlation_key'}}",
+        "state": {
+          "phase_formal_reason_done": "null",
+          "phase_query_done": "null",
+          "phase_query_done_ledger_done": "null"
+        }
+      }
+    }
+  ]
+}

@@ -312,6 +312,33 @@ def composite_context_key(stub_tag: str, correlation_key: str) -> str:
     return f"{stub_tag}::{correlation_key}"
 
 
+def wiremock_e2e_state_reset_formal_reason_phases_post_url(public_base: str) -> str:
+    """Публичный URL стаба ``008_e2e_state_reset_formal_reason_phases.json`` (сценарный каталог)."""
+    root = _normalize_wiremock_public_root(public_base)
+    return f"{root}/__threlium/e2e/state/reset_formal_reason_phases"
+
+
+def wiremock_state_reset_formal_reason_phases(
+    public_base: str,
+    correlation_key: str,
+    *,
+    timeout: float = TIMEOUT_POLL_SHORT,
+) -> None:
+    """Удалить фазовые свойства formal_reason chain из контекста (``recordState`` → ``\"null\"``).
+
+    Сбрасывает ``phase_formal_reason_done``, ``phase_query_done``,
+    ``phase_query_done_ledger_done`` без трогания ``active`` и прочих ключей.
+    """
+    with _wiremock_admin_api_exclusive(timeout=timeout):
+        url = wiremock_e2e_state_reset_formal_reason_phases_post_url(public_base)
+        r = _wm_session().post(
+            url,
+            json={"correlation_key": correlation_key},
+            timeout=timeout,
+        )
+        r.raise_for_status()
+
+
 def wiremock_state_seed_context(
     public_base: str, correlation_key: str, *, timeout: float = TIMEOUT_POLL_SHORT
 ) -> None:
@@ -1611,6 +1638,10 @@ def prepare_wiremock_scenario(
             reuse_admin_lock=True,
         )
         remove_wiremock_journal_by_stub_tag(public_base, tag=stub_tag, timeout=timeout)
+        if (stub_dir / "008_e2e_state_reset_formal_reason_phases.json").is_file():
+            wiremock_state_reset_formal_reason_phases(
+                public_base, ctx_key, timeout=timeout
+            )
         wiremock_state_seed_context(public_base, ctx_key, timeout=timeout)
 
 
@@ -2388,6 +2419,71 @@ def count_wiremock_chat_completion_posts_for_stub(
             continue
         n += 1
     return n
+
+
+def count_wiremock_reasoning_chat_posts_for_stub(
+    public_base: str,
+    *,
+    stub_tag: str,
+    anchor_needle: str | None = None,
+) -> int:
+    """POST ``/chat/completions`` с ``X-Threlium-Call-Site: reasoning`` для ``stub_tag``."""
+    n = 0
+    for ent in journal_entries_for_stub_tag(public_base, stub_tag=stub_tag):
+        req = ent.get("request")
+        if not isinstance(req, dict):
+            continue
+        if str(req.get("method") or "").upper() != "POST":
+            continue
+        url = str(req.get("url") or req.get("absoluteUrl") or "")
+        if "/chat/completions" not in url:
+            continue
+        if _wiremock_headers_get_ci(req.get("headers"), "X-Threlium-Call-Site") != "reasoning":
+            continue
+        haystack = _journal_request_anchor_haystack(ent)
+        if anchor_needle is not None and anchor_needle not in haystack:
+            continue
+        n += 1
+    return n
+
+
+def wait_for_wiremock_reasoning_chat_posts_for_stub(
+    public_base: str,
+    *,
+    stub_tag: str,
+    anchor_needle: str | None,
+    min_posts: int,
+    wait_timeout_sec: float | None = None,
+    diag_callback: Callable[[], None] | None = None,
+) -> None:
+    """Poll: ≥ ``min_posts`` reasoning POST ``/chat/completions`` (фильтр ``stub_tag`` + якорь)."""
+    w = float(TIMEOUT_POLL_SHORT) if wait_timeout_sec is None else float(wait_timeout_sec)
+
+    def _probe() -> bool:
+        return (
+            count_wiremock_reasoning_chat_posts_for_stub(
+                public_base,
+                stub_tag=stub_tag,
+                anchor_needle=anchor_needle,
+            )
+            >= min_posts
+        )
+
+    def _msg() -> str:
+        n = count_wiremock_reasoning_chat_posts_for_stub(
+            public_base, stub_tag=stub_tag, anchor_needle=anchor_needle
+        )
+        return (
+            f"expected at least {min_posts} reasoning POST /chat/completions in WireMock journal "
+            f"for stub_tag={stub_tag!r} (anchor={anchor_needle!r}) within {w}s, found {n}"
+        )
+
+    _poll_wiremock_with_tenacity(
+        probe=_probe,
+        wait_timeout_sec=wait_timeout_sec,
+        diag_callback=diag_callback,
+        build_error=_msg,
+    )
 
 
 def _journal_entry_response_status(entry: dict[str, Any]) -> int:

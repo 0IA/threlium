@@ -79,8 +79,9 @@ class MailflowScenarioSpec:
     expect_notmuch_stage_folders: tuple[str, ...] | None = None
     reply_subject_needle: str | None = None
     reply_body_needle: str | None = None
-    # Длинные multi-hop: poll журнала WireMock (request/response) до GreenMail, чтобы
-    # min_chat_completion_posts на раннем lightrag не «съел» TIMEOUT_POLL_SHORT.
+    # Длинные multi-hop: poll только reasoning POST (не все chat/LightRAG) до needle/GreenMail.
+    min_reasoning_chat_completion_posts: int | None = None
+    # Poll журнала WireMock (request/response) до GreenMail после reasoning-порога выше.
     wiremock_journal_ready_needle: str | None = None
     assert_thread_no_unread: bool = False
     length_recovery_e2e: bool = False
@@ -427,6 +428,34 @@ def mailflow_inject_and_wait(
         )
 
 
+def _mailflow_wait_reasoning_chat_posts_if_configured(
+    spec: MailflowScenarioSpec,
+    *,
+    project: str,
+    stub_tag: str,
+    correlation_key: str,
+) -> None:
+    min_r = spec.min_reasoning_chat_completion_posts
+    if min_r is None:
+        return
+    from tests.e2e.wiremock_client import (  # noqa: PLC0415
+        wait_for_wiremock_reasoning_chat_posts_for_stub,
+        wiremock_public_base,
+    )
+
+    rt = discover_runtime(project, repo_root=REPO_ROOT)
+    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+    mailflow_log_phase(
+        f"{spec.label}: wait reasoning chat posts>={min_r} (call-site=reasoning)"
+    )
+    wait_for_wiremock_reasoning_chat_posts_for_stub(
+        wm,
+        stub_tag=stub_tag,
+        anchor_needle=correlation_key,
+        min_posts=min_r,
+    )
+
+
 def _mailflow_wait_wiremock_journal_ready_if_configured(
     spec: MailflowScenarioSpec,
     *,
@@ -471,6 +500,12 @@ def assert_full_mailflow_pipeline(
     wait_for_notmuch_message(project, message_id=nm_inner, repo_root=REPO_ROOT)
     mailflow_log_phase(f"{spec.label}: notmuch OK (+{time.monotonic() - t0:.1f}s)")
     mailflow_pipeline_diag(project, anchor_message_id=nm_inner, repo_root=REPO_ROOT)
+    _mailflow_wait_reasoning_chat_posts_if_configured(
+        spec, project=project, stub_tag=stub_tag, correlation_key=correlation_key
+    )
+    _mailflow_wait_wiremock_journal_ready_if_configured(
+        spec, project=project, stub_tag=stub_tag, correlation_key=correlation_key
+    )
     assert_wiremock_mailflow_received_chat_completion_posts(
         project,
         stub_tag=stub_tag,
@@ -491,11 +526,6 @@ def assert_full_mailflow_pipeline(
             min_posts=spec.min_rerank_posts,
             repo_root=REPO_ROOT,
         )
-    # Multi-hop: ответ пользователю только после egress; для длинных контуров см.
-    # ``wiremock_journal_ready_needle`` (poll finalize-стаба до GreenMail).
-    _mailflow_wait_wiremock_journal_ready_if_configured(
-        spec, project=project, stub_tag=stub_tag, correlation_key=correlation_key
-    )
     wait_for_greenmail_user_reply(
         project,
         raw_id=raw_id,
