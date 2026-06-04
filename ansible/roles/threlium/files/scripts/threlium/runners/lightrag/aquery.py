@@ -7,12 +7,35 @@ from typing import Any
 
 from lightrag import QueryParam
 
+from threlium.litellm_route_context import get_litellm_http_correlation
 from threlium.runners.lightrag._lifecycle import daemon_lightrag, run_rag_coroutine
 from threlium.settings import ThreliumSettings
+from threlium.types import LitellmCallSite
+from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
 _ALLOWED_QUERY_MODES = frozenset(
     {"local", "global", "hybrid", "naive", "mix", "bypass"}
 )
+
+
+def build_query_correlation(settings: ThreliumSettings) -> dict[str, str]:
+    """Correlation для RAG query LLM-вызова: **всегда** стампит ``lightrag_query`` call-site.
+
+    Call-site нужен ``llm_func`` (``_adapters.py``), чтобы выбрать фазу ``generate_rag_answer``
+    (а не ``extract_knowledge_graph`` по дефолтной базе ``lightrag_index``). HTTP route-заголовки
+    (From/To/Message-ID) подмешиваются **только** при ``e2e.litellm_route_correlation`` — merge
+    в ``merge_litellm_call_kwargs_and_log`` gated этим флагом; на проде dict несёт лишь call-site
+    для выбора фазы и в HTTP не утекает.
+    """
+    correlation: dict[str, str] = {}
+    if settings.e2e.litellm_route_correlation:
+        snap = get_litellm_http_correlation()
+        if snap:
+            correlation.update(snap)
+    correlation[LitellmCorrelationHeader.CALL_SITE.value] = (
+        LitellmCallSite.LIGHTRAG_QUERY.value
+    )
+    return correlation
 
 
 def build_lightrag_query_param(cfg: ThreliumSettings) -> QueryParam:
@@ -100,6 +123,7 @@ def run_lightrag_aquery(
 
 __all__ = [
     "build_lightrag_query_param",
+    "build_query_correlation",
     "lightrag_query_raw",
     "run_lightrag_aquery",
 ]

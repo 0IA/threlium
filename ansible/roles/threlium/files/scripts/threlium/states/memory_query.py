@@ -7,14 +7,16 @@ from email.message import EmailMessage
 
 from threlium.fsm_emit_semantic import emit_to_enrich_fast
 from threlium.knowledge_fsm import parse_memory_query_payload
-from threlium.litellm_route_context import get_litellm_http_correlation
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 
-from threlium.runners.lightrag.aquery import build_lightrag_query_param, run_lightrag_aquery
+from threlium.runners.lightrag.aquery import (
+    build_lightrag_query_param,
+    build_query_correlation,
+    run_lightrag_aquery,
+)
 from threlium.settings import ThreliumSettings
-from threlium.types import EnrichCalleeHistoryText, EnrichRequestEchoText, FsmStage, LitellmCallSite, PromptPath
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
+from threlium.types import EnrichCalleeHistoryText, EnrichRequestEchoText, FsmStage, PromptPath
 
 
 def main(
@@ -24,20 +26,11 @@ def main(
     if payload is None:
         raise RuntimeError("memory_query: invalid payload")
 
-    rag_correlation: dict[str, str] | None = None
-    if config.e2e.litellm_route_correlation:
-        snap = get_litellm_http_correlation()
-        rag_correlation = dict(snap) if snap else None
-        if rag_correlation is not None:
-            rag_correlation[LitellmCorrelationHeader.CALL_SITE.value] = (
-                LitellmCallSite.LIGHTRAG_QUERY.value
-            )
-
     query_param = build_lightrag_query_param(config)
     result = run_lightrag_aquery(
         payload.query,
         settings=config,
-        correlation=rag_correlation,
+        correlation=build_query_correlation(config),
         param=query_param,
         query_api=config.lightrag.query_api,
     )

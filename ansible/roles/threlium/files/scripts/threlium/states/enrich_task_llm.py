@@ -68,9 +68,25 @@ def _invoke_enrich_task_subtasks_llm(
             context=context,
         )
         parsed = parse_assistant(assistant)
-        return list(parsed.subtasks)
+        subtasks = list(parsed.subtasks)
+        if not subtasks:
+            # Модель вызвала tool, но вернула пустой subtasks[] — отличаем от сбоя вызова.
+            log.warning(
+                f"{context}_llm_empty_subtasks",
+                site=site.value,
+                prompt_chars=len(prompt),
+            )
+        return subtasks
     except Exception as exc:  # noqa: BLE001 — fail-open: seed/гипотезы опциональны
-        log.warning(f"{context}_llm_failed", error=str(exc))
+        # Тихий fail-open маскирует пустой ledger на проде: логируем как error с полями для
+        # диагностики (site / тип исключения / размер prompt — без самого prompt).
+        log.error(
+            f"{context}_llm_failed",
+            site=site.value,
+            exception_type=type(exc).__name__,
+            error=str(exc),
+            prompt_chars=len(prompt),
+        )
         return []
 
 

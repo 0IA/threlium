@@ -124,11 +124,14 @@ def build_rag(settings: ThreliumSettings) -> LightRAG:
     return LightRAG(**rag_kwargs)
 
 
-def install_e2e_correlation_bridge(rag: LightRAG) -> None:
+def install_litellm_correlation_bridge(rag: LightRAG) -> None:
     """Wrap llm/embedding/rerank funcs with ContextVar → kwargs bridge.
 
-    Called ONLY when e2e_litellm_route_correlation is enabled, AFTER initialize_storages
-    (when LightRAG has already installed priority_limit_async_func_call wrappers).
+    Installed ALWAYS (prod + e2e), AFTER initialize_storages (when LightRAG has already installed
+    priority_limit_async_func_call wrappers). The bridge only forwards correlation when the ctxvar
+    is set; query calls stamp ``lightrag_query`` (→ ``generate_rag_answer`` phase) even on prod,
+    while index calls leave the ctxvar unset and keep the ``lightrag_index`` extraction phase. HTTP
+    route headers stay e2e-gated in ``merge_litellm_call_kwargs_and_log``.
     """
     original_llm = rag.llm_model_func
 

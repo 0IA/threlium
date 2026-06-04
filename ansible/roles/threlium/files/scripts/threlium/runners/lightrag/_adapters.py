@@ -74,6 +74,10 @@ def build_llm_func(
             "_threlium_e2e_correlation", None
         )
         if correlation is not None:
+            # Shallow copy: ``kg_query`` делает keyword LLM, затем answer LLM в одном ctxvar-scope.
+            # Без копии первая мутация granular call-site (``extract_query_keywords``) портит base
+            # ``lightrag_query`` в ctxvar → финальный ответ уходит в ``extract_knowledge_graph``.
+            correlation = dict(correlation)
             base_cs = correlation.get(LitellmCorrelationHeader.CALL_SITE.value)
             granular_cs = detect_lightrag_call_site_wire(
                 base_cs,
@@ -143,10 +147,11 @@ def build_llm_func(
             args_struct = parse_tool_call_for_phase(msg_obj, phase)
             wire = struct_to_lightrag_wire(phase, args_struct)
             result = to_lightrag_return_value(wire)
-            log.debug(
+            log.info(
                 "lightrag_tool_call",
                 phase=phase.call_site.value,
                 tool_name=phase.tool_name.value,
+                call_site_wire=call_site_wire,
             )
             return result
 

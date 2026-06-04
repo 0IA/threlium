@@ -55,7 +55,11 @@ from threlium.mime_reform import (
 )
 from threlium.nm import require_fsm_message_id
 from threlium.prompts import render_prompt
-from threlium.runners.lightrag.aquery import build_lightrag_query_param, run_lightrag_aquery
+from threlium.runners.lightrag.aquery import (
+    build_lightrag_query_param,
+    build_query_correlation,
+    run_lightrag_aquery,
+)
 from threlium.settings import ThreliumSettings
 from threlium.states.enrich_task_llm import (
     invoke_task_hypothesis_subtasks,
@@ -147,7 +151,14 @@ def _build_lightrag_envelope(
             log.warning("aquery_llm_streaming_ignored")
         llm_resp.pop("response_iterator", None)
         sanitized["llm_response"] = llm_resp
-        envelope["lightrag"]["llm_text"] = llm_resp.get("content")
+        content = llm_resp.get("content")
+        envelope["lightrag"]["llm_text"] = content
+        if isinstance(content, str) and "entity<|#|>" in content:
+            log.warning(
+                "lightrag_query_answer_wire_format",
+                hint="expected generate_rag_answer prose; check llm_func correlation copy + query cache",
+                content_prefix=content[:120],
+            )
     envelope["lightrag"]["raw"] = sanitized
     return envelope
 
@@ -311,6 +322,15 @@ def _finalize_task_mime_parts(
         new_total=len(all_new),
         total=len(combined.subtasks),
     )
+    if not all_new and not combined.subtasks:
+        # Письмо enrich→reasoning уйдёт с пустым ledger → response_finalize HARD-GATE.
+        # Делаем «тихий пустой outbound» заметным в journal для диагностики (seed+hyp оба []).
+        log.warning(
+            "task_ledger_empty_outbound",
+            seeded=len(seed_defs),
+            hypotheses=len(hyp_defs),
+            existing_ops=len(existing_ops),
+        )
     return parts, combined
 
 
@@ -527,31 +547,29 @@ def _emit_summarize_overflow(
 
 def _build_rag_correlation(
     config: ThreliumSettings, mid_w: RfcMessageIdWire | None
-) -> dict[str, str] | None:
-    """e2e route correlation snapshot со стампом ``LIGHTRAG_QUERY`` call-site."""
-    if not config.e2e.litellm_route_correlation:
-        return None
-    snap = get_litellm_http_correlation()
-    th = threading.current_thread()
-    route_k = _HDR.ROUTE.value
-    route_v = snap.get(route_k) if snap else None
-    rt = route_v if isinstance(route_v, str) else None
-    log.debug(
-        "e2e_litellm_tls",
-        thread_name=th.name,
-        thread_ident=threading.get_ident(),
-        snap_is_none=snap is None,
-        snap_keys=sorted(snap.keys()) if snap else [],
-        route_header_present=bool(snap and route_k in snap),
-        route_tail=e2e_route_wire_tail(rt),
-        message_id=mid_w.value if mid_w else None,
-    )
-    rag_correlation = dict(snap) if snap else None
-    if rag_correlation is not None:
-        rag_correlation[LitellmCorrelationHeader.CALL_SITE.value] = (
-            LitellmCallSite.LIGHTRAG_QUERY.value
+) -> dict[str, str]:
+    """RAG query correlation: всегда стамп ``LIGHTRAG_QUERY`` call-site (фаза ``generate_rag_answer``).
+
+    Route-заголовки подмешиваются только при e2e; на проде dict несёт лишь call-site и в HTTP не
+    утекает (см. :func:`threlium.runners.lightrag.aquery.build_query_correlation`).
+    """
+    if config.e2e.litellm_route_correlation:
+        snap = get_litellm_http_correlation()
+        th = threading.current_thread()
+        route_k = _HDR.ROUTE.value
+        route_v = snap.get(route_k) if snap else None
+        rt = route_v if isinstance(route_v, str) else None
+        log.debug(
+            "e2e_litellm_tls",
+            thread_name=th.name,
+            thread_ident=threading.get_ident(),
+            snap_is_none=snap is None,
+            snap_keys=sorted(snap.keys()) if snap else [],
+            route_header_present=bool(snap and route_k in snap),
+            route_tail=e2e_route_wire_tail(rt),
+            message_id=mid_w.value if mid_w else None,
         )
-    return rag_correlation
+    return build_query_correlation(config)
 
 
 def main(
