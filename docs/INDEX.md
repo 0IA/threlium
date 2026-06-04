@@ -586,7 +586,7 @@ Mailfilter делает `notmuch insert` → файл в `stages/<stage>/Maildir
 Результат enrich — `multipart/mixed` с гранулярными MIME-частями по Content-ID (`build_context_backpack_multipart`):
 
 1. **`<user-message>`** — рендер `prompts/lightrag/enrich_incoming_user_text.j2` по входящему `EmailMessage`.
-2. **`<graph-answer>`** — prose-сэмпл LightRAG (`graph_answer*.j2`: formulated query, subgraph, answer).
+2. **`<graph-answer>`** — prose-сэмпл LightRAG (`graph_answer*.j2`: mermaid subgraph с описаниями сущностей/связей + `## Answer`).
 3. **`<{hash}@history>` × N** — хронология треда (leaf-CID из `<history>`-частей писем); в reasoning → `<conversation_history>` (синтез без `X-Threlium-Origin`).
 4. **`<thread-memory>`** — только thread_memory-записи текущего треда (`lightrag/mail_context.j2` по `thread_memory_msgs`).
 5. **`<global-memory>`** — global_memory-записи из всех тредов (`lightrag/mail_context.j2` по `global_memory_msgs`).
@@ -623,6 +623,8 @@ graph_answer = EnrichGraphAnswerText.parse_present_optional(graph_prose)
 # Backpack: granular <history> CID (не merged unified) + <graph-answer> + <task-init> + memory.
 backpack = build_context_backpack_multipart(msg, user_message_text=..., graph_answer=graph_answer, history_parts=..., ...)
 ```
+
+**Call-site фазы (always-on, прод + e2e):** каждый query-вызов штампится `X-Threlium-Call-Site: lightrag_query` через `build_query_correlation` ([`runners/lightrag/aquery.py`](../ansible/roles/threlium/files/scripts/threlium/runners/lightrag/aquery.py)) → `run_rag_coroutine` ставит ctxvar → мост `install_litellm_correlation_bridge` пробрасывает его в `llm_func`, где `detect_lightrag_call_site_wire` выбирает фазу **`generate_rag_answer`** (а не `extract_knowledge_graph`). В одном `kg_query` сначала идёт keyword LLM (`extract_query_keywords`), затем answer LLM — **`llm_func` обязан копировать correlation dict перед мутацией granular call-site**, иначе второй вызов видит испорченный base и пишет wire в `## Answer`. Smoke: `scripts/verify_lightrag_query_phase.py`. HTTP route-заголовки подмешиваются только при `e2e.litellm_route_correlation`; на проде dict несёт лишь call-site. После смены фазы на проде может понадобиться сброс `kv_store_llm_response_cache` (записи `*:query:*` с устаревшим wire). Индексация (`ainsert`) ctxvar не ставит — база `lightrag_index`.
 
 **Опции `QueryParam.mode`** (см. `lightrag/base.py`):
 

@@ -106,7 +106,7 @@ flowchart LR
 |---|---|:--:|:--:|:--:|---|
 | `ingress` | `enrich` (или `cli_resume`) | — | да | **нет** | **Только bridge + HITL router:** distill gateway (`From:` email/telegram/matrix@localhost) → `enrich` с `<user-query>` + distill `<history>`; HITL → `cli_resume` только `<system>`. Internal стадии в ingress **не** эмитят. |
 | `enrich` | `reasoning` / `summarize_context` | — | — | да² | → `reasoning`: **`<system>` НЕТ** — backpack (§4): core-CID + гранулярные `<history>` leaf; reasoning собирает `<conversation_history>` из частей без `X-Threlium-Origin`, `<conversation_delta>` — с origin (enrich_fast). ²Только → `summarize_context` есть `<system>`. |
-| `enrich_fast` | `reasoning` / `enrich` | — | — | **релей** | Relay-сборщик дельты: `<history>` + `<system>` из окна (штампует `origin`); replace `<response-state>`/`<task-state>`. Старые `@system` из `E_prev` не копируются — только свежие из дельты. При `backpack_token_total(spliced) > reasoning_effective_budget` → **`enrich@`** (canonical `user_query` по IRT). Иначе → `reasoning`; `reasoning` не кладёт `<system>` в LLM-промпт, но читает для FSM gate (`formal_reason`). Token-trim на стадии reasoning **нет**. |
+| `enrich_fast` | `reasoning` / `enrich` | — | — | **релей** | Relay-сборщик дельты: `<history>` + `<system>` из окна (штампует `origin`); replace `<response-state>`/`<task-state>`. Старые `@system` из `E_prev` не копируются — только свежие из дельты. При `backpack_token_total(spliced) > reasoning_effective_budget` → **`enrich@`** (canonical `user_query` по IRT). Иначе → `reasoning`; `reasoning` не кладёт `<system>` в LLM-промпт; FSM gate (`formal_reason`) читает `FormalReasonResultPayload` по **IRT** с hop-письма `formal_reason@`, не из enrich-backpack ([`FORMAL_REASON_GATE.md`](FORMAL_REASON_GATE.md)). Token-trim на стадии reasoning **нет**. |
 | `reasoning` | tool | **нет** | **нет** | да | Чистый `<system>`-эмиттер tool-call (команда адресату). История — забота callee. На ВХОДЕ сам `<system>` не читает. |
 
 > **`<system>` на входе `reasoning` не нужен.** `reasoning` собирает контекст из core-CID частей
@@ -162,7 +162,7 @@ flowchart LR
 | Content-ID | Источник |
 |---|---|
 | `<user-message>` | canonical user text (§4.1: `enrich_incoming_user_text.j2` + `<user-query>` CID) |
-| `<graph-answer>` | Prose-сэмпл LightRAG (`graph_answer*.j2`: query + subgraph + answer) |
+| `<graph-answer>` | Prose-сэмпл LightRAG (`graph_answer*.j2`: mermaid subgraph + answer; без дубля query — canonical turn в `<user-message>`) |
 | `<{hash}@history>` × N | хронология треда из `<history>`-частей писем (`message_has_history`), гранулярно |
 | `<thread-memory>` / `<global-memory>` | memory-письма (намеренное дублирование маркеров) |
 | `<response-state>` | детерминированный пересчёт CRDT-буфера |
@@ -363,7 +363,7 @@ CID `<{sha256(body)}@history>` (без слияния в одно plain-тело
 **Tool-цикл (reasoning → formal_reason → enrich_fast → reasoning).** Каноническое описание
 (gate, `FormalReasonResultPayload`, relay `<system>`) — [`FORMAL_REASON_GATE.md`](FORMAL_REASON_GATE.md).
 Кратко: `reasoning → formal_reason` — только `<system>`-команда; callee — echo + observation +
-result JSON; `enrich_fast` релеит дельту (§5); prose в `<conversation_delta>`, gate по `<system>`.
+result JSON; `enrich_fast` релеит дельту (§5); prose в `<conversation_delta>`, gate по IRT + `<system>` hop-письма formal_reason.
 
 **Буфер ответа (append×N + observe + finalize).** `reasoning → response_append`: `<system>` =
 чанк. `response_append → enrich_fast`: preserving payload, **без** history (чанк не в памяти).

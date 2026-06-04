@@ -440,9 +440,12 @@ Subject: Help with report
 ...
 
 <graph-answer>
-Graph query: ...
-## Entities
-...
+```mermaid
+flowchart LR
+    ent_0["Entity (type): description"]
+    ent_0 -->|keywords| ent_1
+```
+
 ## Answer
 ...
 
