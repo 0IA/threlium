@@ -12,7 +12,6 @@ from .toolkit import (
     E2EComposeRuntime,
     E2EComposeRuntime,
     E2E_CTX_TRIM_HEAD_MARKER,
-    E2E_CTX_TRIM_JOURNAL_SLACK_CHARS,
     E2E_CTX_TRIM_TAIL_MARKER,
     MailflowScenarioSpec,
     REPO_ROOT,
@@ -28,9 +27,6 @@ from .wiremock_client import (
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
-
-# e2e group_vars: context_max_chars=8000
-E2E_CONTEXT_MAX_CHARS = 8000
 
 REASONING_CTX_TRIM_SPEC = MailflowScenarioSpec(
     label="reasoning_litellm_ctx_trim",
@@ -91,8 +87,6 @@ def test_reasoning_litellm_context_trim_mailflow(
                 correlation_key=correlation_key,
                 tail_marker=E2E_CTX_TRIM_TAIL_MARKER,
                 head_marker=E2E_CTX_TRIM_HEAD_MARKER,
-                max_body_chars=E2E_CONTEXT_MAX_CHARS,
-                journal_slack_chars=E2E_CTX_TRIM_JOURNAL_SLACK_CHARS,
             )
         except Exception:
             log.debug(

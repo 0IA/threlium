@@ -2789,10 +2789,8 @@ def assert_wiremock_reasoning_journal_preserves_context_tail(
     correlation_key: str,
     tail_marker: str,
     head_marker: str,
-    max_body_chars: int,
-    journal_slack_chars: int = 4096,
 ) -> None:
-    """Reasoning POST в журнале: хвост маркера сохранён, HEAD отброшен, user content ≤ лимит+slack."""
+    """Reasoning POST в журнале: TAIL маркер есть, HEAD старых ходов нет (post-summarize)."""
     entries = journal_entries_for_stub_tag(public_base, stub_tag=stub_tag)
     reasoning_user_bodies: list[str] = []
     for entry in entries:
@@ -2822,17 +2820,11 @@ def assert_wiremock_reasoning_journal_preserves_context_tail(
     if not tail_bodies:
         raise AssertionError(
             f"reasoning journal user content missing tail marker {tail_marker!r} "
-            "(trim_context_text expected to keep tail; prior thread turns may omit it)"
+            "(expected after summarize_context; prior thread turns may omit it)"
         )
     worst = max(tail_bodies, key=len)
     if head_marker in worst:
         raise AssertionError(
             f"reasoning journal user content still contains head marker {head_marker!r} "
-            "(expected trim from start)"
-        )
-    cap = max_body_chars + journal_slack_chars
-    if len(worst) > cap:
-        raise AssertionError(
-            f"reasoning journal user content length {len(worst)} exceeds "
-            f"{max_body_chars} + slack {journal_slack_chars} = {cap}"
+            "(expected summarized away from prior thread turns)"
         )
