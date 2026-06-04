@@ -1,46 +1,14 @@
-{#- Renders a list of EmailMessage objects as chronological context.
+{#- Renders a list of EmailMessage objects as chronological mail context.
     Used for thread/global/hypotheses mail context strings (not a MIME CID).
     Body is the message's <history> part(s) (history_text filter), not the raw
-    first text/plain (which may be the <system> payload). Each message is annotated
-    with its origin stage (tier_assignments_types[index]); the from -> to envelope
-    plus tool spec convey the semantics — no per-kind tags.
-    Tiered rendering via tier_assignments dict (index → tier level):
-    - Tier 1: full body
-    - Tier 2: headers + truncated body (preview)
-    - Tier 3: headers only (From/Date/Subject)
-    When tier_assignments is empty, all messages render with full body (backwards-compatible). -#}
-{% set body_preview_chars = preview_chars %}
-{% set total = total_messages %}
-{% set t1_count = tier_assignments.values() | select('equalto', 1) | list | length if tier_assignments else 0 %}
-{% set t2_count = tier_assignments.values() | select('equalto', 2) | list | length if tier_assignments else 0 %}
-{% if tier_assignments and t1_count > 0 %}
-[context: {{ total }} messages total, {{ t1_count }} full, {{ t2_count }} summarized, rest headers-only. Use reflect if needed information is in summarized/header messages.]
-{% endif %}
+    first text/plain (which may be the <system> payload). -#}
 {% for msg in messages %}
-{% set origin = tier_assignments_types.get(loop.index0, '?') if tier_assignments_types is defined else '?' %}
-{% set tier = tier_assignments.get(loop.index0, 1) if tier_assignments else 1 %}
-{% if tier == 1 %}
---- message {{ loop.index }} [from: {{ origin }}] ---
+--- message {{ loop.index }} ---
 From: {{ msg.get('From', '') }}
 Date: {{ msg.get('Date', '') }}
 Subject: {{ msg.get('Subject', '') }}
 {% set body = msg | history_text %}
 {% if body %}
 {{ body }}
-{% endif %}
-{% elif tier == 2 %}
---- message {{ loop.index }} [from: {{ origin }}, summary] ---
-From: {{ msg.get('From', '') }}
-Date: {{ msg.get('Date', '') }}
-Subject: {{ msg.get('Subject', '') }}
-{% set body = msg | history_text %}
-{% if body %}
-{{ body[:body_preview_chars] }}...
-{% endif %}
-{% else %}
---- message {{ loop.index }} [from: {{ origin }}, header] ---
-From: {{ msg.get('From', '') }}
-Date: {{ msg.get('Date', '') }}
-Subject: {{ msg.get('Subject', '') }}
 {% endif %}
 {% endfor %}

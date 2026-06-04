@@ -328,25 +328,21 @@ def _finalize_task_mime_parts(
     return parts, combined
 
 
-def _render_mail_context_full(messages: list[EmailMessage], config: ThreliumSettings) -> str:
-    """Полный рендер списка писем (full body, без MCKP-tier): unified / thread / global."""
+def _render_mail_context_full(messages: list[EmailMessage]) -> str:
+    """Полный рендер списка писем (все ``<history>``-части каждого письма): hypotheses / memory."""
     if not messages:
         return ""
     return render_prompt(
         PromptPath.LIGHTRAG_MAIL_CONTEXT,
         messages=messages,
-        tier_assignments={},
-        tier_assignments_types={},
-        preview_chars=config.enrich.tier_preview_chars,
-        total_messages=len(messages),
     ).strip()
 
 
-def _render_thread_context(messages: list[EmailMessage], config: ThreliumSettings) -> str:
+def _render_thread_context(messages: list[EmailMessage]) -> str:
     """Контекст треда для ``lightrag_query.j2`` — newest-first (хвост = старые письма)."""
     if not messages:
         return ""
-    return _render_mail_context_full(list(reversed(messages)), config)
+    return _render_mail_context_full(list(reversed(messages)))
 
 
 def _is_empty_rag_result(raw_result: dict[str, Any] | str | None, api: str) -> bool:
@@ -385,7 +381,7 @@ async def _enrich_lightrag_once(
     tokenizer: Any,
 ) -> EnrichResult:
     """Шаги 3b–6: один ``lightrag_query.j2`` (+ token cap) → один ``aquery`` → graph answer."""
-    thread_context = _render_thread_context(ctx.all_messages, cfg)
+    thread_context = _render_thread_context(ctx.all_messages)
     budget = lightrag_query_budget(cfg)
     query_text = render_prompt(
         PromptPath.LIGHTRAG_QUERY,
@@ -441,9 +437,9 @@ async def _enrich_lightrag_once(
 
     graph_prose = format_graph_answer_part(lightrag_envelope, cfg.enrich)
 
-    unified_full = _render_mail_context_full(ctx.all_messages, cfg)
-    thread_full = _render_mail_context_full(ctx.thread_memory_msgs, cfg)
-    global_full = _render_mail_context_full(ctx.global_memory_msgs, cfg)
+    unified_full = _render_mail_context_full(ctx.all_messages)
+    thread_full = _render_mail_context_full(ctx.thread_memory_msgs)
+    global_full = _render_mail_context_full(ctx.global_memory_msgs)
 
     return EnrichResult(
         graph_answer=EnrichGraphAnswerText.parse_present_optional(graph_prose),

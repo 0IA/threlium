@@ -675,8 +675,6 @@ class EnrichSettings(BaseModel):
         description="Резерв токенов под system+user shell summarize_context (pack budget).",
     )
 
-    tier_preview_chars: int = Field(default=200, ge=50, description="Символов preview в tier2.")
-
     graph_answer_max_entities: int = Field(
         default=40,
         ge=0,
