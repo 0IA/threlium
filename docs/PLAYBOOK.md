@@ -353,7 +353,7 @@ apt-пакеты `python3`, `python3-venv` и `python3-pip` ставятся в 
 
 ### 7.11. Режим e2e (`group_vars/e2e.yml`)
 
-Оверрайды для Docker-SUT: `threlium_fetchmail_host` / `threlium_msmtp_host` — внутренние (`greenmail`); host-порты GreenMail динамические (runtime discovery в `tests/e2e/helpers.py`); `threlium_fetchmail_tls: true` + `threlium_imap_ssl_verify: 0` для self-signed GreenMail cert; `threlium_openai_api_base=http://wiremock:8080` — compose-сервис WireMock ([TESTING.md §4.4](TESTING.md#44-wiremock-openai-http-mock-e2e)); `threlium_bundle_enabled=false`. `e2e_sut_container_id` передаётся через `-e` (используется как `ansible_host` при `ansible_connection=docker`).
+Оверрайды для Docker-SUT: `threlium_fetchmail_host` / `threlium_msmtp_host` — внутренние (`greenmail`); host-порты GreenMail динамические (runtime discovery в `tests/e2e/toolkit/runtime.py`); `threlium_fetchmail_tls: true` + `threlium_imap_ssl_verify: 0` для self-signed GreenMail cert; `threlium_openai_api_base=http://wiremock:8080` — compose-сервис WireMock ([TESTING.md §4.4](TESTING.md#44-wiremock-openai-http-mock-e2e)); `threlium_bundle_enabled=false`. `e2e_sut_container_id` передаётся через `-e` (используется как `ansible_host` при `ansible_connection=docker`).
 
 ### 7.12. Vault
 

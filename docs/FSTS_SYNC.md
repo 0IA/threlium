@@ -12,7 +12,7 @@
 - На **хосте** известен каталог репозозитория (`REPO_ROOT`); в примерах ниже: `/path/to/threlium`.
 - Порты: WireMock Admin обычно на хосте `127.0.0.1:9080` (см. проброс в compose); `sut` — `docker ps` по сервису `sut`.
 
-Пути **внутри контейнера `sut`** по умолчанию совпадают с переменными из [`tests/e2e/helpers.py`](../tests/e2e/helpers.py) (`THRELIUM_E2E_REMOTE_*` при необходимости переопределяют):
+Пути **внутри контейнера `sut`** по умолчанию совпадают с переменными из [`tests/e2e/toolkit/constants.py`](../tests/e2e/toolkit/constants.py) (`THRELIUM_E2E_REMOTE_*` при необходимости переопределяют):
 
 | Назначение | Путь в SUT |
 |------------|------------|
@@ -50,7 +50,7 @@ curl -sS -X POST "$WM/__admin/scenarios/reset" -o /dev/null -w "scenarios %{http
 
 ## 2. Сброс Maildir стадий и `notmuch new` (опционально)
 
-Та же политика, что [`e2e_flush_sut_fsm_maildirs`](../tests/e2e/helpers.py) в e2e harness: удалить файлы писем в `*/Maildir/{new,cur,tmp}/*` под `$TH/stages`, затем от пользователя `threlium` выполнить `notmuch new` (индекс `stages/.notmuch` не удаляем — полный wipe ломает окружение).
+Та же политика, что [`e2e_flush_sut_fsm_maildirs`](../tests/e2e/toolkit/cleanup.py) в e2e harness: удалить файлы писем в `*/Maildir/{new,cur,tmp}/*` под `$TH/stages`, затем от пользователя `threlium` выполнить `notmuch new` (индекс `stages/.notmuch` не удаляем — полный wipe ломает окружение).
 
 ```bash
 TH=/home/threlium/threlium/data

@@ -298,7 +298,7 @@ Crash matrix — в [`INDEX.md` §9.1](INDEX.md#91-crash-matrix). Краткая
 
 ### 5.5. Разделение с FSM-стадией `enrich`
 
-Stage submit делает settle. Индексация LightRAG — **в том же процессе** `threlium-engine` (RAG-loop, `schedule_index_pending` **не блокирует** FSM). FSM-стадия `enrich` — потребитель graph'а: seed-план задач формируется **до** `aquery`, и его подзадачи подмешиваются в графовый запрос; сам `aquery` идёт через `run_rag_coroutine` плюс notmuch-контекст треда `unified_messages` в Jinja (см. [`INDEX.md` §7](INDEX.md#7-enrich-notmuch-context--query--lightrag)).
+Stage submit делает settle. Индексация LightRAG — **в том же процессе** `threlium-engine` (RAG-loop, `schedule_index_pending` **не блокирует** FSM). FSM-стадия `enrich` — потребитель graph'а: seed `enrich_task_plan` **до** `aquery`; строка запроса — `lightrag/lightrag_query.j2` (token cap с конца); один `aquery` через `run_rag_coroutine`; late `enrich_task_hypotheses` после графа; при token overflow — `summarize_context@` (см. [`INDEX.md` §7](INDEX.md#7-enrich-notmuch-context--query--lightrag), [`FSM.md` §5.2](FSM.md#52-контракт-тела-enrich--reasoning)).
 
 Пока очередь `ainsert` не догнала свежие письма, граф может отставать; параллельно enrich включает те же письма гранулярными `<history>`-частями в backpack. Контракт Content-ID частей — [`FSM.md` §5.2](FSM.md#52-контракт-тела-enrich--reasoning); сборка — [`INDEX.md` §7.3](INDEX.md#73-composing-the-enrichment-payload-granular-multipart).
 

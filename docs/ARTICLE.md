@@ -275,7 +275,7 @@ EGR --> EM
 Стадия `reasoning` — точка контакта с LLM. Используется `litellm` (Python SDK для OpenAI-совместимых API, версия 1.83 уже без взломов :) ). Модель получает:
 
 1. **System-промпт** из Jinja2-шаблона `reasoning/system.j2`.
-2. **User-промпт** с обогащённым контекстом из `enrich` (контекст графа знаний + хронология треда).
+2. **User-промпт** с обогащённым контекстом из `enrich` (MIME backpack: `<graph-answer>`, гранулярные `<history>` → `<conversation_history>` / `<conversation_delta>`).
 3. **Список tool_specs** для каждого возможного маршрута: `egress_router`, `cli_intent`, `thread_memory`, `global_memory`, `subagent_intent`.
 
 Модель отвечает **tool call'ом**, а не свободным текстом. Это принципиальное решение: LLM — источник намерения, FSM — исполнитель. Парсинга свободного текста для выбора маршрута нет. Если модель вернула текст без tool call — `ReasoningStageError`, письмо остаётся в `new/+unread`, воркер завершается с `exit 1`, systemd делает retry. Позже я сделаю дополнительные стадии FSM для формирования больших ответов, но пока что есть минимум.
@@ -322,15 +322,19 @@ package "Запись (async, после settle)" {
 }
 
 package "Чтение (sync, в FSM)" {
+  rectangle "enrich_task_plan\n(seed)" as SEED
   rectangle "enrich" as ENR
   rectangle "Jinja: lightrag_query.j2" as PLAN
   rectangle "rag.aquery(...)" as AQ
-  rectangle "Payload:\n--- user message ---\n--- lightrag context ---" as PAY
+  rectangle "enrich_task_hypotheses" as HYP
+  rectangle "backpack MIME\n(build_context_backpack_multipart)" as BP
   rectangle "reasoning" as REA
+  SEED --> ENR
   ENR --> PLAN
   PLAN --> AQ
-  AQ --> PAY
-  PAY --> REA
+  AQ --> HYP
+  HYP --> BP
+  BP --> REA
 }
 
 INS ..> AQ : "общий\nworking_dir/"
@@ -340,7 +344,7 @@ INS ..> AQ : "общий\nworking_dir/"
 
 ![LightRAG write/read](https://www.plantuml.com/plantuml/png/RPBDQjmm4CVlVefXJowj7UXn3oKcSPg0uoRPlGGMZ69Fl6wyybQIQPPIQ7ehz9vpJhssXOLyaEGLv3VgIDejTPgBnCpyv-idRKh5X6fdjLVZgGBLWAZAgOAY4fYhgk6UDsVv6IiH1lfI_zIF-hgxwBw3p-I2vw-070_TXRxJIv2eL8ql1l390p3fZ9SrvV5Pva8-nPY4KJmU9t5V8_Cf5csDMSKBFC_co8kAbqw-jHjlzzNwIYzDIttRVQNsNuOJdhuRWsBbiEK2MJ7XKReDQrzjLXAiTCMnM4sHz8kI86GLboYKVy9KFdNJxgMZlkxbi-N6qLkIkTKW2Dxy7TlUpcCxqcajLvTEQvdqp_-o_a6RBVMzlYQm_WhrRzWPxV_F5xceygcT8awF-h4asH-24sGVMXIBR5up7hv_RUK7IPG-0y4A_J0C7O7eiAyvO8kwOGL13u80MW86CvJIp4qEvrqpWhpX2i-LYRYMqV6JZiXamzUFVHH75AOrB9NLVEQojfqaEdGnMuXEQvayucTmXg4Hmf0WFkXVtJT2U3FX7njnHaqo-jWR0s-J_XTz-Zy=)
 
-Стадия `enrich` при формировании контекста для `reasoning` вызывает `rag.aquery()` — семантический запрос к графу. Результат вместе с хронологией треда упаковывается в тело письма для `reasoning` через Jinja2-шаблоны. Пока что опять же это простейшее решение несмотря на мощь GraphRAG подхода, нужно дорабатывать подходы к экономии контекста, но когда кода совсем мало это не сложно, даже не шибко умные нейронки вайбкодят при таких объемах проекта легко.
+Стадия `enrich` вызывает `rag.aquery()` один раз (строка запроса из `lightrag_query.j2`), затем собирает **multipart backpack** (`build_context_backpack_multipart`) с гранулярными CID-частями; `reasoning` читает их через Jinja (`reasoning/user.j2`). При переполнении токенного бюджета — `summarize_context` (token ledger, без MCKP); char-cap на стороне reasoning — per-field.
 
 Линейных цепочек для контекста отслеживать не нужно — весь тред со всеми форками индексируется как единая база знаний (глобальные знания агента). Mutex на весь тред от ingress до ответа не нужен.
 
@@ -513,7 +517,7 @@ llm_endpoints:
       enable_thinking: true
 ```
 
-Маршрутизация вызовов — по `LitellmRoutingSite` (reasoning, enrich_plan, lightrag_llm и т.д.), каждый site может ехать на свой endpoint с разным score. Это все проработано пока скорее как концепт конечно, но уже работает, дорогие вызовы делает reasoning, а дешевые делает GraphRAG.
+Маршрутизация вызовов — по `LitellmRoutingSite` (reasoning, `enrich_plan` → call-site `enrich_task_plan`, `enrich_task_hypotheses`, `summarize_context`, lightrag_llm и т.д.), каждый site может ехать на свой endpoint с разным score. Это все проработано пока скорее как концепт конечно, но уже работает, дорогие вызовы делает reasoning, а дешевые делает GraphRAG.
 
 ---
 

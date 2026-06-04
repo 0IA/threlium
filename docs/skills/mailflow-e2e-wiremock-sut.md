@@ -77,7 +77,7 @@ pytest -n0 -s -vv --tb=short 'tests/e2e/test_foo_e2e.py::test_bar' \
 
 ### 3.1. Между тестами
 
-- Разделение сценариев на общем WireMock: **`X-Threlium-Route`** (b62-wire, тот же расчёт, что у bridge — [`e2e_smtp_inject_ingress_route_wire_for_message_id`](../../tests/e2e/helpers.py)) + **WireMock State Extension** (`hasContext`, сид в setup, teardown только своего контекста).
+- Разделение сценариев на общем WireMock: **`X-Threlium-Route`** (b62-wire, тот же расчёт, что у bridge — [`e2e_smtp_inject_ingress_route_wire_for_message_id`](../../tests/e2e/toolkit/bridges/email.py)) + **WireMock State Extension** (`hasContext`, сид в setup, teardown только своего контекста).
 - Матчер сравнивает **конкретное** значение Route, а не факт «заголовок есть».
 - **`stub_tag`** в pytest-модуле согласован с `metadata.threlium_e2e_stub_tag` в JSON стабов каталога `tests/e2e/wiremock_stubs/<имя_теста>/`.
 
@@ -95,6 +95,10 @@ pytest -n0 -s -vv --tb=short 'tests/e2e/test_foo_e2e.py::test_bar' \
 
 - Тела маппингов живут в **git** (`*.json`); из pytest **не** собирать и не патчить mapping на лету.
 - Разрешено в рантайме: seed/delete **state**, upsert готовых JSON с диска, compose bootstrap.
+
+### 3.5. Enrich / overflow (один hop `enrich@`)
+
+Call sites на enrich-hop: `enrich_task_plan` (до RAG, стаб `081_*`), LightRAG tool phases (`extract_query_keywords` обязателен — assert в `wiremock_client.py`), `enrich_task_hypotheses` (после RAG, стаб `083_*`), при переполнении — `summarize_thread_context`. Стабы `080_chat_enrich_plan.json` / `enrich_query_plan` **удалены**. Overflow e2e: низкий `model_context_tokens` в `ansible/group_vars/e2e.yml`; регрессии — `test_summarize_context_e2e`, `test_unified_context_roles_e2e`, `test_reasoning_litellm_context_trim_e2e`. Контракт — [`CONTEXT_CONTRACT.md`](../CONTEXT_CONTRACT.md) §4, [`FSM.md`](../FSM.md) §5.2, [`E2E_ISOLATION.md`](../E2E_ISOLATION.md) §6.
 
 ---
 

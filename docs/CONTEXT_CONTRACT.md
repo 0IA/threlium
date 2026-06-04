@@ -174,6 +174,8 @@ flowchart LR
 в backpack (`build_context_backpack_multipart`), без merged `<unified-mail-context>` и без MCKP.
 Деталь секций — [`FSM.md` §5.2](FSM.md#52-контракт-тела-enrich--reasoning).
 
+**Пайплайн `enrich.main` (11 шагов):** user query → unified messages → seed `enrich_task_plan` + `lightrag_query.j2` → cap query → один `aquery` → graph answer → late `enrich_task_hypotheses` → task/response MIME → token ledger → overflow (`excess > 0` → `summarize_context@`) → `build_context_backpack_multipart` → `reasoning@`. Код и docstring — [`states/enrich.py`](../ansible/roles/threlium/files/scripts/threlium/states/enrich.py). Удалено: plan-LLM `enrich_query_plan`, MCKP/`context_budget.py`, merged CID `<unified-mail-context>`.
+
 ### 4.1 Distill → enrich: контур передачи
 
 Distill **не передаёт** в enrich отдельный JSON или заголовок: результат — только
@@ -250,7 +252,7 @@ flowchart TB
    PromptPath.LIGHTRAG_ENRICH_INCOMING_USER_TEXT, incoming=msg)`. Шаблон
    `lightrag/enrich_incoming_user_text.j2`: заголовки конверта + фильтр
    `user_query_text` (= `require_enrich_user_query_text` → `<user-query>` CID).
-   Используется для query plan, task plan, бюджета `EnrichPartId.USER_MESSAGE`.
+   Используется для `enrich_task_plan` (seed), `lightrag_query.j2`, `enrich_task_hypotheses` и бюджета `EnrichPartId.USER_MESSAGE`.
 
 2. **Unified-бакет** — `ctx = build_unified_email_messages(leaf_inner=текущий MID,
    thread_id=…)` (`enrich_context.py`): обход IRT **старые→новые**, лист (текущий
@@ -276,9 +278,10 @@ distill_fallback_max_chars)`; `<user-query>` = преобразованный br
 отдельного артефакта. Summarize сжимает **старый хвост** треда при переполнении токенного
 бюджета: batch = самые старые гранулярные `<history>` CID из `ctx.all_messages` (oldest→newest)
 до покрытия избытка `X` токенов; в payload — `SummarizeHistoryUnit` (cid + text + source_mid). E2e:
-`test_summarize_overflow_full_pipeline` — **3 prior-хода + main**, накопление unified под cap
-distill, overflow на enrich главного хода (брифинг:
-`docs/briefing/summarize_context_overflow_e2e_briefing.md`).
+`test_summarize_overflow_full_pipeline` — **2 prior-хода + main**, накопление unified под cap
+distill, overflow на enrich главного хода (token ledger `excess > 0` → `summarize_context`;
+e2e: `summarize_overflow_prior_turns=2` в `tests/e2e/toolkit/mailflow.py`, низкий
+`model_context_tokens` в `ansible/group_vars/e2e.yml`).
 
 **Цикл user_query.** Суммаризация не меняет ход пользователя, поэтому канонический `user_query`
 (`<user-query>` CID текущего enrich-листа) едет неизменным по `enrich → summarize_context →
