@@ -9,7 +9,7 @@
     },
     "bodyPatterns": [
       {
-        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+        "matches": "(?s).*(openai/threlium_e2e_l0|/threlium_e2e_l0).*"
       },
       {
         "contains": "<envelope>"
@@ -18,15 +18,18 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "E2E-CLI-DISCOVERY-STDOUT-MARKER"
+        "contains": "E2E-CLI-DISCOVERY-CHAIN-BODY"
+      },
+      {
+        "doesNotContain": "E2E-CLI-DISCOVERY-STDOUT-MARKER"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-cli-discovery-chain-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_cli_intent_done",
-        "hasNotProperty": "phase_cli_intent_done_ledger_done"
+        "hasProperty": "phase_cli_intent_done_ledger_done",
+        "hasNotProperty": "phase_finalize_done"
       }
     }
   },
@@ -39,7 +42,7 @@
       "response-template"
     ],
     "jsonBody": {
-      "id": "chatcmpl-e2e-tasks-ledger-phase_cli_intent_done_ledger_done",
+      "id": "chatcmpl-e2e-cli-discovery-pre-finalize-hold",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -52,11 +55,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_tasks_ledger_phase_cli_intent_done_ledger_done",
+                "id": "call_e2e_tasks_ledger_cli_discovery_hold",
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e: record task completion after cli_exec stdout relay\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
+                  "arguments": "{\"reasoning\": \"e2e: hold until cli_exec stdout relay\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
                 }
               }
             ]
@@ -64,16 +67,5 @@
         }
       ]
     }
-  },
-  "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "stub-cli-discovery-chain-01::{{request.headers.[x-threlium-thread-root]}}",
-        "state": {
-          "phase_cli_intent_done_ledger_done": "1"
-        }
-      }
-    }
-  ]
+  }
 }

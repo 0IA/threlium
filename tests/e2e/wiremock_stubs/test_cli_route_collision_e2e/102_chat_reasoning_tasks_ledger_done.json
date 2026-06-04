@@ -16,6 +16,9 @@
       },
       {
         "contains": "\"tools\""
+      },
+      {
+        "contains": "FSM reasoning route exposed as a separate tool"
       }
     ],
     "customMatcher": {
@@ -32,8 +35,11 @@
     "headers": {
       "Content-Type": "application/json"
     },
+    "transformers": [
+      "response-template"
+    ],
     "jsonBody": {
-      "id": "chatcmpl-e2e-tasks-ledger-phase_cli_intent_done_ledger_done",
+      "id": "chatcmpl-e2e-tasks-ledger-cli-route-collision",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -46,11 +52,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_tasks_ledger_phase_cli_intent_done_ledger_done",
+                "id": "call_e2e_tasks_ledger_cli_route_collision",
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e: record task completion before finalize\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
+                  "arguments": "{\"reasoning\": \"e2e: record task completion after route collision observation\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
                 }
               }
             ]

@@ -35,6 +35,9 @@
     "headers": {
       "Content-Type": "application/json"
     },
+    "transformers": [
+      "response-template"
+    ],
     "jsonBody": {
       "id": "chatcmpl-e2e-live-cli-intent-allow",
       "object": "chat.completion",

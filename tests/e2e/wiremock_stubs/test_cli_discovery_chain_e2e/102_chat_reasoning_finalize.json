@@ -16,13 +16,17 @@
       },
       {
         "contains": "\"tools\""
+      },
+      {
+        "contains": "E2E-CLI-DISCOVERY-STDOUT-MARKER"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
         "hasContext": "stub-cli-discovery-chain-01::{{request.headers.[x-threlium-thread-root]}}",
-        "hasProperty": "phase_cli_intent_done_ledger_done"
+        "hasProperty": "phase_cli_intent_done_ledger_done",
+        "hasNotProperty": "phase_finalize_done"
       }
     }
   },
@@ -31,6 +35,9 @@
     "headers": {
       "Content-Type": "application/json"
     },
+    "transformers": [
+      "response-template"
+    ],
     "jsonBody": {
       "id": "chatcmpl-e2e-live-cli-allow-egress",
       "object": "chat.completion",
@@ -57,5 +64,16 @@
         }
       ]
     }
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "stub-cli-discovery-chain-01::{{request.headers.[x-threlium-thread-root]}}",
+        "state": {
+          "phase_finalize_done": "1"
+        }
+      }
+    }
+  ]
 }

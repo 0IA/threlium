@@ -12,19 +12,18 @@ from threlium.types import FsmStage
 
 from .toolkit import (
     E2EComposeRuntime,
-    E2EComposeRuntime,
-    E2EComposeRuntime,
     E2E_REMOTE_REPO_PATH,
     MailflowScenarioSpec,
     REPO_ROOT,
     assert_full_mailflow_pipeline,
+    assert_notmuch_folder_contains_body_token,
     discover_runtime,
     dump_failure_artifacts,
     mailflow_inject_and_wait,
     service_exec,
 )
 from .wiremock_client import (
-    find_wiremock_requests_by_body_contains,
+    wait_for_wiremock_stub_journal_contains,
     wiremock_public_base,
 )
 
@@ -69,24 +68,29 @@ CLI_DISCOVERY_CHAIN_SPEC = MailflowScenarioSpec(
         FsmStage.ARCHIVE.value,
     ),
     reply_body_needle="e2e-cli-discovery-chain-verified",
+    wiremock_journal_ready_needle="call_threlium_e2e_egress_after_allow",
 )
 
 
-def _assert_cli_stdout_in_reasoning_journal(project: str, stub_tag: str) -> None:
+def _assert_cli_stdout_in_reasoning_journal(
+    project: str, stub_tag: str, correlation_key: str
+) -> None:
+    """cli_exec stdout must reach reasoning via enrich_fast relay (on-disk + LLM prompt)."""
+    assert_notmuch_folder_contains_body_token(
+        project,
+        stage_folder_id=FsmStage.ENRICH_FAST.value,
+        body_token=E2E_CLI_DISCOVERY_STDOUT,
+        repo_root=REPO_ROOT,
+    )
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    matches = find_wiremock_requests_by_body_contains(
-        wm_base, E2E_CLI_DISCOVERY_STDOUT, stub_tag=stub_tag
+    wait_for_wiremock_stub_journal_contains(
+        wm_base,
+        stub_tag=stub_tag,
+        needle=E2E_CLI_DISCOVERY_STDOUT,
+        anchor_needle=correlation_key,
     )
-    chat = [
-        e
-        for e in matches
-        if "/chat/completions" in (e.get("request", {}).get("url") or "")
-    ]
-    assert chat, (
-        f"expected cli stdout marker {E2E_CLI_DISCOVERY_STDOUT!r} in reasoning journal"
-    )
-    log.info("cli_discovery_stdout_verified", hits=len(chat))
+    log.info("cli_discovery_stdout_verified", stub_tag=stub_tag)
 
 
 
@@ -112,7 +116,9 @@ def test_cli_discovery_chain_full_pipeline(
                 stub_tag=stub_tag,
                 correlation_key=correlation_key,
             )
-            _assert_cli_stdout_in_reasoning_journal(project, stub_tag)
+            _assert_cli_stdout_in_reasoning_journal(
+                project, stub_tag, correlation_key
+            )
         except Exception:
             log.debug(
                 "failure_artifacts",
@@ -152,22 +158,24 @@ CLI_ROUTE_COLLISION_SPEC = MailflowScenarioSpec(
 )
 
 
-def _assert_route_collision_observation_in_journal(project: str, stub_tag: str) -> None:
+def _assert_route_collision_observation_in_journal(
+    project: str, stub_tag: str, correlation_key: str
+) -> None:
+    assert_notmuch_folder_contains_body_token(
+        project,
+        stage_folder_id=FsmStage.ENRICH_FAST.value,
+        body_token=E2E_ROUTE_COLLISION_OBSERVATION,
+        repo_root=REPO_ROOT,
+    )
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    matches = find_wiremock_requests_by_body_contains(
-        wm_base, E2E_ROUTE_COLLISION_OBSERVATION, stub_tag=stub_tag
+    wait_for_wiremock_stub_journal_contains(
+        wm_base,
+        stub_tag=stub_tag,
+        needle=E2E_ROUTE_COLLISION_OBSERVATION,
+        anchor_needle=correlation_key,
     )
-    chat = [
-        e
-        for e in matches
-        if "/chat/completions" in (e.get("request", {}).get("url") or "")
-    ]
-    assert chat, (
-        f"expected route-collision observation {E2E_ROUTE_COLLISION_OBSERVATION!r} "
-        "in reasoning journal after enrich_fast relay"
-    )
-    log.info("cli_route_collision_observation_verified", hits=len(chat))
+    log.info("cli_route_collision_observation_verified", stub_tag=stub_tag)
 
 
 
@@ -192,7 +200,9 @@ def test_cli_route_collision_enrich_fast_not_cli_exec(
                 stub_tag=stub_tag,
                 correlation_key=correlation_key,
             )
-            _assert_route_collision_observation_in_journal(project, stub_tag)
+            _assert_route_collision_observation_in_journal(
+                project, stub_tag, correlation_key
+            )
         except Exception:
             log.debug(
                 "failure_artifacts",

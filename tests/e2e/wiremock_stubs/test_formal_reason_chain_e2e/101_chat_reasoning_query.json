@@ -39,6 +39,9 @@
     "headers": {
       "Content-Type": "application/json"
     },
+    "transformers": [
+      "response-template"
+    ],
     "jsonBody": {
       "id": "chatcmpl-e2e-formal-reason-reasoning-2",
       "object": "chat.completion",
