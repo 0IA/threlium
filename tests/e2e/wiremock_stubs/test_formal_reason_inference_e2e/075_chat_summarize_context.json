@@ -45,7 +45,7 @@
                 "type": "function",
                 "function": {
                   "name": "summarize_thread_context",
-                  "arguments": "{\"summary\": \"E2E summarize context stub for token overflow in enrich\"}"
+                  "arguments": "{\"summary\": \"E2E summarize context stub for token overflow in enrich; preserve conforms: True, derived_triples (inference delta):, ex:Person and E2E-FORMAL-REASON-INFERENCE-BODY markers.\"}"
                 }
               }
             ]

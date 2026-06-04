@@ -18,13 +18,15 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "conforms: True"
+        "contains": "E2E-FORMAL-REASON-INFERENCE-BODY"
       },
       {
-        "contains": "derived_triples (inference delta):"
+        "comment": "Повторные completion в том же _decide после recordState phase_formal_reason_done у 100_: тело без conforms, фаза уже выставлена.",
+        "doesNotContain": "conforms: True"
       },
       {
-        "contains": "ex:Person"
+        "comment": "2-й reasoning (tasks/finalize): дельта уже несёт derived_triples — отдаём 102_, не retry formal_reason.",
+        "doesNotContain": "derived_triples (inference delta):"
       }
     ],
     "customMatcher": {
@@ -42,7 +44,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-tasks-ledger-phase_formal_reason_done_ledger_done",
+      "id": "chatcmpl-e2e-formal-reason-inference-reasoning-1-retry",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -55,11 +57,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_tasks_ledger_phase_formal_reason_done_ledger_done",
+                "id": "call_e2e_formal_reason_1",
                 "type": "function",
                 "function": {
-                  "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e: record task completion before finalize\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
+                  "name": "formal_reason",
+                  "arguments": "{\"reasoning\": \"e2e: RDFS subclass inference — read derived triples\", \"inference\": \"rdfs\", \"return_derived\": true, \"ontology_ttl\": \"@prefix ex: <http://example.org/> .\\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\\n\\nex:Employee rdfs:subClassOf ex:Person .\\n\", \"shapes_ttl\": \"@prefix sh: <http://www.w3.org/ns/shacl#> .\\n@prefix ex: <http://example.org/> .\\n\\nex:PersonShape a sh:NodeShape ;\\n  sh:targetClass ex:Person ;\\n  sh:property [ sh:path ex:name ; sh:minCount 1 ] .\", \"facts_ttl\": \"@prefix ex: <http://example.org/> .\\n\\nex:alice a ex:Employee ;\\n  ex:name \\\"Alice\\\" .\\n\"}"
                 }
               }
             ]
@@ -67,16 +69,5 @@
         }
       ]
     }
-  },
-  "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "stub-formal-reason-inference-01::{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_formal_reason_done_ledger_done": "1"
-        }
-      }
-    }
-  ]
+  }
 }

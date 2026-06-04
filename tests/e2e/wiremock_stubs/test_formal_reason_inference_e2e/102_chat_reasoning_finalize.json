@@ -21,10 +21,10 @@
         "contains": "conforms: True"
       },
       {
-        "contains": "derived_triples"
+        "contains": "derived_triples (inference delta):"
       },
       {
-        "contains": "http://example.org/Person"
+        "contains": "ex:Person"
       }
     ],
     "customMatcher": {

@@ -45,7 +45,7 @@
                 "type": "function",
                 "function": {
                   "name": "summarize_thread_context",
-                  "arguments": "{\"summary\": \"E2E summarize context stub for token overflow in enrich\"}"
+                  "arguments": "{\"summary\": \"E2E summarize context stub for token overflow in enrich; preserve QUERY ERROR, query_result: and E2E-FORMAL-REASON-TECH-GATE-BODY markers (gate notice is rendered by SUT when gate is on).\"}"
                 }
               }
             ]

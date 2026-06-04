@@ -43,6 +43,7 @@ FORMAL_REASON_TECH_GATE_SPEC = MailflowScenarioSpec(
         "e2e formal_reason QUERY ERROR technical gate test body"
     ),
     min_chat_completion_posts=4,
+    min_reasoning_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(

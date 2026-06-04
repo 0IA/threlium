@@ -56,8 +56,9 @@ FORMAL_REASON_GATE_MATRIX_SPEC = MailflowScenarioSpec(
         f"{E2E_FORMAL_REASON_GATE_MATRIX_BODY}\n"
         "e2e formal_reason gate recovery matrix test body"
     ),
-    # enrich LightRAG ~10 posts; needle ждёт stub 104 — старт после ~102 (query error).
-    min_chat_completion_posts=14,
+    min_chat_completion_posts=4,
+    # gated hops: fatal → mq (до needle tasks_ledger); см. formal_reason_chain harness.
+    min_reasoning_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
     expect_notmuch_stage_folders=(
