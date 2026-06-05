@@ -10,8 +10,12 @@ from litellm.types.utils import Embedding
 
 from threlium.litellm_client import litellm_aembedding, litellm_arerank
 from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
-from threlium.litellm_required_tool import ainvoke_with_bridge_retries, build_site_call
-from threlium.litellm_tool_completion import acompletion_required_tool
+from threlium.litellm_required_tool import (
+    ainvoke_required_tool,
+    ainvoke_with_bridge_retries,
+    build_site_call,
+    correlation_with_call_site,
+)
 from threlium.litellm_tool_response import LiteLlmToolResponseError
 from threlium.litellm_tool_spec import load_tool_spec
 from threlium.litellm_wire import require_embedding_response
@@ -29,12 +33,8 @@ from threlium.types import (
     lite_llm_aembedding_to_dict,
     lite_llm_arerank_to_dict,
 )
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 from threlium.types.lightrag_tool_function import LightragToolBridgeError
-from threlium.types.lightrag_tool_phase import (
-    detect_lightrag_call_site_wire,
-    lightrag_tool_phase_for_call_site,
-)
+from threlium.types.lightrag_tool_phase import lightrag_tool_phase_for_call_site
 
 from threlium.logutil import logger
 
@@ -49,13 +49,70 @@ log = logger.bind(stage="lightrag")
 _MAX_LIGHTRAG_TOOL_BRIDGE_RETRIES = 2
 
 
+# Резолвер call-site точки вызова LightRAG: сигналы запроса → call-site. call-site ВСЕГДА известен.
+CallSiteResolver = Callable[..., LitellmCallSite]
+
+
+def fixed_call_site(call_site: LitellmCallSite) -> CallSiteResolver:
+    """Точка 1:1 с фазой — резолвер-константа (keyword → extract_query_keywords, query → generate_rag_answer)."""
+
+    def _resolve(**_signals: bool) -> LitellmCallSite:
+        return call_site
+
+    return _resolve
+
+
+def extract_call_site(*, has_history: bool, has_system_prompt: bool) -> LitellmCallSite:
+    """Роль ``extract`` LightRAG (``role_llm_funcs["extract"]``: entity-pass + gleaning + summarize в одной
+    функции) — ЕДИНСТВЕННАЯ точка, где call-site зависит от структуры: gleaning-continue несёт history;
+    summarize идёт без system_prompt; иначе первичный entity-pass."""
+    if has_history:
+        return LitellmCallSite.EXTRACT_KNOWLEDGE_GRAPH_GLEANING
+    if not has_system_prompt:
+        return LitellmCallSite.SUMMARIZE_DESCRIPTIONS
+    return LitellmCallSite.EXTRACT_KNOWLEDGE_GRAPH
+
+
+def _build_chat_messages(
+    prompt: str,
+    system_prompt: str | None,
+    history_messages: list[dict] | None,
+) -> list[LiteLlmChatMessage]:
+    """``system?`` + ``history*`` + ``user(prompt)`` → litellm chat-сообщения."""
+    raw: list[dict] = []
+    if system_prompt:
+        raw.append({"role": "system", "content": system_prompt})
+    raw.extend(history_messages or [])
+    raw.append({"role": "user", "content": prompt})
+    return [LiteLlmChatMessage(role=str(m["role"]), content=str(m["content"])) for m in raw]
+
+
+def _log_unsupported_llm_args(*, stream: bool | None, enable_cot: bool, extra: dict[str, Any]) -> None:
+    """Залогировать игнорируемые LightRAG-аргументы (stream / enable_cot / неизвестные kwargs)."""
+    unsupported: list[str] = []
+    if stream is True:
+        unsupported.append("stream=True(ignored)")
+    if enable_cot:
+        unsupported.append("enable_cot=True(no-op)")
+    if extra:
+        unsupported.append(f"unknown_kwargs={sorted(extra.keys())}")
+    if unsupported:
+        log.debug("llm_func_unsupported_args", args=unsupported)
+
+
 def build_llm_func(
     settings: ThreliumSettings,
     *,
     llm_ep: LlmEndpoint,
     default_max_retries: int,
     chat_template_kwargs: dict[str, Any] | None = None,
+    resolve_call_site: CallSiteResolver,
 ) -> Callable[..., Awaitable[str]]:
+    """LLM-функция LightRAG для ОДНОЙ точки вызова (``role_llm_configs``).
+
+    ``resolve_call_site`` детерминирует call-site (константа для keyword/query, структурный резолвер для
+    ``extract``) — call-site ВСЕГДА известен, без if-fallback и без сниффинга формата. Всегда tool-call → JSON.
+    """
     closure_max_tokens = llm_ep.max_tokens
     closure_ctk = chat_template_kwargs or llm_ep.chat_template_kwargs or None
 
@@ -71,82 +128,44 @@ def build_llm_func(
         stream: bool | None = None,
         **kwargs: Any,
     ) -> str:
-        # Корреляция приходит kwarg-мостом (``_llm_bridge`` из ctxvar). Но под 1.5 json-extraction вызов
-        # может идти на задаче, не получившей kwarg → читаем ctxvar напрямую как фолбэк, чтобы сохранить
-        # thread-root. Локальная копия (не мутируем ctxvar): ``kg_query`` делает keyword-LLM, затем
-        # answer-LLM в одном scope — каждый вызов гранулирует свой call-site от base заново.
-        popped = kwargs.pop("_threlium_e2e_correlation", None)
-        correlation: dict[str, str] = (
-            dict(popped) if popped else dict(get_litellm_correlation_from_ctxvar() or {})
-        )
-        base_cs = (
-            correlation.get(LitellmCorrelationHeader.CALL_SITE.value)
-            or LitellmCallSite.LIGHTRAG_INDEX.value
-        )
-        call_site_wire = detect_lightrag_call_site_wire(
-            base_cs,
-            keyword_extraction=keyword_extraction,
+        # call-site детерминирован резолвером точки вызова (без сниффинга формата). Сам tool-call —
+        # общий проектный ``ainvoke_required_tool`` (force-tool + call_site = function.name +
+        # ``correlation_with_call_site`` из ctxvar-снапшота). Здесь — выбор фазы и нативная wire-конверсия.
+        kwargs.pop("_threlium_e2e_correlation", None)  # legacy kwarg-мост удалён
+        kwargs.pop("response_format", None)  # 1.5-хинт «нужен JSON» — не нужен (всегда tool-call → JSON)
+        _log_unsupported_llm_args(stream=stream, enable_cot=enable_cot, extra=kwargs)
+
+        call_site = resolve_call_site(
             has_history=bool(history_messages),
             has_system_prompt=bool(system_prompt),
         )
-        # ВСЕГДА форсим гранулярный call-site в override → header X-Threlium-Call-Site == function.name
-        # (инвариант single-tool + матч стаба по call-site); thread-root из ctxvar/kwarg сохранён.
-        correlation[LitellmCorrelationHeader.CALL_SITE.value] = call_site_wire
-
-        unsupported: list[str] = []
-        if stream is True:
-            unsupported.append("stream=True(ignored)")
-        if enable_cot:
-            unsupported.append("enable_cot=True(no-op)")
-        if kwargs:
-            unsupported.append(f"unknown_kwargs={sorted(kwargs.keys())}")
-        if unsupported:
-            log.debug("llm_func_unsupported_args", args=unsupported)
-
-        effective_max = max_tokens if max_tokens is not None else closure_max_tokens
-
-        messages: list[dict] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        for m in history_messages or []:
-            messages.append(m)
-        messages.append({"role": "user", "content": prompt})
-        litellm_messages = [
-            LiteLlmChatMessage(role=str(m["role"]), content=str(m["content"]))
-            for m in messages
-        ]
-
-        phase = lightrag_tool_phase_for_call_site(call_site_wire)
+        phase = lightrag_tool_phase_for_call_site(call_site.value)
         tool_spec = load_tool_spec(phase.tool_spec_path)
-        tools = [tool_spec]
-
         call = build_site_call(
             settings,
             None,
-            litellm_messages,
+            _build_chat_messages(prompt, system_prompt, history_messages),
             endpoint=llm_ep,
-            max_tokens=effective_max,
+            max_tokens=max_tokens if max_tokens is not None else closure_max_tokens,
             chat_template_kwargs=closure_ctk,
         )
+        correlation_snap = get_litellm_correlation_from_ctxvar()
+        context = f"LightRAG phase {call_site.value}"
 
         async def _attempt() -> str:
-            resp = await acompletion_required_tool(
+            msg = await ainvoke_required_tool(
                 settings=settings,
                 call=call,
-                tools=tools,
-                correlation_override=correlation,
+                tool_spec=tool_spec,
+                correlation_snap=correlation_snap,
+                context=context,
             )
-            msg_obj = resp.choices[0].message
-            if msg_obj is None:
-                raise RuntimeError("LightRAG LLM bridge: empty assistant message")
-            args_struct = parse_tool_call_for_phase(msg_obj, phase)
-            wire = struct_to_lightrag_wire(phase, args_struct)
-            result = to_lightrag_return_value(wire)
+            args_struct = parse_tool_call_for_phase(msg, phase)
+            result = to_lightrag_return_value(struct_to_lightrag_wire(phase, args_struct))
             log.info(
                 "lightrag_tool_call",
                 phase=phase.call_site.value,
                 tool_name=phase.tool_name.value,
-                call_site_wire=call_site_wire,
             )
             return result
 
@@ -154,7 +173,7 @@ def build_llm_func(
             log.warning(
                 "lightrag_tool_bridge_retry",
                 attempt=attempt_no,
-                call_site=call_site_wire,
+                call_site=call_site.value,
                 error=str(exc),
             )
 
@@ -181,9 +200,8 @@ def build_embedding_func(
     mr_def = default_max_retries
 
     async def embed_func(texts: list[str], **_kwargs: Any):
-        correlation: dict[str, str] | None = _kwargs.pop(
-            "_threlium_e2e_correlation", None
-        )
+        # thread-root + базовый call-site (index/query) — из ctxvar напрямую (как llm/rerank; без моста).
+        correlation = get_litellm_correlation_from_ctxvar()
         mr = embed_ep.max_retries if embed_ep.max_retries is not None else mr_def
         call = LiteLlmAembeddingKwargs(
             model=embed_ep.model,
@@ -218,8 +236,11 @@ def build_rerank_func(
         top_n: int | None = None,
         **_kwargs: Any,
     ) -> list[dict[str, Any]]:
-        correlation: dict[str, str] | None = _kwargs.pop(
-            "_threlium_e2e_correlation", None
+        # rerank ставит свой call-site общим хелпером ``correlation_with_call_site`` (тем же, что внутри
+        # ``ainvoke_required_tool`` для tool-вызовов): thread-root из ctxvar + гранулярный lightrag_query_rerank.
+        correlation = correlation_with_call_site(
+            get_litellm_correlation_from_ctxvar(),
+            LitellmCallSite.LIGHTRAG_QUERY_RERANK.value,
         )
         mr = rerank_ep.max_retries if rerank_ep.max_retries is not None else mr_def
         effective_top_n = top_n if top_n is not None else rerank_ep.top_n

@@ -20,7 +20,7 @@ from threlium.types import LitellmRoutingSite
 from threlium.types.systemd_status import SystemdStatusBody
 
 from threlium.runners.lightrag._bootstrap import bootstrap_knowledge_dir
-from threlium.runners.lightrag._construction import build_rag, install_litellm_correlation_bridge
+from threlium.runners.lightrag._construction import build_rag
 from threlium.runners.lightrag._drain import (
     reset_drain_task,
     reset_thread_locks,
@@ -80,10 +80,10 @@ def run_rag_coroutine(
 ) -> _T:
     """Выполнить корутину LightRAG на выделенном loop (из любого потока движка).
 
-    При непустом ``correlation`` устанавливает ContextVar на задаче RAG-loop — мост (см.
-    :func:`install_litellm_correlation_bridge`) пробрасывает его в ``llm_func`` для выбора фазы
-    (``generate_rag_answer`` на query). Работает и на проде: call-site нужен для фазы, а route-merge
-    в HTTP gated за e2e-флагом.
+    При непустом ``correlation`` устанавливает ContextVar на задаче RAG-loop; llm/embed/rerank-функции
+    (``_adapters``) читают его НАПРЯМУЮ из ctxvar (дочерние задачи наследуют контекст) — отдельного
+    kwarg-моста больше нет. call-site детерминирован точкой вызова (роль/rerank); route-merge в HTTP
+    gated за e2e-флагом.
     """
     if _rag_loop is None:
         raise RuntimeError("lightrag: RAG event loop is not running (start_rag_loop_thread first)")
@@ -213,7 +213,6 @@ def _rag_thread_main(settings: ThreliumSettings) -> None:
             notify_status(SystemdStatusBody.lightrag_initializing_storages())
             rag = build_rag(settings)
             await rag.initialize_storages()
-            install_litellm_correlation_bridge(rag)
             notify_status(SystemdStatusBody.lightrag_storages_ready())
             return rag
 

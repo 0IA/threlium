@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Any
 
 from lightrag import LightRAG
+from lightrag.llm_roles import RoleLLMConfig
 from lightrag.utils import EmbeddingFunc
 
 from threlium.lightrag_chunking import threlium_email_chunking_func
 from threlium.lightrag_prompts import install_overlay
-from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.settings import (
     ThreliumSettings,
     resolve_llm_endpoint,
@@ -20,9 +20,15 @@ from threlium.types import (
     LitellmCallSite,
     LitellmRoutingSite,
 )
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
-from threlium.runners.lightrag._adapters import build_llm_func, build_embedding_func, build_rerank_func
+from threlium.runners.lightrag._adapters import (
+    CallSiteResolver,
+    build_embedding_func,
+    build_llm_func,
+    build_rerank_func,
+    extract_call_site,
+    fixed_call_site,
+)
 from threlium.logutil import logger
 
 log = logger.bind(stage="lightrag")
@@ -75,19 +81,37 @@ def build_rag(settings: ThreliumSettings) -> LightRAG:
     body_max, overlap_toks = _chunk_dims(settings)
     llm_ep = resolve_llm_endpoint(settings.litellm, LitellmRoutingSite.LIGHTRAG_LLM)
     embed_ep = resolve_embedding_endpoint(settings.litellm)
-    log.info("litellm_routing", site=LitellmRoutingSite.LIGHTRAG_LLM.value, score=llm_ep.score, embedding_score=embed_ep.embedding_score)
+    log.info(
+        "litellm_routing",
+        site=LitellmRoutingSite.LIGHTRAG_LLM.value,
+        score=llm_ep.score,
+        embedding_score=embed_ep.embedding_score,
+    )
     rerank_ep = resolve_rerank_endpoint(settings.litellm)
     if rerank_ep is not None:
         log.info("litellm_routing_rerank", rerank_score=rerank_ep.rerank_score)
 
-    rag_kwargs: dict[str, Any] = {
-        "working_dir": str(_working_dir(settings)),
-        "llm_model_func": build_llm_func(
+    # Отдельная llm-функция на каждую роль-точку вызова LightRAG (1.5 role_llm_configs). call-site и tool-spec
+    # детерминированы РЕЗОЛВЕРОМ точки (без сниффинга формата): keyword/query → константа, extract → структурный
+    # (одна роль LightRAG = entity/gleaning/summarize). База = extract. max_async/timeout наследуют базовые.
+    def _role_llm(resolve_call_site: CallSiteResolver) -> Any:
+        return build_llm_func(
             settings,
             llm_ep=llm_ep,
             default_max_retries=settings.litellm.max_retries,
             chat_template_kwargs=llm_ep.chat_template_kwargs or None,
-        ),
+            resolve_call_site=resolve_call_site,
+        )
+
+    extract_llm = _role_llm(extract_call_site)
+    rag_kwargs: dict[str, Any] = {
+        "working_dir": str(_working_dir(settings)),
+        "llm_model_func": extract_llm,
+        "role_llm_configs": {
+            "extract": RoleLLMConfig(func=extract_llm),
+            "keyword": RoleLLMConfig(func=_role_llm(fixed_call_site(LitellmCallSite.EXTRACT_QUERY_KEYWORDS))),
+            "query": RoleLLMConfig(func=_role_llm(fixed_call_site(LitellmCallSite.GENERATE_RAG_ANSWER))),
+        },
         "embedding_func": EmbeddingFunc(
             embedding_dim=_embed_dim(settings),
             max_token_size=_embed_max_tokens(settings),
@@ -126,49 +150,3 @@ def build_rag(settings: ThreliumSettings) -> LightRAG:
         rag_kwargs["embedding_func_max_async"] = settings.lightrag.embedding_func_max_async
         rag_kwargs["max_parallel_insert"] = settings.lightrag.max_parallel_insert
     return LightRAG(**rag_kwargs)
-
-
-def install_litellm_correlation_bridge(rag: LightRAG) -> None:
-    """Wrap llm/embedding/rerank funcs with ContextVar → kwargs bridge.
-
-    Installed ALWAYS (prod + e2e), AFTER initialize_storages (when LightRAG has already installed
-    priority_limit_async_func_call wrappers). The bridge only forwards correlation when the ctxvar
-    is set; query calls stamp ``lightrag_query`` (→ ``generate_rag_answer`` phase) even on prod,
-    while index calls leave the ctxvar unset and keep the ``lightrag_index`` extraction phase. HTTP
-    route headers stay e2e-gated in ``merge_litellm_call_kwargs_and_log``.
-    """
-    original_llm = rag.llm_model_func
-
-    async def _llm_bridge(*args: Any, **kwargs: Any) -> Any:
-        corr = get_litellm_correlation_from_ctxvar()
-        if corr is not None:
-            kwargs["_threlium_e2e_correlation"] = corr
-        return await original_llm(*args, **kwargs)
-
-    rag.llm_model_func = _llm_bridge
-
-    if rag.embedding_func is not None:
-        original_embed = rag.embedding_func.func
-
-        async def _embed_bridge(texts: list[str], **kwargs: Any) -> Any:
-            corr = get_litellm_correlation_from_ctxvar()
-            if corr is not None:
-                kwargs["_threlium_e2e_correlation"] = corr
-            return await original_embed(texts, **kwargs)
-
-        rag.embedding_func.func = _embed_bridge
-
-    if rag.rerank_model_func is not None:
-        original_rerank = rag.rerank_model_func
-
-        async def _rerank_bridge(query: str, documents: list[str], **kwargs: Any) -> Any:
-            corr = get_litellm_correlation_from_ctxvar()
-            if corr is not None:
-                corr_copy = dict(corr)
-                corr_copy[LitellmCorrelationHeader.CALL_SITE.value] = (
-                    LitellmCallSite.LIGHTRAG_QUERY_RERANK.value
-                )
-                kwargs["_threlium_e2e_correlation"] = corr_copy
-            return await original_rerank(query=query, documents=documents, **kwargs)
-
-        rag.rerank_model_func = _rerank_bridge
