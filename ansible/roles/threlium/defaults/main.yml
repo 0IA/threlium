@@ -52,6 +52,18 @@ threlium_bridges:
     # Gmail: label «Threlium/Processed» в UI; CREATE по IMAP не поддержан → imap_ensure_processed_folder: false.
     imap_processed_folder: "Threlium/Processed"
     imap_ensure_processed_folder: false
+  # isomorph — входящий HTTP-мост (Anthropic/OpenAI API поверх FSM). api_key пуст → мост не стартует.
+  isomorph:
+    listen_host: "127.0.0.1"
+    listen_port: 8040
+    api_key: ""
+    push_secret: "{{ vault_isomorph_push_secret | default('') }}"
+    request_timeout_sec: 180
+    keepalive_sec: 20
+    graceful_shutdown_sec: 10
+    enabled_surfaces:
+      - anthropic_messages
+      - openai_chat_completions
 
 # =============================================================================
 # cli — песочница systemd-run для cli_exec (sandbox / privileged).

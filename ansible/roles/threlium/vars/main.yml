@@ -24,6 +24,7 @@ threlium_fsm_mailbox_stages:
   - { id: egress_email }
   - { id: egress_telegram }
   - { id: egress_matrix }
+  - { id: egress_isomorph }
   - { id: formal_reason }
   - { id: memory_query }
   - { id: summarize_context }
@@ -123,6 +124,17 @@ _threlium_bridges_base:
   telegram:
     bot_token: ""
     bot_api_base: ""
+  isomorph:
+    listen_host: "127.0.0.1"
+    listen_port: 8040
+    api_key: ""
+    push_secret: ""
+    request_timeout_sec: 180
+    keepalive_sec: 20
+    graceful_shutdown_sec: 10
+    enabled_surfaces:
+      - anthropic_messages
+      - openai_chat_completions
 
 _threlium_enrich_base:
   context_thread_n: 200

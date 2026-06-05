@@ -70,6 +70,9 @@ from .identity import (
     ExternalRfcMidWire,
     ImapFolderUid,
     IngressRoute,
+    IsomorphApiSurface,
+    IsomorphContentId,
+    IsomorphIngressRoute,
     MatrixIngressRoute,
     MatrixNativeId,
     MatrixRoomEventId,
@@ -82,6 +85,12 @@ from .identity import (
     TNative,
     imap_folder_uid_as_imaplib_arg,
     imap_folder_uid_from_int,
+)
+from .isomorph_content import (
+    IsomorphAssistantContent,
+    IsomorphContentHashWire,
+    IsomorphToolCallSig,
+    canonical_json,
 )
 from threlium.mail_header_names import MailHeaderName
 from .matrix_client_room_message import (
@@ -350,8 +359,15 @@ __all__ = [
     "IngressRouterChildMsg",
     "IngressRouterResolvedChannelSlug",
     "IrtHashWire",
+    "IsomorphApiSurface",
+    "IsomorphAssistantContent",
+    "IsomorphContentHashWire",
+    "IsomorphContentId",
+    "IsomorphIngressRoute",
+    "IsomorphToolCallSig",
     "ThreliumContentScoreWire",
     "bridge_channel_from_email",
+    "canonical_json",
     "ingress_route_from_json_str",
     "LightragChunkRecord",
     "LightragDocumentHeader",

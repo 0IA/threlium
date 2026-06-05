@@ -13,6 +13,7 @@ from threlium.mail_header_names import MailHeaderName
 from .identity import (
     EmailIngressRoute,
     IngressRoute,
+    IsomorphIngressRoute,
     MatrixIngressRoute,
     TelegramIngressRoute,
     normalize_ingress_route_dict,
@@ -46,6 +47,8 @@ def ingress_route_from_json_str(raw: str) -> IngressRoute:
         return msgspec.json.decode(blob2, type=TelegramIngressRoute)
     if ch == "matrix":
         return msgspec.json.decode(blob2, type=MatrixIngressRoute)
+    if ch == "isomorph":
+        return msgspec.json.decode(blob2, type=IsomorphIngressRoute)
     raise ValueError(f"unknown ingress route channel: {ch!r}")
 
 

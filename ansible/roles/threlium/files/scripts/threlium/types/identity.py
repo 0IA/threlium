@@ -5,11 +5,19 @@
 """
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import NewType, Self, TypeVar
 
 import msgspec
 
 from ._core import NonEmptyStr
+
+
+class IsomorphApiSurface(StrEnum):
+    """Вендорный wire-формат HTTP-ответа клиенту (выбор не slug-ом канала, а полем маршрута)."""
+
+    ANTHROPIC_MESSAGES = "anthropic_messages"
+    OPENAI_CHAT_COMPLETIONS = "openai_chat_completions"
 
 
 class ExternalRfcMidWire(msgspec.Struct, frozen=True):
@@ -90,9 +98,23 @@ class MatrixNativeId(msgspec.Struct, frozen=True):
         return cls(v=1, room_id=r.room_id, event_id=r.event_id)
 
 
-NativeId = EmailNativeId | TelegramNativeId | MatrixNativeId
+class IsomorphContentId(msgspec.Struct, frozen=True):
+    """Контент-адресуемая идентичность isomorph-сообщения для канонического ``<b62@localhost>``.
 
-TNative = TypeVar("TNative", EmailNativeId, TelegramNativeId, MatrixNativeId)
+    ``content_hash`` — sha256-hex от нормализованного контента (ответ Threlium / хвост запроса
+    Cline). Один и тот же контент → один и тот же канонический Message-ID, поэтому мост может
+    пересчитать ``In-Reply-To`` из last-assistant без чтения notmuch (см. docs/THREAD_MODEL §isomorph).
+    """
+
+    v: int
+    content_hash: NonEmptyStr
+
+
+NativeId = EmailNativeId | TelegramNativeId | MatrixNativeId | IsomorphContentId
+
+TNative = TypeVar(
+    "TNative", EmailNativeId, TelegramNativeId, MatrixNativeId, IsomorphContentId
+)
 
 
 class EmailIngressRoute(msgspec.Struct, frozen=True):
@@ -134,7 +156,25 @@ class MatrixIngressRoute(msgspec.Struct, frozen=True):
     reply_to_event_id: MatrixRoomEventId | None = None
 
 
-IngressRoute = EmailIngressRoute | TelegramIngressRoute | MatrixIngressRoute
+class IsomorphIngressRoute(msgspec.Struct, frozen=True):
+    """Маршрут isomorph-ingress (HTTP-мост многих LLM API поверх одного FSM-контура).
+
+    ``request_id`` — коррелятор pending↔push (per-HTTP-request). ``api_surface`` — вендорный
+    wire-формат ответа (см. :class:`IsomorphApiSurface`), а не slug канала. ``model`` —
+    эхо-значение клиенту (Cline берёт по нему лимит контекстного окна), не выбор LLM.
+    """
+
+    channel: NonEmptyStr
+    request_id: NonEmptyStr
+    api_surface: NonEmptyStr
+    model: NonEmptyStr
+    v: int = 1
+    stream: bool = True
+
+
+IngressRoute = (
+    EmailIngressRoute | TelegramIngressRoute | MatrixIngressRoute | IsomorphIngressRoute
+)
 
 _OPTIONAL_STR_KEYS_EMPTY_TO_NONE = frozenset({"sync_batch", "reply_to_event_id"})
 

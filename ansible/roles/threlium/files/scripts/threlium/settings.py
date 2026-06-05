@@ -617,14 +617,58 @@ class TelegramBridgeSettings(BaseModel):
         return s.rstrip("/")
 
 
+class IsomorphBridgeSettings(BaseModel):
+    """HTTP-мост isomorph: эмулирует Anthropic/OpenAI API поверх FSM (long-hold + push).
+
+    Пусто (``api_key``) — мост не запускается (см. ``bridge_readiness``). ``listen_host``/``listen_port`` —
+    bind uvicorn И адрес ``/internal/v1/push`` для egress (cross-process на ``127.0.0.1``).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    listen_host: str = Field(default="127.0.0.1", description="Bind-адрес uvicorn (и таргет push).")
+    listen_port: int = Field(default=8040, ge=1, le=65535, description="Порт HTTP-моста.")
+    api_key: str = Field(
+        default="",
+        description="Единый ключ клиента (Anthropic x-api-key / OpenAI Bearer). Пусто — мост не настраивается.",
+    )
+    push_secret: str = Field(
+        default="",
+        description="Секрет для POST /internal/v1/push (egress→мост, localhost-only).",
+    )
+    request_timeout_sec: int = Field(
+        default=180,
+        ge=1,
+        le=3600,
+        description="Максимум ожидания push до 504/error-envelope.",
+    )
+    keepalive_sec: int = Field(
+        default=20,
+        ge=1,
+        le=290,
+        description="Интервал SSE keep-alive до push (меньше прокси/idle-таймаута).",
+    )
+    graceful_shutdown_sec: int = Field(
+        default=10,
+        ge=0,
+        le=600,
+        description="uvicorn --timeout-graceful-shutdown при рестарте моста.",
+    )
+    enabled_surfaces: list[str] = Field(
+        default_factory=lambda: ["anthropic_messages", "openai_chat_completions"],
+        description="Включённые api_surface; отключать вендоров без смены кода.",
+    )
+
+
 class BridgesSettings(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
     email: EmailBridgeSettings = Field(default_factory=EmailBridgeSettings)
     matrix: MatrixBridgeSettings = Field(default_factory=MatrixBridgeSettings)
     telegram: TelegramBridgeSettings = Field(default_factory=TelegramBridgeSettings)
+    isomorph: IsomorphBridgeSettings = Field(default_factory=IsomorphBridgeSettings)
 
-    @field_validator("email", "matrix", "telegram", mode="before")
+    @field_validator("email", "matrix", "telegram", "isomorph", mode="before")
     @classmethod
     def _bridge_subsection_not_null(cls, v: Any) -> Any:
         """YAML с только комментариями под ключом даёт ``null`` — трактуем как пустой объект."""

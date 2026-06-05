@@ -37,6 +37,7 @@ class FsmStage(StrEnum):
     EGRESS_EMAIL = "egress_email"
     EGRESS_TELEGRAM = "egress_telegram"
     EGRESS_MATRIX = "egress_matrix"
+    EGRESS_ISOMORPH = "egress_isomorph"
     FORMAL_REASON = "formal_reason"
     MEMORY_QUERY = "memory_query"
     SUMMARIZE_CONTEXT = "summarize_context"

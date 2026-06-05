@@ -55,6 +55,8 @@ def egress_addr_for_channel(channel: IngressRouterResolvedChannelSlug) -> FsmSta
         return FsmStage.EGRESS_TELEGRAM
     if ch == BridgeIngressChannel.MATRIX:
         return FsmStage.EGRESS_MATRIX
+    if ch == BridgeIngressChannel.ISOMORPH:
+        return FsmStage.EGRESS_ISOMORPH
     return FsmStage.EGRESS_EMAIL
 
 

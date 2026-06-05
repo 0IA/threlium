@@ -9,6 +9,7 @@ account "stdin" disabled stdin
 action "ins_ingress_route_tg" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +route && exec {{ _dispatch }}\""
 action "ins_ingress_route_mx" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +route && exec {{ _dispatch }}\""
 action "ins_ingress_route_em" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +route && exec {{ _dispatch }}\""
+action "ins_ingress_route_isomorph" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir +route && exec {{ _dispatch }}\""
 action "ins_ingress_plain" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=ingress && notmuch insert --folder=ingress/Maildir && exec {{ _dispatch }}\""
 
 action "ins_stage_archive" pipe "sh -ec \"export HOME={{ threlium_posix_home }} NOTMUCH_CONFIG={{ threlium_posix_home }}/.notmuch-config THRELIUM_STAGE=archive && notmuch insert --folder=archive/Maildir +route +lightrag_indexed && exec {{ _dispatch }}\""
@@ -30,6 +31,7 @@ match account "stdin" {
 		match "^From:[^\n]*(<telegram@localhost>|[[:space:]]telegram@localhost([[:space:];,\r\n]|$))" in headers action "ins_ingress_route_tg"
 		match "^From:[^\n]*(<matrix@localhost>|[[:space:]]matrix@localhost([[:space:];,\r\n]|$))" in headers action "ins_ingress_route_mx"
 		match "^From:[^\n]*(<email@localhost>|[[:space:]]email@localhost([[:space:];,\r\n]|$))" in headers action "ins_ingress_route_em"
+		match "^From:[^\n]*(<isomorph@localhost>|[[:space:]]isomorph@localhost([[:space:];,\r\n]|$))" in headers action "ins_ingress_route_isomorph"
 		match all action "ins_ingress_plain"
 	}
 	match "^To:.*archive@localhost" in headers action "ins_stage_archive"

@@ -73,6 +73,7 @@ class NotmuchBridgeFromLocalhost(StrEnum):
     TELEGRAM = "telegram@localhost"
     MATRIX = "matrix@localhost"
     EMAIL = "email@localhost"
+    ISOMORPH = "isomorph@localhost"
 
     def as_from_query_term(self) -> str:
         """Предикат ``from:<mailbox>``."""

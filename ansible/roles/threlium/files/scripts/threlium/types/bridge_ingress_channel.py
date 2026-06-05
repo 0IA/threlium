@@ -8,3 +8,4 @@ class BridgeIngressChannel(StrEnum):
     EMAIL = "email"
     TELEGRAM = "telegram"
     MATRIX = "matrix"
+    ISOMORPH = "isomorph"

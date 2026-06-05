@@ -30,6 +30,8 @@ def channel_label_for_stage(stage: FsmStage) -> str:
         return "telegram"
     if stage is FsmStage.EGRESS_MATRIX:
         return "matrix"
+    if stage is FsmStage.EGRESS_ISOMORPH:
+        return "isomorph"
     raise ValueError(f"egress sent-record: unsupported stage {stage!r}")
 
 
