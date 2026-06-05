@@ -168,3 +168,40 @@ ingress(U1)  [tag:route]
 Проверка вручную — подъём по `In-Reply-To` от листа последнего хода в SUT (через
 `notmuch find` по `Message-ID` и чтению `In-Reply-To`) должен показывать непрерывную
 линейную цепочку через все стадии всех ходов, с `glue`-записями между ходами.
+
+---
+
+## 6. Канал `isomorph`: контент-адресуемые Message-ID (glue без внешнего MID)
+
+Канал `isomorph` ([`bridges/isomorph/`](../ansible/roles/threlium/files/scripts/threlium/bridges/isomorph/),
+[`states/egress_isomorph.py`](../ansible/roles/threlium/files/scripts/threlium/states/egress_isomorph.py)) —
+входящий HTTP-мост, эмулирующий OpenAI/Anthropic API поверх FSM. Клиент (Cline и др.) **stateless**:
+шлёт полную историю в каждом запросе, **без** `In-Reply-To` (внешнего MID ответа, как `ext-A1` у email,
+нет). Тред-непрерывность достигается **контент-адресуемыми Message-ID** — это та же glue-схема §2, где
+роль внешнего идентификатора играет **хеш контента ответа**:
+
+* `egress_isomorph` минтит glue-archive с `Message-ID = canon(IsomorphContentId(hash(ответ)))`
+  (вместо `canon(EmailNativeId(ext-A1))`), `In-Reply-To` — на egress-задачу (линейно, §3–4);
+* следующий запрос несёт этот ответ как **last-assistant** в истории → мост пересчитывает тот же хеш и
+  ставит его как `In-Reply-To` нового `ingress` — **без чтения notmuch**; notmuch связывает тред по
+  MID/IRT сам, как при ответе пользователя на email.
+
+Нормализация хеша (паритет egress↔мост) — [`types/isomorph_content.py`](../ansible/roles/threlium/files/scripts/threlium/types/isomorph_content.py):
+text-блоки + сигнатура tool_use, исключая thinking/`cache_control`; tool-call `id` — на Anthropic
+включается, на OpenAI исключается (SDK усекает). Для FSM `isomorph` **неотличим** от email/tg/mx; FSM
+не меняется.
+
+**Инварианты, специфичные для `isomorph`:**
+
+* **ARCHIVE-FIRST.** Egress пишет glue **до** push клиенту — иначе следующий запрос (его `ingress`
+  ссылается на glue MID) может прийти раньше записи glue → `ingress`-стадия не найдёт родителя →
+  orphan-форк. (У email/tg/mx гонки нет: внешний MID присваивает MTA/API, не Threlium.)
+* **Идемпотентность.** `Message-ID` нового `ingress` = `canon(hash(хвост, parent))` → ретрай того же
+  запроса даёт тот же MID → notmuch дедуп, без дубля FSM-хода.
+* **Коллизия = форк, не порча.** `request_id` в хеш не положить (его нет в эхо клиента), поэтому два
+  байт-идентичных ответа в одном треде → один MID → дедуп → форк ветки (редко в агентских потоках; FSM
+  терпит форк как любую ветку §3). На Anthropic уникальность добирается `tool_use.id`.
+* **Fallback.** Первый ход (нет last-assistant) или редкий промах хеша → `In-Reply-To=None` → orphan →
+  новый тред (история — «просто большое входное сообщение»). Корректность сохраняется всегда.
+
+Подробности API/wire — [`BRIDGE_ISOMORPH.md`](BRIDGE_ISOMORPH.md).
