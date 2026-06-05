@@ -2919,8 +2919,15 @@ def assert_wiremock_reasoning_journal_preserves_context_tail(
             "(expected after summarize_context; prior thread turns may omit it)"
         )
     worst = max(tail_bodies, key=len)
-    if head_marker in worst:
+    # HEAD-маркер сам по себе может пережить summarize: сводка ссылается на оригинал в
+    # ``## Original user message`` (как в test_summarize_overflow). Запрещаем не маркер, а
+    # СЫРОЙ pad-блок старого хода (regression get_body / частичная summarize): его не должно
+    # быть в reasoning после суммаризации. ``head_marker`` оставлен в сигнатуре как якорь
+    # старого хода (см. fixtures e2e_oversized_context_trim_*; pad — символ ``X``).
+    _RAW_PAD_BLOCK = "X" * 64
+    if _RAW_PAD_BLOCK in worst:
         raise AssertionError(
-            f"reasoning journal user content still contains head marker {head_marker!r} "
-            "(expected summarized away from prior thread turns)"
+            "reasoning journal user content still contains raw oversized pad block "
+            f"({len(_RAW_PAD_BLOCK)}× 'X') near head_marker {head_marker!r} "
+            "(expected summarized away; overflow must be driven by distill brief, not raw pad)"
         )

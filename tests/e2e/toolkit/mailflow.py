@@ -311,11 +311,14 @@ def mailflow_inject_and_wait(
                     pad_chars=0,
                 )
             elif spec.oversized_trim_body:
-                # Малое сырое тело (HEAD-маркер); размер unified задаёт templated distill-бриф.
+                # HEAD-маркер без сырого pad: overflow гонится из distill-брифа (accumulation-
+                # filler в wiremock), не из сырого X-блока. Иначе один большой prior-CID
+                # закрывает excess, остальные prior-ходы остаются несуммаризированными
+                # (summarize редуцирует до бюджета, не «всё») и сырой X протекает в reasoning.
                 seed_body = e2e_oversized_context_trim_prior_turn_body(
                     head=f"{spec.body_head} (prior thread turn seed {turn_idx})",
                     correlation_key=correlation_key,
-                    pad_chars=500,
+                    pad_chars=0,
                 )
             else:
                 seed_body = e2e_dense_threlium_ctx_body(
