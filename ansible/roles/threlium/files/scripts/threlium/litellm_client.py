@@ -1,9 +1,10 @@
 """Единые вызовы LiteLLM с ``extra_headers`` e2e-корреляции.
 
 Источник корреляции (приоритет):
-1. Явный ``correlation_override`` (kwargs-мост LightRAG PriorityQueue).
-2. ``ContextVar`` (:func:`get_litellm_correlation_from_ctxvar`) — asyncio task-local.
-3. ``threading.local`` (:func:`get_litellm_http_correlation`) — sync FSM-пути.
+1. Явный ``correlation_override`` (для tool-вызовов, см. ``correlation_with_call_site``).
+2. ``ContextVar`` (:func:`get_litellm_correlation_from_ctxvar`) — единый носитель и для asyncio
+   RAG-задач (наследуется через ``create_task``), и для синхронных FSM-стадий (per-thread set→read,
+   скоуп на сообщение через token-reset во ``fsm._run_stage``).
 
 Снаружи процесса вызовов LiteLLM — :func:`merge_litellm_call_kwargs_and_log`: при
 ``ThreliumSettings.e2e.litellm_route_correlation`` подмешивает заголовки и пишет одну строку отладки
@@ -27,7 +28,6 @@ from threlium.types.litellm_routing_site import LitellmRoutingSite
 from threlium.litellm_route_context import (
     e2e_route_wire_tail,
     get_litellm_correlation_from_ctxvar,
-    get_litellm_http_correlation,
 )
 from threlium.types import MailHeaderName
 from threlium.types.litellm_call_site import (
@@ -42,7 +42,7 @@ _HDR_VALUE_MAX = 160
 
 log = logger.bind(stage="litellm")
 
-# Внутренние ключи в dict корреляции (TLS); не отправляются в HTTP ``extra_headers``.
+# Внутренние ключи в dict корреляции (ctxvar); не отправляются в HTTP ``extra_headers``.
 _SEQ_PREFIX = "__threlium_litellm_seq_"
 _SEQ_FSM_COMPLETION = f"{_SEQ_PREFIX}fsm_completion"
 _SEQ_FSM_EMBEDDING = f"{_SEQ_PREFIX}fsm_embedding"
@@ -75,18 +75,18 @@ def _parse_seq_cell(raw: object) -> int:
 
 
 def _assign_litellm_request_seq(
-    tls: dict[str, str],
+    correlation: dict[str, str],
     *,
     kind: LitellmRequestKind,
 ) -> int:
-    """Инкремент выбранной ячейки в ``tls``; возвращает новое значение для wire-заголовка."""
+    """Инкремент выбранной ячейки в dict корреляции; возвращает новое значение для wire-заголовка."""
 
-    cs = tls.get(LitellmCorrelationHeader.CALL_SITE.value)
+    cs = correlation.get(LitellmCorrelationHeader.CALL_SITE.value)
     slot = _seq_storage_key(call_site_wire=cs, kind=kind)
     with _litellm_seq_lock:
-        cur = _parse_seq_cell(tls.get(slot))
+        cur = _parse_seq_cell(correlation.get(slot))
         nxt = cur + 1
-        tls[slot] = str(nxt)
+        correlation[slot] = str(nxt)
         return nxt
 
 
@@ -212,7 +212,7 @@ def _merge_litellm_extra_route_headers(
 ) -> dict[str, Any]:
     """Корреляция → ``extra_headers`` + счётчик ``LITELLM_REQUEST_SEQ``.
 
-    Источник корреляции (приоритет): ``correlation_override`` > ContextVar > TLS.
+    Источник корреляции (приоритет): ``correlation_override`` > ContextVar.
 
     Четыре независимых счётчика живут в том же dict, что и источник, под ключами
     ``__threlium_litellm_seq_*`` (не попадают в HTTP). В wire один заголовок
@@ -227,17 +227,15 @@ def _merge_litellm_extra_route_headers(
 
     co = correlation_override
     cv = get_litellm_correlation_from_ctxvar()
-    tl = get_litellm_http_correlation()
-    tls_headers = co or cv or tl
-    source = "override" if co else ("ctxvar" if cv else ("tls" if tl else "NONE"))
-    thread_root = tls_headers.get("X-Threlium-Thread-Root") if tls_headers else None
+    correlation = co or cv
+    source = "override" if co else ("ctxvar" if cv else "NONE")
+    thread_root = correlation.get("X-Threlium-Thread-Root") if correlation else None
     log.debug(
         "merge_correlation",
         source=source,
         thread_root=thread_root,
         override_present=co is not None,
         ctxvar_present=cv is not None,
-        tls_present=tl is not None,
         kind=litellm_request_kind,
     )
     out = dict(kwargs)
@@ -250,13 +248,13 @@ def _merge_litellm_extra_route_headers(
                 continue
             extra[ks] = str(v)
     wire_seq_key = LitellmCorrelationHeader.LITELLM_REQUEST_SEQ.value
-    if tls_headers:
-        for k, v in tls_headers.items():
+    if correlation:
+        for k, v in correlation.items():
             ks = str(k)
             if _is_internal_correlation_key(ks):
                 continue
             extra[ks] = str(v)
-        seq_val = _assign_litellm_request_seq(tls_headers, kind=litellm_request_kind)
+        seq_val = _assign_litellm_request_seq(correlation, kind=litellm_request_kind)
         extra[wire_seq_key] = str(seq_val)
     if not extra:
         return out

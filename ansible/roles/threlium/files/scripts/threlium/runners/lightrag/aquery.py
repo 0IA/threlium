@@ -7,7 +7,7 @@ from typing import Any
 
 from lightrag import QueryParam
 
-from threlium.litellm_route_context import get_litellm_http_correlation
+from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.runners.lightrag._lifecycle import daemon_lightrag, run_rag_coroutine
 from threlium.settings import ThreliumSettings
 from threlium.types import LitellmCallSite
@@ -29,7 +29,7 @@ def build_query_correlation(settings: ThreliumSettings) -> dict[str, str]:
     """
     correlation: dict[str, str] = {}
     if settings.e2e.litellm_route_correlation:
-        snap = get_litellm_http_correlation()
+        snap = get_litellm_correlation_from_ctxvar()
         if snap:
             correlation.update(snap)
     correlation[LitellmCorrelationHeader.CALL_SITE.value] = (

@@ -16,7 +16,7 @@ from threlium.types import (
     NotmuchMessageIdInner,
     RfcMessageIdWire,
 )
-from threlium.litellm_route_context import get_litellm_http_correlation
+from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.settings import ThreliumSettings
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
@@ -109,7 +109,7 @@ def fsm_correlation_snap(
     """
     if not settings.e2e.litellm_route_correlation:
         return None
-    snap = get_litellm_http_correlation()
+    snap = get_litellm_correlation_from_ctxvar()
     if snap is not None:
         corr = dict(snap)
     elif msg is not None and call_site is not None:

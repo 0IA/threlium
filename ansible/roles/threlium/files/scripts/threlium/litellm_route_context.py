@@ -1,8 +1,10 @@
-"""Двойное хранилище e2e-корреляции LiteLLM: ``threading.local`` (TLS) + ``ContextVar``.
+"""Единое хранилище e2e-корреляции LiteLLM: один ``ContextVar``.
 
-TLS используется синхронными путями (``reasoning`` стадия) на FSM-потоках.
-ContextVar используется asyncio-путями (LightRAG aquery/ainsert) на RAG event-loop,
-где необходимо параллельное исполнение нескольких aquery без глобального lock.
+ContextVar — носитель и для asyncio-путей (LightRAG aquery/ainsert на RAG event-loop, где нужно
+параллельное исполнение нескольких aquery без глобального lock; дочерние задачи наследуют контекст
+через ``create_task``), и для синхронных FSM-стадий (``reasoning``/``enrich`` на FSM-потоке): в обычном
+потоке ContextVar ведёт себя как thread-local (set→read на одном потоке), а ``fsm._run_stage`` скоупит
+корреляцию на сообщение через ``set``→``reset(token)`` (важно, т.к. поток воркера переиспользуется).
 
 Набор wire-ключей задаётся билдером :func:`threlium.litellm_correlation_headers.build_litellm_correlation_headers`
 (From, To, Message-ID, In-Reply-To с конверта; ``X-Threlium-Route`` из корня треда в notmuch;
@@ -14,47 +16,21 @@ ContextVar используется asyncio-путями (LightRAG aquery/ainser
 from __future__ import annotations
 
 import contextvars
-import threading
 from contextvars import Token
-
-class _LitellmCorrelationTls(threading.local):
-    headers: dict[str, str] | None = None
-
-_tls = _LitellmCorrelationTls()
 
 _correlation_ctxvar: contextvars.ContextVar[dict[str, str] | None] = contextvars.ContextVar(
     "threlium_litellm_correlation", default=None
 )
 
 
-# ── TLS (threading.local) API ─────────────────────────────────────────────────
-
-
-def get_litellm_http_correlation() -> dict[str, str] | None:
-    """Текущий dict для merge ``extra_headers`` на этом OS-потоке (в т.ч. внутренние ключи seq при merge)."""
-    return _tls.headers
-
-
-def set_litellm_http_correlation(headers: dict[str, str] | None) -> None:
-    """Заменить снимок заголовков на потоке (``None`` — очистить)."""
-    _tls.headers = headers
-
-
-def clear_litellm_http_correlation() -> None:
-    """Снять корреляцию с потока (эквивалентно ``set_litellm_http_correlation(None)``)."""
-    _tls.headers = None
-
-
-# ── ContextVar API (asyncio task-local) ───────────────────────────────────────
-
-
 def get_litellm_correlation_from_ctxvar() -> dict[str, str] | None:
-    """Корреляция из текущего asyncio-контекста задачи (наследуется через ``create_task``)."""
+    """Корреляция из текущего контекста (asyncio-задача наследует через ``create_task``; на синхронном
+    FSM-потоке — значение, выставленное на этом же потоке)."""
     return _correlation_ctxvar.get()
 
 
 def set_litellm_correlation_ctxvar(headers: dict[str, str] | None) -> Token[dict[str, str] | None]:
-    """Выставить корреляцию в ContextVar; вернуть token для reset."""
+    """Выставить корреляцию в ContextVar; вернуть token для reset (per-message-скоуп)."""
     return _correlation_ctxvar.set(headers)
 
 

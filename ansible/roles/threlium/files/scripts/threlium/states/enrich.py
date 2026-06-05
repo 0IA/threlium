@@ -44,7 +44,7 @@ from threlium.graph_answer_view import format_graph_answer_part
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_transition_simple_step_preserving_payload
 from threlium.ledger_context_parts import ledger_context_parts
-from threlium.litellm_route_context import e2e_route_wire_tail, get_litellm_http_correlation
+from threlium.litellm_route_context import e2e_route_wire_tail, get_litellm_correlation_from_ctxvar
 from threlium.logutil import logger
 from threlium.mime_reform import (
     EnrichContentId,
@@ -52,7 +52,6 @@ from threlium.mime_reform import (
     build_context_backpack_multipart,
     history_part_text,
     iter_history_parts,
-    require_enrich_user_query_text,
 )
 from threlium.nm import require_fsm_message_id
 from threlium.prompts import render_prompt
@@ -82,7 +81,6 @@ from threlium.types import (
     ReasoningUserMessageText,
     FsmTransitionPlainBody,
     LightragPromptLibraryKey,
-    LitellmCallSite,
     FsmStage,
     MailHeaderName,
     NotmuchMessageIdInner,
@@ -95,7 +93,6 @@ from threlium.types import (
     TaskSubtaskContentId,
     TaskSubtaskText,
 )
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 
 log = logger.bind(stage="enrich")
 
@@ -553,13 +550,13 @@ def _build_rag_correlation(
     утекает (см. :func:`threlium.runners.lightrag.aquery.build_query_correlation`).
     """
     if config.e2e.litellm_route_correlation:
-        snap = get_litellm_http_correlation()
+        snap = get_litellm_correlation_from_ctxvar()
         th = threading.current_thread()
         route_k = _HDR.ROUTE.value
         route_v = snap.get(route_k) if snap else None
         rt = route_v if isinstance(route_v, str) else None
         log.debug(
-            "e2e_litellm_tls",
+            "e2e_litellm_corr",
             thread_name=th.name,
             thread_ident=threading.get_ident(),
             snap_is_none=snap is None,

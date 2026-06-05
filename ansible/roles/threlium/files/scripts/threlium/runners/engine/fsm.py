@@ -11,9 +11,9 @@ from threlium.mail import email_message_from_bytes, serialize_rfc822_for_wire
 from threlium.settings import ThreliumSettings
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers
 from threlium.litellm_route_context import (
-    clear_litellm_http_correlation,
     e2e_route_wire_tail,
-    set_litellm_http_correlation,
+    reset_litellm_correlation_ctxvar,
+    set_litellm_correlation_ctxvar,
 )
 from threlium.nm import inner_message_id_for_path, nm_settle, settle_recovery_for_stage
 from threlium.runners.lightrag import schedule_index_pending
@@ -90,18 +90,20 @@ def _run_stage(
         snap = LitellmCorrelationSnapshot.from_mapping(corr)
         tid_s = thread_scope.value if thread_scope is not None else "?"
         _log.debug(
-            "e2e_fsm_tls_set",
+            "e2e_fsm_corr_set",
             thread=threading.current_thread().name,
             ident=threading.get_ident(),
             notmuch_thread_id=tid_s,
             route_tail=e2e_route_wire_tail(snap.route_wire),
             call_site=snap.call_site,
         )
-        set_litellm_http_correlation(snap.as_dict())
+        # ContextVar (а не TLS): на синхронном FSM-потоке ведёт себя как thread-local (set→read на одном
+        # потоке), а token-reset гарантирует per-message-скоуп при переиспользовании потока воркером.
+        token = set_litellm_correlation_ctxvar(snap.as_dict())
         try:
             out_msg = handler(msg, stage_vo, config=settings)
         finally:
-            clear_litellm_http_correlation()
+            reset_litellm_correlation_ctxvar(token)
 
     if out_msg is None:
         _log.info("fsm_result_terminal")

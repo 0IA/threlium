@@ -11,7 +11,7 @@ from email.message import EmailMessage
 
 from threlium.formal_reason_gate import formal_reason_gate_active
 from threlium.litellm_required_tool import build_site_call, correlation_with_call_site
-from threlium.litellm_route_context import get_litellm_http_correlation
+from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.litellm_tool_completion import completion_required_tool_sync
 from threlium.litellm_tool_response import require_tool_calls_response
 from litellm.types.utils import Message
@@ -41,7 +41,6 @@ from threlium.types import (
     ReasoningRouteDecision,
     LiteLlmToolCallArgumentsWire,
     ReasoningToolFunctionName,
-    RfcMessageIdWire,
     MailHeaderName,
     reasoning_assistant_message,
     reasoning_assistant_plain_text,
@@ -207,7 +206,7 @@ def _decide(
         correlation = None
         if config.e2e.litellm_route_correlation:
             correlation = correlation_with_call_site(
-                get_litellm_http_correlation(), call_site_wire
+                get_litellm_correlation_from_ctxvar(), call_site_wire
             )
         resp = completion_required_tool_sync(
             settings=config,
