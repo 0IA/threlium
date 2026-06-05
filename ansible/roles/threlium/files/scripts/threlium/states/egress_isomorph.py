@@ -66,11 +66,11 @@ def push_completion_to_bridge(
     )
     try:
         with urllib.request.urlopen(req, timeout=iso.request_timeout_sec) as resp:
-            log.info("push_ok", request_id=payload.request_id, status=resp.status)
+            log.info("push_ok", mid=payload.ingress_mid, status=resp.status)
     except urllib.error.HTTPError as e:  # noqa: PERF203
-        log.warning("push_http_error", request_id=payload.request_id, status=e.code)
+        log.warning("push_http_error", mid=payload.ingress_mid, status=e.code)
     except urllib.error.URLError as e:
-        log.warning("push_unreachable", request_id=payload.request_id, reason=str(e.reason))
+        log.warning("push_unreachable", mid=payload.ingress_mid, reason=str(e.reason))
 
 
 def main(
@@ -82,9 +82,12 @@ def main(
             f"{type(r).__name__} (channel={r.channel!r})"
         )
 
-    route, _snap = resolve_egress_task_route_ancestor(
+    route, snap = resolve_egress_task_route_ancestor(
         msg, IsomorphIngressRoute, wrong_route_type_message=_wrong_type
     )
+    # Коррелятор push↔pending = Message-ID ЭТОГО хода (ближайший tag:route предок = ingress хода),
+    # под ним мост зарегистрировал pending. inner-форма — байтовый паритет с регистрацией моста.
+    corr = snap.ancestor_mid.value
 
     # MVP (фаза A): FSM-ответ — текст (reasoning → … → response_finalize). Cline-tools на
     # MVP не эмитируются; tool_blocks пусты. Хеш считается от того же нейтрального контента,
@@ -96,7 +99,7 @@ def main(
     )
 
     payload = IsomorphBridgePushPayload(
-        request_id=route.request_id,
+        ingress_mid=corr,
         api_surface=route.api_surface,
         finish_reason="stop",
         model=route.model,
@@ -106,7 +109,7 @@ def main(
     sent_raw = json.dumps(
         {
             "channel": "isomorph",
-            "request_id": route.request_id,
+            "ingress_mid": corr,
             "api_surface": route.api_surface,
             "model": route.model,
             "stream": route.stream,
@@ -124,9 +127,9 @@ def main(
             glue_message_id_wire=glue_mid, settings=config,
         )
         run_fdm(serialize_rfc822_for_wire(archive_email))
-        log.info("archive_written", request_id=route.request_id)
+        log.info("archive_written", mid=corr)
     else:
-        log.info("archive_exists_repush", request_id=route.request_id)
+        log.info("archive_exists_repush", mid=corr)
 
     push_completion_to_bridge(payload, settings=config)
     return None

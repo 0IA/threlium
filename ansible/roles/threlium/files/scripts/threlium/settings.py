@@ -658,6 +658,17 @@ class IsomorphBridgeSettings(BaseModel):
         default_factory=lambda: ["anthropic_messages", "openai_chat_completions"],
         description="Включённые api_surface; отключать вендоров без смены кода.",
     )
+    thread_vote_max_replies: int = Field(
+        default=3,
+        ge=1,
+        le=32,
+        description=(
+            "Сколько последних assistant-ответов из истории клиента сверять с notmuch для резолва "
+            "целевого треда (голосование по glue-MID). 1 = чистая контент-адресация по last-assistant; "
+            "≥3 устойчивее к коллизии последнего ответа. Ничья верхушки → 409 ambiguous; 0 совпадений → "
+            "новый тред."
+        ),
+    )
 
 
 class BridgesSettings(BaseModel):

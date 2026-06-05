@@ -159,13 +159,14 @@ class MatrixIngressRoute(msgspec.Struct, frozen=True):
 class IsomorphIngressRoute(msgspec.Struct, frozen=True):
     """Маршрут isomorph-ingress (HTTP-мост многих LLM API поверх одного FSM-контура).
 
-    ``request_id`` — коррелятор pending↔push (per-HTTP-request). ``api_surface`` — вендорный
-    wire-формат ответа (см. :class:`IsomorphApiSurface`), а не slug канала. ``model`` —
-    эхо-значение клиенту (Cline берёт по нему лимит контекстного окна), не выбор LLM.
+    Коррелятор pending↔push — НЕ отдельный ``request_id``, а **контент-адресуемый ``Message-ID``
+    ingress** (per-turn-уникален, доступен сразу на первом ходу до notmuch): мост регистрирует pending
+    под ним, egress пушит ``ancestor_mid`` ближайшего ``tag:route`` предка (= этот ingress). ``thread_id``
+    notmuch не годится (нет на первом ходу + не per-turn). ``api_surface`` — вендорный wire-формат ответа
+    (см. :class:`IsomorphApiSurface`), а не slug канала. ``model`` — эхо клиенту (лимит окна), не выбор LLM.
     """
 
     channel: NonEmptyStr
-    request_id: NonEmptyStr
     api_surface: NonEmptyStr
     model: NonEmptyStr
     v: int = 1

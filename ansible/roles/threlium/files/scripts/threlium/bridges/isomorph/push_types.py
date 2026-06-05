@@ -29,7 +29,8 @@ class IsomorphPushToolBlock(msgspec.Struct, frozen=True):
 class IsomorphBridgePushPayload(msgspec.Struct, frozen=True):
     """Тело ``POST /internal/v1/push``: результат FSM-хода для отдачи клиенту."""
 
-    request_id: NonEmptyStr
+    #: Коррелятор pending↔push = контент-адресуемый ``Message-ID`` ingress этого хода (inner-форма).
+    ingress_mid: NonEmptyStr
     api_surface: NonEmptyStr
     finish_reason: NonEmptyStr
     #: Эхо ``model`` (Cline берёт по нему лимит контекстного окна).

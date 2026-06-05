@@ -19,7 +19,6 @@ from threlium.fsm_emit_semantic import emit_bridge_distill_to_enrich
 from threlium.ingress_distill import ingress_distill_llm
 from threlium.logutil import logger
 from threlium.mime_reform import (
-    ingress_pipeline_email,
     require_unique_threading_rfc822_headers,
     system_part_text,
 )
@@ -97,7 +96,8 @@ def _emit_to_cli_resume(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings,
 ) -> EmailMessage:
     require_bridge_from_email(msg)
-    msg = ingress_pipeline_email(msg)
+    # Мост уже кладёт тело пользователя в <system> (контракт проекта; email _build_canonical /
+    # build_bridge_ingress_email). Читаем его напрямую — без сплющивания в plain.
     return build_fsm_step_to_stage(
         msg,
         to_addr=FsmStage.CLI_RESUME,

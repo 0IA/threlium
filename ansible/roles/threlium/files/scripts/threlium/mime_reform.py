@@ -258,33 +258,6 @@ def require_unique_threading_rfc822_headers(msg: EmailMessage) -> None:
             )
 
 
-def ingress_pipeline_email(incoming: EmailMessage) -> EmailMessage:
-    """Письмо для handoff после ingress: моночасть ``text/plain``, без multipart/вложений.
-
-    Заголовки переносятся как в orphan-префиксе (:mod:`threlium.states.ingress`), тело —
-    :func:`extract_plain_body`.
-    """
-    out = EmailMessage()
-    skip = frozenset(
-        {
-            _HDR.CONTENT_TYPE.value.lower(),
-            _HDR.CONTENT_TRANSFER_ENCODING.value.lower(),
-            _HDR.MIME_VERSION.value.lower(),
-            _HDR.CONTENT_DISPOSITION.value.lower(),
-        }
-    )
-    for k, v in incoming.items():
-        if k.lower() in skip:
-            continue
-        if k in out:
-            out.add_header(k, v)
-        else:
-            out[k] = v
-    body = extract_plain_body(incoming)
-    out.set_content(body, subtype="plain", charset="utf-8")
-    return out
-
-
 def _make_inline_text_part(
     content_id: EnrichPartId | EnrichContentId,
     text: str,

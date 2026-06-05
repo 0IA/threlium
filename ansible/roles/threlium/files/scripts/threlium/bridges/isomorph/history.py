@@ -1,14 +1,13 @@
-"""Stateless tail-extractor + контент-адресуемые Message-ID (ядро isomorph-моста).
+"""Разбор присланной истории клиента: кандидаты-голоса + хвост (чистый compute, БЕЗ notmuch).
 
-Структурный разбор ``messages`` (НЕ поиск подстроки), БЕЗ чтения notmuch:
-  1. найти последний ``role=="assistant"`` (= прошлый ответ Threlium);
-  2. ``In-Reply-To = canon(IsomorphContentId(hash(last_assistant)))`` — MID glue прошлого хода
-     (egress сминтил его так же) → notmuch свяжет тред сам;
-  3. хвост = сообщения после last-assistant (tool-результаты + возможный новый user) → один ingress;
-  4. ``Message-ID = canon(IsomorphContentId(hash(хвост, parent)))`` — идемпотентность + позиционная
-     уникальность.
+Структурный разбор ``messages`` (НЕ поиск подстроки):
+  1. найти последний ``role=="assistant"`` (= прошлый ответ Threlium); ассистента нет → первый ход;
+  2. кандидаты = ``G_i = canon(IsomorphContentId(hash(R_i)))`` КАЖДОГО assistant-ответа, most-recent-first;
+  3. хвост = сообщения после last-assistant (tool-результаты + возможный новый user) → один ``<system>``.
 
-Нет last-assistant → первый ход: ``In-Reply-To=None``, хвост = последний user-turn.
+``In-Reply-To`` НЕ считается здесь: его резолвит :mod:`.thread_resolve` голосованием по кандидатам в
+notmuch (устойчивость к коллизии последнего ответа + детект «прошлый ход ещё в работе»). Финальный
+``Message-ID`` нового ingress (``hash(parent=IRT, tail)``) — :func:`ingress_message_id` после резолва.
 
 Нормализация контента ассистента (для паритета хеша с ``states/egress_isomorph``) — общий модуль
 :mod:`threlium.types.isomorph_content`.
@@ -28,15 +27,14 @@ from threlium.types import (
 )
 
 
-class TailExtraction(msgspec.Struct, frozen=True):
-    """Результат разбора запроса для построения одного ingress-письма."""
+class ParsedHistory(msgspec.Struct, frozen=True):
+    """Чистый разбор присланной истории (без notmuch): кандидаты на голосование + хвост."""
 
-    #: ``In-Reply-To`` нового ingress (MID glue прошлого хода) или ``None`` для первого хода.
-    in_reply_to: RfcMessageIdWire | None
-    #: Контент-адресуемый ``Message-ID`` нового ingress.
-    message_id: RfcMessageIdWire
-    #: Plain-текст хвоста → ``<system>``-body для FSM (bridge→ingress только ``<system>``).
-    body: str
+    #: ``G_i = canon(hash(R_i))`` последних assistant-ответов, **most-recent-first**; для голосования
+    #: за целевой тред (:mod:`.thread_resolve`). Пусто ⟺ первый ход (ассистента в истории нет).
+    recent_assistant_mids: tuple[RfcMessageIdWire, ...]
+    #: Plain-текст хвоста (после last-assistant) → ``<system>``-body для FSM.
+    tail_body: str
 
 
 # --- внутренние нормализованные представления --------------------------------------------
@@ -160,8 +158,17 @@ def _content_addressed_mid(content_hash: str) -> RfcMessageIdWire:
     return RfcMessageIdWire.from_native(IsomorphContentId(v=1, content_hash=content_hash))
 
 
-def extract_tail(surface: IsomorphApiSurface, body: dict[str, object]) -> TailExtraction:
-    """Полная история Cline → (In-Reply-To, Message-ID, body) для одного ingress. Чистый compute."""
+def _render_body(tail_msgs: list[_Msg]) -> str:
+    return "\n".join(m.render for m in tail_msgs if m.render).strip()
+
+
+def parse_history(surface: IsomorphApiSurface, body: dict[str, object]) -> ParsedHistory:
+    """Полная история клиента → кандидаты-голоса (G_i, most-recent-first) + хвост. Чистый compute.
+
+    Хвост = сообщения после последнего assistant (или первый user-turn, если ассистента нет) —
+    сливаются в один ``<system>``-body. Кандидаты — ``G_i`` каждого assistant-ответа, свежайший первым;
+    их сверяет с notmuch :func:`threlium.bridges.isomorph.thread_resolve.resolve_in_reply_to`.
+    """
     msgs = _parse_messages(surface, body)
 
     last_assistant_idx = -1
@@ -171,24 +178,29 @@ def extract_tail(surface: IsomorphApiSurface, body: dict[str, object]) -> TailEx
             break
 
     if last_assistant_idx < 0:
-        # Первый ход: родителя нет; хвост = последний user-turn (фолбэк — все user/tool).
-        in_reply_to = None
-        parent_value = ""
-        tail_msgs = _first_turn_tail(msgs)
-    else:
-        anchor = msgs[last_assistant_idx].assistant
-        assert anchor is not None
-        in_reply_to = _content_addressed_mid(
-            IsomorphContentHashWire.from_content(anchor).value
-        )
-        parent_value = in_reply_to.value
-        tail_msgs = msgs[last_assistant_idx + 1:]
+        return ParsedHistory(recent_assistant_mids=(), tail_body=_render_body(_first_turn_tail(msgs)))
 
-    body_text = "\n".join(m.render for m in tail_msgs if m.render).strip()
-    message_id = _content_addressed_mid(
-        IsomorphContentHashWire.from_ingress_tail(parent=parent_value, tail=body_text).value
+    candidates: list[RfcMessageIdWire] = []
+    for i in range(last_assistant_idx, -1, -1):  # most-recent-first
+        a = msgs[i].assistant
+        if msgs[i].role == "assistant" and a is not None:
+            candidates.append(_content_addressed_mid(IsomorphContentHashWire.from_content(a).value))
+
+    return ParsedHistory(
+        recent_assistant_mids=tuple(candidates),
+        tail_body=_render_body(msgs[last_assistant_idx + 1:]),
     )
-    return TailExtraction(in_reply_to=in_reply_to, message_id=message_id, body=body_text)
+
+
+def ingress_message_id(*, parent_value: str, tail_body: str) -> RfcMessageIdWire:
+    """Контент-адресуемый ``Message-ID`` нового ingress = ``hash(parent=IRT, tail)``.
+
+    ``parent_value`` = resolved ``In-Reply-To`` (``G_j``) или ``""`` для orphan. Идемпотентность ретраев
+    + позиционная уникальность (тот же хвост под разным родителем → разные MID).
+    """
+    return _content_addressed_mid(
+        IsomorphContentHashWire.from_ingress_tail(parent=parent_value, tail=tail_body).value
+    )
 
 
 def _first_turn_tail(msgs: list[_Msg]) -> list[_Msg]:
