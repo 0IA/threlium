@@ -89,15 +89,19 @@ def formal_reason_result_from_formal_reason_email(
 def _latest_formal_reason_output_snap(
     leaf_inner: NotmuchMessageIdInner,
 ) -> IrtAncestorSnapshot | None:
-    """Новейший hop ``formal_reason@`` в IRT-окне (лист reasoning → watermark ``To: reasoning``)."""
-    found: IrtAncestorSnapshot | None = None
-    for snap in iter_irt_ancestors_filtered(leaf_inner):
-        if snap.is_addressed_to_fsm_stage(FsmStage.REASONING):
-            break
+    """Ближайший ``formal_reason@``-выход в текущем ходе (frame-isolated, до ``tag:route``).
+
+    Письмо ``formal_reason@ → …`` само несёт machine payload (outcome) — гейт = «есть ли он и
+    каков исход», без watermark ``To: reasoning``. Watermark по последнему reasoning был неверен:
+    под гейтом разрешён ``memory_query`` (без нового formal_reason), и в дельте следующего
+    reasoning formal_reason отсутствует → watermark гасил гейт → escape с полным toolset до
+    **чистого** formal_reason. «Найти последний formal_reason хода или нет» держит гейт ровно до
+    чистого прогона; ``stop_at_route`` сбрасывает гейт на границе нового пользовательского хода.
+    """
+    for snap in iter_irt_ancestors_filtered(leaf_inner, stop_at_route=True):
         if snap.is_sent_from_fsm_stage(FsmStage.FORMAL_REASON):
-            found = snap
-            break
-    return found
+            return snap
+    return None
 
 
 def formal_reason_result_from_irt_delta(
