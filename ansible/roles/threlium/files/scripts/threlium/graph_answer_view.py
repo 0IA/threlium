@@ -49,9 +49,14 @@ def _llm_text(envelope: dict[str, Any]) -> str | None:
     return stripped
 
 
-def _parse_lightrag_query_data(raw: dict[str, Any]) -> LightragQueryData:
+def _parse_lightrag_query_data(raw: dict[str, Any]) -> LightragQueryData | None:
     payload = copy.deepcopy(raw)
     payload.pop("llm_response", None)
+    # Пустой retrieval (нет сущностей/связей — напр. keyword-extraction дал пустые ключи): aquery_llm
+    # отдаёт ТОЛЬКО llm_response, а raw_data = {}. Это НЕ malformed-ответ, а легитимный «граф пуст» —
+    # не валим воркер (иначе systemd-restart loop), возвращаем None → деградация до answer-only.
+    if not payload:
+        return None
     try:
         resp = QueryDataResponse.model_validate(payload)
     except ValidationError as exc:
@@ -100,6 +105,17 @@ def build_graph_answer_view(
         )
 
     data = _parse_lightrag_query_data(raw)
+    if data is None:
+        # Пустой retrieval: для aquery_llm есть сгенерированный ответ (llm_text) — отдаём answer-only
+        # view (как ветка aquery), без подграфа; иначе графа нет вовсе → None.
+        if query_api == "aquery_llm" and answer:
+            return GraphAnswerView(
+                formulated_query=formulated,
+                answer=answer,
+                entities=(),
+                relations=(),
+            )
+        return None
     view = GraphAnswerView.from_query_data(
         formulated_query=formulated,
         answer=answer if query_api == "aquery_llm" else None,
