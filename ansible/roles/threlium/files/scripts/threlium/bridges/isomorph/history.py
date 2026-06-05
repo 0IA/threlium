@@ -3,7 +3,9 @@
 Структурный разбор ``messages`` (НЕ поиск подстроки):
   1. найти последний ``role=="assistant"`` (= прошлый ответ Threlium); ассистента нет → первый ход;
   2. кандидаты = ``G_i = canon(IsomorphContentId(hash(R_i)))`` КАЖДОГО assistant-ответа, most-recent-first;
-  3. хвост = сообщения после last-assistant (tool-результаты + возможный новый user) → один ``<system>``.
+  3. хвост = ВСЁ присланное после последнего якоря-ассистента (system + user'ы + tool-результаты),
+     слитое в один ``<system>``-body. Якоря — только наши ответы; ничего из клиентского не отбрасываем.
+     Первый ход (нет ассистента) → сливается вся история (включая Anthropic top-level ``system``).
 
 ``In-Reply-To`` НЕ считается здесь: его резолвит :mod:`.thread_resolve` голосованием по кандидатам в
 notmuch (устойчивость к коллизии последнего ответа + детект «прошлый ход ещё в работе»). Финальный
@@ -138,6 +140,13 @@ def _parse_messages(surface: IsomorphApiSurface, body: dict[str, object]) -> lis
     if not isinstance(raw, list):
         raise ValueError("isomorph: request body has no 'messages' array")
     out: list[_Msg] = []
+    # Anthropic держит system отдельным top-level полем (НЕ в messages). Это такое же сообщение
+    # клиента, как прочие, — не игнорируем: вносим первым (до anchor'ов) → сольётся в хвост turn-1.
+    # OpenAI шлёт system обычным элементом messages (role=="system") → попадает в общий проход ниже.
+    if surface is IsomorphApiSurface.ANTHROPIC_MESSAGES:
+        sys_text = _coerce_text(body.get("system")).strip()
+        if sys_text:
+            out.append(_Msg(role="system", assistant=None, render=f"[system] {sys_text}"))
     for m in raw:
         if not isinstance(m, dict):
             continue
@@ -177,9 +186,9 @@ def parse_history(surface: IsomorphApiSurface, body: dict[str, object]) -> Parse
             last_assistant_idx = i
             break
 
-    if last_assistant_idx < 0:
-        return ParsedHistory(recent_assistant_mids=(), tail_body=_render_body(_first_turn_tail(msgs)))
-
+    # Якоря — assistant-ответы Threlium. Хвост = ВСЁ, что клиент прислал после последнего якоря
+    # (system + user'ы + tool-результаты), слитое в один <system>-body. Ничего из присланного не
+    # отбрасываем. Нет якоря (первый ход) → idx=-1 → msgs[0:] = вся история сливается целиком.
     candidates: list[RfcMessageIdWire] = []
     for i in range(last_assistant_idx, -1, -1):  # most-recent-first
         a = msgs[i].assistant
@@ -201,11 +210,3 @@ def ingress_message_id(*, parent_value: str, tail_body: str) -> RfcMessageIdWire
     return _content_addressed_mid(
         IsomorphContentHashWire.from_ingress_tail(parent=parent_value, tail=tail_body).value
     )
-
-
-def _first_turn_tail(msgs: list[_Msg]) -> list[_Msg]:
-    """Первый ход: предпочесть последний user; если его нет — все не-system сообщения."""
-    for i in range(len(msgs) - 1, -1, -1):
-        if msgs[i].role == "user":
-            return [msgs[i]]
-    return [m for m in msgs if m.role != "system"]
