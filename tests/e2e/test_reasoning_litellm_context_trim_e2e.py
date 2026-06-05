@@ -35,6 +35,10 @@ REASONING_CTX_TRIM_SPEC = MailflowScenarioSpec(
     stub_tag="stub-reasoning-litellm-ctx-trim-01",
     body_head=f"{REASONING_E2E_BODY_MARKER}\ne2e reasoning context trim inbound",
     oversized_trim_body=True,
+    # RAG-warmup тело (min_rerank_posts=0) не несёт CTX-TRIM HEAD/TAIL маркеров, поэтому
+    # ни 075 (HEAD), ни 075_turn2 (TAIL) его distill не матчат. Уникальный warmup-маркер
+    # разводит его в отдельный distill-стаб (075_warmup), без priority/doesNotContain.
+    warmup_body_extra="E2E-CTX-TRIM-WARMUP-MARKER",
     # Каждый distill-бриф под cap (distill_max_chars=8000); 3 prior + main → overflow.
     summarize_overflow_prior_turns=3,
     min_chat_completion_posts=2,

@@ -56,7 +56,7 @@
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e: close act1 ledger after forced 500\",\"new_subtasks\": [{\"text\": \"Acknowledge handler failure (act1)\",\"status\": \"done\"}]}"
+                  "arguments": "{\"reasoning\": \"e2e: close act1 ledger after forced 500\",\"new_subtasks\": [{\"text\": \"Acknowledge handler failure (act1)\",\"status\": \"done\"}],\"subtask_updates\": [{\"content_id\": \"481a8275734a\",\"status\": \"done\"}]}"
                 }
               }
             ]

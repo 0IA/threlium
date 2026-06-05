@@ -266,6 +266,23 @@ def mailflow_inject_and_wait(
 
     reset_maildrop_debug_log(project_name, repo_root=REPO_ROOT)
 
+    if seed_id is not None and spec.min_rerank_posts == 0:
+        # Cold-reset сносит lightrag; цепочка prior-turn seed (summarize/trim) гоняет
+        # полный ingress→egress на каждый ход. Без прогретого vdb первый seed часто не
+        # успевает в TIMEOUT_POLL_SHORT на solo/cold (в batch vdb уже тёплый от соседей).
+        _inject_rag_warmup(
+            project_name,
+            rt=rt,
+            wm_base=wm_base,
+            stub_tag=spec.stub_tag,
+            body_head=spec.body_head,
+            body_extra=spec.warmup_body_extra,
+            label=spec.label,
+        )
+        mailflow_log_phase(
+            f"{spec.label}: lightrag ready for prior-turn seeds (+{time.monotonic() - t0:.1f}s)"
+        )
+
     if seed_id is not None:
         # summarize overflow: несколько старых ходов одного треда, каждый distill-бриф под
         # cap (distill_max_chars), накапливаются в history tokens до excess X (token ledger) →
@@ -289,7 +306,9 @@ def mailflow_inject_and_wait(
                 seed_body = e2e_summarize_overflow_inject_body(
                     head=f"{spec.body_head} (prior thread turn seed {turn_idx})",
                     correlation_key=correlation_key,
-                    pad_chars=500,
+                    # Токены overflow — из distill-брифа (wiremock accumulation-filler), не из
+                    # сырого P-блока в ## Original user message (иначе один CID закрывает excess).
+                    pad_chars=0,
                 )
             elif spec.oversized_trim_body:
                 # Малое сырое тело (HEAD-маркер); размер unified задаёт templated distill-бриф.
@@ -337,6 +356,12 @@ def mailflow_inject_and_wait(
                 f"{spec.label}: prior-turn seed[{turn_idx}] indexed mid={cur_seed_id!r} "
                 f"(+{time.monotonic() - t0:.1f}s)"
             )
+            _mailflow_wait_wiremock_journal_ready_if_configured(
+                spec,
+                project=project_name,
+                stub_tag=spec.stub_tag,
+                correlation_key=correlation_key,
+            )
             wait_for_greenmail_user_reply(
                 project_name,
                 raw_id=cur_seed_id,
@@ -379,14 +404,11 @@ def mailflow_inject_and_wait(
                 head=spec.body_head, correlation_key=correlation_key
             )
     elif spec.summarize_overflow_body:
-        if seed_id is not None:
-            inject_body = e2e_dense_threlium_ctx_body(
-                head=spec.body_head, correlation_key=correlation_key
-            )
-        else:
-            inject_body = e2e_summarize_overflow_inject_body(
-                head=spec.body_head, correlation_key=correlation_key
-            )
+        inject_body = e2e_summarize_overflow_inject_body(
+            head=spec.body_head,
+            correlation_key=correlation_key,
+            pad_chars=0,
+        )
     else:
         inject_body = e2e_dense_threlium_ctx_body(
             head=spec.body_head, correlation_key=correlation_key

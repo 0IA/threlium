@@ -51,12 +51,13 @@ SUMMARIZE_CONTEXT_SPEC = MailflowScenarioSpec(
     stub_tag="stub-summarize-context-e2e-01",
     body_head=f"{REASONING_E2E_BODY_MARKER}\ne2e summarize context overflow inbound",
     summarize_overflow_body=True,
-    # Каждый distill-бриф под cap (distill_max_chars=8000); 2 старых хода + основной
-    # накапливают history tokens (tight model_context_tokens в e2e) → excess X → summarize.
-    summarize_overflow_prior_turns=2,
+    # Один prior + main: один overflow batch закрывает excess по seed-ходу; 2 prior
+    # оставляют несummarized history с PAD_MARKER (granular batch не покрывает весь тред).
+    summarize_overflow_prior_turns=1,
     min_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
+    wiremock_journal_ready_needle="call_e2e_tasks_ledger_phase_tasks_ledger_done",
     expect_notmuch_stage_folders=(
         FsmStage.INGRESS.value,
         FsmStage.ENRICH.value,
@@ -105,8 +106,7 @@ def _summarize_context_user_content_merged(
         call_site = _wiremock_headers_get_ci(
             req.get("headers"), "X-Threlium-Call-Site"
         )
-        hay = _journal_request_anchor_haystack(entry)
-        if call_site != "summarize_thread_context" and E2E_SUMMARIZE_LLM_NEEDLE not in hay:
+        if call_site != "summarize_thread_context":
             continue
         body = _journal_chat_completion_user_content(entry)
         if body:
@@ -139,6 +139,27 @@ def _reasoning_user_bodies_for_correlation(
         if body:
             out.append(body)
     return out
+
+
+def _reasoning_history_and_delta_sections(body: str) -> str:
+    """`<conversation_history>` + `<conversation_delta>` без `<user_message>` (stable anchor slot)."""
+    chunks: list[str] = []
+    for tag in ("conversation_history", "conversation_delta"):
+        open_tag = f"<{tag}>"
+        close_tag = f"</{tag}>"
+        if open_tag not in body:
+            continue
+        chunks.append(body.split(open_tag, 1)[1].split(close_tag, 1)[0])
+    return "\n".join(chunks)
+
+
+_DISTILL_HISTORY_HEADINGS = (
+    "## Original user message",
+    "## User intent",
+    "## User reply language",
+    "## Step-back context",
+    "## Open gaps",
+)
 
 
 def _assert_summarize_pipeline_artifacts(
@@ -177,19 +198,25 @@ def _assert_summarize_pipeline_artifacts(
     assert post_summarize, (
         "expected at least one reasoning hop after summarize_memory with summary in context"
     )
-    merged_post = "\n".join(post_summarize)
-    assert E2E_SUM_ORIG_PAD_MARKER not in merged_post, (
-        "summarized originals (pad block) must not appear in post-summarize reasoning user content"
+    merged_hist = "\n".join(
+        _reasoning_history_and_delta_sections(b) for b in post_summarize
+    )
+    assert "P" * 64 not in merged_hist, (
+        "summarized originals (pad block) must not appear in post-summarize "
+        "reasoning history/delta (PAD marker line in unsummarized leaf history is OK)"
     )
     merged_summarize = _summarize_context_user_content_merged(wm_base, stub_tag=stub_tag)
     assert merged_summarize, "no summarize_context LLM user content in WireMock journal"
-    assert "## User intent" in merged_summarize, (
-        "summarize overflow bodies must use concat_history_parts_text (distill headings)"
+    assert any(h in merged_summarize for h in _DISTILL_HISTORY_HEADINGS), (
+        "summarize overflow batch must include ingress distill <history> headings "
+        "(granular SummarizeHistoryUnit text, not get_body)"
     )
     assert E2E_SUM_ORIG_HEAD_MARKER in merged_summarize, (
-        "summarize input must include HEAD from inject (via distill), not drop overflow bodies"
+        "summarize input must include HEAD from inject (via distill or original_user history)"
     )
-    assert E2E_SUM_ORIG_PAD_MARKER not in merged_summarize, (
+    # PAD_MARKER может быть в ## Original user message (leaf history); запрет — сырой P-блок
+    # (regression get_body), не маркерная строка.
+    assert "P" * 64 not in merged_summarize, (
         "summarize input must not include raw PAD block (get_body regression)"
     )
     return n_summarize

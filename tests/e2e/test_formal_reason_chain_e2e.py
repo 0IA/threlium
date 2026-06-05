@@ -173,6 +173,13 @@ def test_formal_reason_chain_full_pipeline(
                 project,
                 anchor_message_id=canonical_id,
                 stage_folder_id=FsmStage.ENRICH.value,
+                min_count=1,
+                repo_root=REPO_ROOT,
+            )
+            assert_notmuch_thread_stage_message_count_at_least(
+                project,
+                anchor_message_id=canonical_id,
+                stage_folder_id=FsmStage.ENRICH_FAST.value,
                 min_count=2,
                 repo_root=REPO_ROOT,
             )

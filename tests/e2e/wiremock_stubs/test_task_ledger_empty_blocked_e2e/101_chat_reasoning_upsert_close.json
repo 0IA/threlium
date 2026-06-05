@@ -54,7 +54,7 @@
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e: trivial answer, record one subtask as done\", \"new_subtasks\": [{\"text\": \"Answer the user question about the task ledger\", \"status\": \"done\"}]}"
+                  "arguments": "{\"reasoning\": \"e2e: trivial answer, record one subtask as done\", \"new_subtasks\": [{\"text\": \"Answer the user question about the task ledger\", \"status\": \"done\"}], \"subtask_updates\": [{\"content_id\": \"481a8275734a\", \"status\": \"done\"}]}"
                 }
               }
             ]
