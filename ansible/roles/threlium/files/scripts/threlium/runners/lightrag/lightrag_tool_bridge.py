@@ -16,13 +16,13 @@ from threlium.types.lightrag_tool_function import LightragToolBridgeError
 from threlium.types.lightrag_tool_phase import LightragToolPhaseSpec
 from threlium.types.lightrag_tool_wire import (
     LightragEntitySummaryText,
-    LightragExtractionDelimiterText,
+    LightragExtractionJsonText,
     LightragKeywordsJsonText,
     LightragRagAnswerText,
 )
 
 from .lightrag_tool_serialize import (
-    lightrag_extraction_delimiter_from_args,
+    lightrag_extraction_json_from_args,
     lightrag_keywords_json_from_args,
     lightrag_rag_answer_from_args,
     lightrag_summary_from_args,
@@ -44,7 +44,7 @@ def parse_tool_call_for_phase(
 
 
 def to_lightrag_return_value(
-    wire: LightragExtractionDelimiterText
+    wire: LightragExtractionJsonText
     | LightragKeywordsJsonText
     | LightragEntitySummaryText
     | LightragRagAnswerText,
@@ -56,7 +56,7 @@ def struct_to_lightrag_wire(
     phase: LightragToolPhaseSpec,
     args: msgspec.Struct,
 ) -> (
-    LightragExtractionDelimiterText
+    LightragExtractionJsonText
     | LightragKeywordsJsonText
     | LightragEntitySummaryText
     | LightragRagAnswerText
@@ -65,7 +65,7 @@ def struct_to_lightrag_wire(
         args,
         (ExtractKnowledgeGraphEntityToolArgs, ExtractKnowledgeGraphGleaningToolArgs),
     ):
-        return lightrag_extraction_delimiter_from_args(args)
+        return lightrag_extraction_json_from_args(args)
     if isinstance(args, SummarizeDescriptionsToolArgs):
         return lightrag_summary_from_args(args)
     if isinstance(args, ExtractQueryKeywordsToolArgs):

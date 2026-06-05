@@ -13,7 +13,11 @@ class LightragCompletionDelimiterWire(_RequiredNonEmpty):
 
 
 class LightragExtractionDelimiterText(_OptionalStripEmpty):
-    """Delimiter-текст для ``operate._process_extraction_result``."""
+    """Delimiter-текст для ``operate._process_extraction_result`` (legacy; в JSON-режиме не используется)."""
+
+
+class LightragExtractionJsonText(_OptionalStripEmpty):
+    """Нативный JSON LightRAG (`{entities, relationships}`) для ``operate._process_json_extraction_result``."""
 
 
 class LightragKeywordsJsonText(_OptionalStripEmpty):
@@ -32,6 +36,7 @@ __all__ = [
     "LightragCompletionDelimiterWire",
     "LightragEntitySummaryText",
     "LightragExtractionDelimiterText",
+    "LightragExtractionJsonText",
     "LightragKeywordsJsonText",
     "LightragRagAnswerText",
     "LightragTupleDelimiterWire",

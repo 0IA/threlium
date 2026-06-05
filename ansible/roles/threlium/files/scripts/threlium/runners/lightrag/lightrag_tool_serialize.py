@@ -13,62 +13,44 @@ from threlium.types.lightrag_tool_args import (
     SummarizeDescriptionsToolArgs,
 )
 from threlium.types.lightrag_tool_wire import (
-    LightragCompletionDelimiterWire,
     LightragEntitySummaryText,
-    LightragExtractionDelimiterText,
+    LightragExtractionJsonText,
     LightragKeywordsJsonText,
     LightragRagAnswerText,
-    LightragTupleDelimiterWire,
-)
-
-_DEFAULT_TUPLE = LightragTupleDelimiterWire.require(
-    name="tuple_delimiter", raw="<|#|>"
-)
-_DEFAULT_COMPLETION = LightragCompletionDelimiterWire.require(
-    name="completion_delimiter", raw="<|COMPLETE|>"
 )
 
 
 def _title_case_name(name: str) -> str:
-    """Title-case entity names when building delimiter text (``entity_extraction_system_prompt.j2`` §1)."""
+    """Title-case имён сущностей/концов связи: LightRAG дедупит узлы по имени, а constrained
+    decoding не нормализует регистр (json-промпт 1.5 просит title-case для case-insensitive имён)."""
     return " ".join(part[:1].upper() + part[1:] if part else part for part in name.split())
 
 
-def lightrag_extraction_delimiter_from_args(
+def lightrag_extraction_json_from_args(
     args: ExtractKnowledgeGraphEntityToolArgs | ExtractKnowledgeGraphGleaningToolArgs,
-    *,
-    tuple_delimiter: LightragTupleDelimiterWire = _DEFAULT_TUPLE,
-    completion_delimiter: LightragCompletionDelimiterWire = _DEFAULT_COMPLETION,
-) -> LightragExtractionDelimiterText:
-    """Serialize tool args to delimiter text for ``operate._process_extraction_result``.
+) -> LightragExtractionJsonText:
+    """Нативный JSON LightRAG ``{entities, relationships}`` → ``operate._process_json_extraction_result``.
 
-    Принимает оба VO фазы (entity / gleaning): общий wire-формат delimiter, различие —
-    только в типе входного Struct (DDD VO, см. ``docs/TYPES.md``).
-
-    Empty ``entities`` and ``relations`` → only ``completion_delimiter`` (gleaning done);
-    LightRAG accepts zero records when the delimiter is present.
+    Принимает оба VO фазы (entity / gleaning) — одинаковая нативная схема. Tool args УЖЕ в нативной форме
+    (tool spec = JSON LightRAG, constrained decoding), поэтому сериализация — прямой dump; только title-case
+    имён сущностей и концов связи для дедупа узлов LightRAG. Пустые массивы валидны (gleaning завершён).
     """
-    td = tuple_delimiter.value
-    cd = completion_delimiter.value
-    lines: list[str] = []
-    for ent in args.entities:
-        name = _title_case_name(ent.name)
-        lines.append(
-            f"entity{td}{name}{td}{ent.type}{td}{ent.description}"
-        )
-    for rel in args.relations:
-        src = _title_case_name(rel.source_entity)
-        tgt = _title_case_name(rel.target_entity)
-        lines.append(
-            "relation"
-            f"{td}{src}{td}{tgt}{td}{rel.relationship_keywords}{td}"
-            f"{rel.relationship_description}"
-        )
-    if not lines:
-        body = cd
-    else:
-        body = "\n".join(lines) + cd
-    return LightragExtractionDelimiterText.parse(body)
+    payload = {
+        "entities": [
+            {"name": _title_case_name(e.name), "type": e.type, "description": e.description}
+            for e in args.entities
+        ],
+        "relationships": [
+            {
+                "source": _title_case_name(r.source),
+                "target": _title_case_name(r.target),
+                "keywords": r.keywords,
+                "description": r.description,
+            }
+            for r in args.relationships
+        ],
+    }
+    return LightragExtractionJsonText.parse(json.dumps(payload, ensure_ascii=False))
 
 
 def lightrag_keywords_json_from_args(
@@ -91,7 +73,7 @@ def lightrag_rag_answer_from_args(
 
 
 __all__ = [
-    "lightrag_extraction_delimiter_from_args",
+    "lightrag_extraction_json_from_args",
     "lightrag_keywords_json_from_args",
     "lightrag_rag_answer_from_args",
     "lightrag_summary_from_args",

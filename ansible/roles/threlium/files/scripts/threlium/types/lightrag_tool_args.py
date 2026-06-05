@@ -11,24 +11,28 @@ class LightragEntityRecord(msgspec.Struct, frozen=True):
 
 
 class LightragRelationRecord(msgspec.Struct, frozen=True):
-    source_entity: str
-    target_entity: str
-    relationship_keywords: str
-    relationship_description: str
+    # Поля = НАТИВНАЯ JSON-схема LightRAG 1.5 (operate._process_json_extraction_result:
+    # rel_data.get("source"/"target"/"keywords"/"description")). tool spec = эта схема → LLM при
+    # tool_choice=required (vLLM constrained decoding) генерит сразу валидный нативный JSON, без
+    # промежуточной конвертации.
+    source: str
+    target: str
+    keywords: str
+    description: str
 
 
 class ExtractKnowledgeGraphEntityToolArgs(msgspec.Struct, frozen=True):
-    """Args первичного прохода ``extract_knowledge_graph`` (отдельный VO от gleaning)."""
+    """Args первичного прохода ``extract_knowledge_graph`` = нативный JSON LightRAG (`entities`/`relationships`)."""
 
     entities: list[LightragEntityRecord]
-    relations: list[LightragRelationRecord]
+    relationships: list[LightragRelationRecord]
 
 
 class ExtractKnowledgeGraphGleaningToolArgs(msgspec.Struct, frozen=True):
-    """Args повторного прохода ``extract_knowledge_graph_gleaning`` (пропущенное/исправленное)."""
+    """Args повторного прохода ``extract_knowledge_graph_gleaning`` = тот же нативный JSON LightRAG."""
 
     entities: list[LightragEntityRecord]
-    relations: list[LightragRelationRecord]
+    relationships: list[LightragRelationRecord]
 
 
 class SummarizeDescriptionsToolArgs(msgspec.Struct, frozen=True):

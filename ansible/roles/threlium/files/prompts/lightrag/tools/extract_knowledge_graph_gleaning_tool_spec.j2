@@ -21,28 +21,28 @@
             "additionalProperties": false
           }
         },
-        "relations": {
+        "relationships": {
           "type": "array",
           "description": "Relationships missed or corrected since the previous pass; empty when none remain.",
           "items": {
             "type": "object",
             "properties": {
-              "source_entity": { "type": "string", "minLength": 1 },
-              "target_entity": { "type": "string", "minLength": 1 },
-              "relationship_keywords": { "type": "string" },
-              "relationship_description": { "type": "string", "minLength": 1 }
+              "source": { "type": "string", "minLength": 1 },
+              "target": { "type": "string", "minLength": 1 },
+              "keywords": { "type": "string" },
+              "description": { "type": "string", "minLength": 1 }
             },
             "required": [
-              "source_entity",
-              "target_entity",
-              "relationship_keywords",
-              "relationship_description"
+              "source",
+              "target",
+              "keywords",
+              "description"
             ],
             "additionalProperties": false
           }
         }
       },
-      "required": ["entities", "relations"],
+      "required": ["entities", "relationships"],
       "additionalProperties": false
     }
   }

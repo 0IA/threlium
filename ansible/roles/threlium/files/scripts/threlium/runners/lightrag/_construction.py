@@ -106,6 +106,10 @@ def build_rag(settings: ThreliumSettings) -> LightRAG:
         "chunk_overlap_token_size": overlap_toks,
         "chunking_func": threlium_email_chunking_func,
         "tiktoken_model_name": settings.lightrag.tiktoken_model_name,
+        # JSON-режим извлечения сущностей (1.5): LightRAG шлёт entity_extraction_json_* промпт и
+        # парсит ответ как нативный JSON {entities, relationships}. Наш tool-bridge форсит ровно эту
+        # схему (tool spec = JSON LightRAG) → constrained decoding vLLM даёт валидный JSON.
+        "entity_extraction_use_json": True,
     }
     if rerank_ep is not None:
         rag_kwargs["rerank_model_func"] = build_rerank_func(

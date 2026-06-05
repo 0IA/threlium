@@ -4,11 +4,11 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from typing import Any
 
 from lightrag import LightRAG
 
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers_from_notmuch
+from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 from threlium.litellm_route_context import (
     e2e_route_wire_tail,
     reset_litellm_correlation_ctxvar,
@@ -35,7 +35,6 @@ from threlium.types import (
     LitellmCallSite,
     LitellmCorrelationSnapshot,
     LitellmRoutingSite,
-    MailHeaderName,
     NotmuchMessageIdInner,
     NotmuchMessageIds,
     NotmuchQueryField,
@@ -53,6 +52,31 @@ def reset_drain_task() -> None:
     """Reset drain task state (called during lifecycle cleanup)."""
     global _drain_task
     _drain_task = None
+
+
+# Пер-тред (по thread-root корреляции) asyncio.Lock на RAG-loop: сериализует ``ainsert``↔``aquery`` ОДНОГО
+# notmuch-треда (каузальный index→query: enrich-query ждёт in-flight индексацию своего треда), но НЕ разные
+# треды (свой лок → конкурентно). Ключ — thread-root (есть в e2e; в прод может отсутствовать → без лока,
+# eventual consistency). Создаётся/читается ТОЛЬКО на RAG-loop (без гонок); сброс при пересоздании loop.
+_thread_locks: dict[str, asyncio.Lock] = {}
+
+
+def reset_thread_locks() -> None:
+    """Сбросить пер-тред локи (loop-bound asyncio.Lock) при пересоздании RAG-loop."""
+    _thread_locks.clear()
+
+
+def thread_lock_for(correlation: dict[str, str] | None) -> asyncio.Lock | None:
+    if not correlation:
+        return None
+    root = correlation.get(LitellmCorrelationHeader.THREAD_ROOT_MID.value)
+    if not root:
+        return None
+    lock = _thread_locks.get(root)
+    if lock is None:
+        lock = asyncio.Lock()
+        _thread_locks[root] = lock
+    return lock
 
 
 def _future_timeout_sec(settings: ThreliumSettings) -> float | None:
@@ -106,10 +130,17 @@ async def _ainsert_with_correlation(
         call_site=snap.call_site,
         first_mid=ids[0],
     )
+    # Пер-тред барьер: индексация треда держит его лок, чтобы enrich-aquery ЭТОГО треда дождался
+    # завершения (index→query causal order); разные треды — разные локи, конкурентно.
     token = set_litellm_correlation_ctxvar(snap.as_dict())
+    lock = thread_lock_for(snap.as_dict())
     try:
         t0 = time.monotonic()
-        await rag.ainsert(texts, ids=ids, file_paths=file_paths)
+        if lock is not None:
+            async with lock:
+                await rag.ainsert(texts, ids=ids, file_paths=file_paths)
+        else:
+            await rag.ainsert(texts, ids=ids, file_paths=file_paths)
         return time.monotonic() - t0
     finally:
         reset_litellm_correlation_ctxvar(token)

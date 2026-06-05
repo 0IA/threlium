@@ -9,6 +9,7 @@ import numpy as np
 from litellm.types.utils import Embedding
 
 from threlium.litellm_client import litellm_aembedding, litellm_arerank
+from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.litellm_required_tool import ainvoke_with_bridge_retries, build_site_call
 from threlium.litellm_tool_completion import acompletion_required_tool
 from threlium.litellm_tool_response import LiteLlmToolResponseError
@@ -70,22 +71,27 @@ def build_llm_func(
         stream: bool | None = None,
         **kwargs: Any,
     ) -> str:
-        correlation: dict[str, str] | None = kwargs.pop(
-            "_threlium_e2e_correlation", None
+        # Корреляция приходит kwarg-мостом (``_llm_bridge`` из ctxvar). Но под 1.5 json-extraction вызов
+        # может идти на задаче, не получившей kwarg → читаем ctxvar напрямую как фолбэк, чтобы сохранить
+        # thread-root. Локальная копия (не мутируем ctxvar): ``kg_query`` делает keyword-LLM, затем
+        # answer-LLM в одном scope — каждый вызов гранулирует свой call-site от base заново.
+        popped = kwargs.pop("_threlium_e2e_correlation", None)
+        correlation: dict[str, str] = (
+            dict(popped) if popped else dict(get_litellm_correlation_from_ctxvar() or {})
         )
-        if correlation is not None:
-            # Shallow copy: ``kg_query`` делает keyword LLM, затем answer LLM в одном ctxvar-scope.
-            # Без копии первая мутация granular call-site (``extract_query_keywords``) портит base
-            # ``lightrag_query`` в ctxvar → финальный ответ уходит в ``extract_knowledge_graph``.
-            correlation = dict(correlation)
-            base_cs = correlation.get(LitellmCorrelationHeader.CALL_SITE.value)
-            granular_cs = detect_lightrag_call_site_wire(
-                base_cs,
-                keyword_extraction=keyword_extraction,
-                has_history=bool(history_messages),
-                has_system_prompt=bool(system_prompt),
-            )
-            correlation[LitellmCorrelationHeader.CALL_SITE.value] = granular_cs
+        base_cs = (
+            correlation.get(LitellmCorrelationHeader.CALL_SITE.value)
+            or LitellmCallSite.LIGHTRAG_INDEX.value
+        )
+        call_site_wire = detect_lightrag_call_site_wire(
+            base_cs,
+            keyword_extraction=keyword_extraction,
+            has_history=bool(history_messages),
+            has_system_prompt=bool(system_prompt),
+        )
+        # ВСЕГДА форсим гранулярный call-site в override → header X-Threlium-Call-Site == function.name
+        # (инвариант single-tool + матч стаба по call-site); thread-root из ctxvar/kwarg сохранён.
+        correlation[LitellmCorrelationHeader.CALL_SITE.value] = call_site_wire
 
         unsupported: list[str] = []
         if stream is True:
@@ -110,17 +116,6 @@ def build_llm_func(
             for m in messages
         ]
 
-        if correlation is not None:
-            call_site_wire = str(
-                correlation[LitellmCorrelationHeader.CALL_SITE.value]
-            )
-        else:
-            call_site_wire = detect_lightrag_call_site_wire(
-                LitellmCallSite.LIGHTRAG_INDEX.value,
-                keyword_extraction=keyword_extraction,
-                has_history=bool(history_messages),
-                has_system_prompt=bool(system_prompt),
-            )
         phase = lightrag_tool_phase_for_call_site(call_site_wire)
         tool_spec = load_tool_spec(phase.tool_spec_path)
         tools = [tool_spec]

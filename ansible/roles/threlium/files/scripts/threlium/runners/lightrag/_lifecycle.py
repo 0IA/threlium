@@ -21,7 +21,12 @@ from threlium.types.systemd_status import SystemdStatusBody
 
 from threlium.runners.lightrag._bootstrap import bootstrap_knowledge_dir
 from threlium.runners.lightrag._construction import build_rag, install_litellm_correlation_bridge
-from threlium.runners.lightrag._drain import schedule_on_loop, reset_drain_task
+from threlium.runners.lightrag._drain import (
+    reset_drain_task,
+    reset_thread_locks,
+    schedule_on_loop,
+    thread_lock_for,
+)
 
 log = logger.bind(stage="lightrag")
 
@@ -84,17 +89,19 @@ def run_rag_coroutine(
         raise RuntimeError("lightrag: RAG event loop is not running (start_rag_loop_thread first)")
     timeout = _future_timeout_sec(settings)
 
-    if correlation is not None:
-        async def _with_ctxvar() -> _T:
-            token = set_litellm_correlation_ctxvar(correlation)
-            try:
-                return await coro
-            finally:
+    async def _runner() -> _T:
+        token = set_litellm_correlation_ctxvar(correlation) if correlation is not None else None
+        lock = thread_lock_for(correlation)  # пер-тред барьер: query ждёт in-flight ainsert СВОЕГО треда
+        try:
+            if lock is not None:
+                async with lock:
+                    return await coro
+            return await coro
+        finally:
+            if token is not None:
                 reset_litellm_correlation_ctxvar(token)
 
-        fut = asyncio.run_coroutine_threadsafe(_with_ctxvar(), _rag_loop)
-    else:
-        fut = asyncio.run_coroutine_threadsafe(coro, _rag_loop)
+    fut = asyncio.run_coroutine_threadsafe(_runner(), _rag_loop)
     return fut.result(timeout=timeout)
 
 
@@ -227,6 +234,7 @@ def _rag_thread_main(settings: ThreliumSettings) -> None:
         _rag_loop = None
         _drain_lock = None
         _bootstrap_task = None
+        reset_thread_locks()  # loop-bound asyncio.Lock'и — сбросить при пересоздании loop
         reset_drain_task()
 
 
@@ -281,4 +289,5 @@ def stop_rag_loop_thread(*, settings: ThreliumSettings | None = None) -> None:
     _daemon_rag = None
     _drain_lock = None
     _bootstrap_task = None
+    reset_thread_locks()
     reset_drain_task()
