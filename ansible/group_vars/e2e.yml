@@ -17,11 +17,14 @@ threlium_mail_archive_cockpit_origins_extra:
   - "http://127.0.0.1:8080"
   - "http://localhost:8080"
 
-# Каналы: все три моста для e2e
+# Каналы: все мосты для e2e (+ isomorph HTTP-сервер)
+# Cline CLI (реальный клиент isomorph) ставится в e2e-harness bake-скриптом
+# (tests/e2e/scripts/bake_e2e_sut_image.sh), НЕ в site.yml (не часть прод-деплоя).
 threlium_channels:
   - email
   - matrix
   - telegram
+  - isomorph
 
 # Bridges: GreenMail + WireMock стабы
 threlium_bridges:
@@ -43,6 +46,17 @@ threlium_bridges:
   telegram:
     bot_token: "e2e-test-telegram-token"
     bot_api_base: "http://wiremock:8080/bot"
+  isomorph:
+    listen_host: "127.0.0.1"
+    listen_port: 8040
+    api_key: "e2e-isomorph-api-key"
+    push_secret: "e2e-isomorph-push-secret"
+    request_timeout_sec: 180
+    keepalive_sec: 20
+    graceful_shutdown_sec: 10
+    enabled_surfaces:
+      - anthropic_messages
+      - openai_chat_completions
 
 # msmtp: GreenMail без TLS
 threlium_msmtp:

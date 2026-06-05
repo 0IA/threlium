@@ -70,6 +70,27 @@ echo "[bake] ansible-playbook site.yml (e2e inventory + ansible-e2e.cfg)"
     -e "e2e_sut_container_id=${SUT_ID}"
 )
 
+# Cline CLI (Node.js) — реальный клиент isomorph-моста для e2e. Ставится ТОЛЬКО здесь, в
+# e2e-harness bake (НЕ в site.yml / прод-деплое — не часть продакшен-деплоя). Запекается в образ.
+echo "[bake] install Node.js + Cline CLI (e2e isomorph real client)"
+docker exec "${SUT_ID}" bash -lc '
+  set -euo pipefail
+  if command -v cline >/dev/null 2>&1; then
+    echo "[bake] cline already present: $(command -v cline)"; exit 0
+  fi
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y ca-certificates curl gnupg
+  install -d -m 0755 /etc/apt/keyrings
+  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key -o /etc/apt/keyrings/nodesource.asc
+  echo "deb [signed-by=/etc/apt/keyrings/nodesource.asc] https://deb.nodesource.com/node_22.x nodistro main" \
+    > /etc/apt/sources.list.d/nodesource.list
+  apt-get update
+  apt-get install -y nodejs
+  npm install -g cline
+  cline --version || true
+'
+
 echo "[bake] docker commit -> ${IMAGE_TAG}"
 docker commit "${SUT_ID}" "${IMAGE_TAG}"
 
