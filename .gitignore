@@ -1,4 +1,5 @@
 # Секреты и локальное окружение (см. INSTALL_CONTRACT)
+.claude
 .cursorignore
 .vscode/
 vendor/
