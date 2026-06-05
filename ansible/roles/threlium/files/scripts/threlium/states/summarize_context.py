@@ -115,7 +115,7 @@ def main(
         log.error("unparseable_payload", body_preview=body_raw[:200])
         return None
 
-    units, user_query = parsed
+    units, _user_query = parsed
     source_mids = {u.source_mid for u in units}
     log.info("summarizing", unit_count=len(units), source_mids=len(source_mids))
 
@@ -163,13 +163,10 @@ def main(
 
     # Сводка едет <history>-частью: оригиналы помечены context_summarized (выпадают из
     # unified), поэтому именно эта history-копия заменяет их в контексте следующего enrich.
-    # user_query релеится в <system>: summarize_memory отдаст его enrich как <history>, чтобы
-    # re-trigger повторил тот же ход пользователя (суммаризация его не меняет, CONTEXT §5).
     return build_fsm_step_to_stage(
         msg,
         to_addr=FsmStage.SUMMARIZE_MEMORY,
         from_stage=stage,
         history=rolling_summary,
-        system=user_query.value,
         settings=config,
     )

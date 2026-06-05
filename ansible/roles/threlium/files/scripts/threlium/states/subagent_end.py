@@ -12,7 +12,7 @@ from threlium.irt_subagent_classifier import (
 from threlium.logutil import logger
 from threlium.mime_reform import system_part_text
 from threlium.nm import require_fsm_message_id
-from threlium.types import EnrichUserQueryText, FsmStage, MailHeaderName
+from threlium.types import EnrichCalleeHistoryText, FsmStage, MailHeaderName
 
 log = logger.bind(stage="subagent_end")
 
@@ -33,12 +33,12 @@ def main(
     log.info("transition_to_enrich", hop=hop.value, message_id=mid_w.value if mid_w else None)
 
     result_text = system_part_text(msg).strip()
-    user_query = EnrichUserQueryText.require(name="subagent result", raw=result_text)
     return emit_to_enrich(
         msg,
         stage,
-        user_query=user_query,
+        callee_history=EnrichCalleeHistoryText.parse(result_text),
         relay_history_from=msg,
         settings=config,
         managed_headers=patch,  # type: ignore[arg-type]
     )
+

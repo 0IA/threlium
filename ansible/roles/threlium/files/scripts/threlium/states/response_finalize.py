@@ -26,7 +26,7 @@ from threlium.settings import ThreliumSettings
 from threlium.ledger_context_parts import crdt_ledger_state
 from threlium.task import build_task_incomplete_notice, ledger_has_open_work
 from threlium.types import (
-    EnrichUserQueryText,
+    EnrichCalleeHistoryText,
     FsmStage,
     FsmTransitionPlainSubjectLine,
     HopBudgetLine,
@@ -75,11 +75,10 @@ def main(
             message_id=mid_w.value if mid_w else None,
         )
         notice = build_task_incomplete_notice(ledger)
-        user_query = EnrichUserQueryText.require(name="task gate notice", raw=notice)
         return emit_to_enrich(
             msg,
             stage,
-            user_query=user_query,
+            callee_history=EnrichCalleeHistoryText.parse(notice),
             settings=config,
         )
 
@@ -118,11 +117,10 @@ def main(
                 subject_line=FsmTransitionPlainSubjectLine.parse(subject_raw),
                 settings=config,
             )
-        user_query = EnrichUserQueryText.require(name="response not formed", raw=notice)
         return emit_to_enrich(
             msg,
             stage,
-            user_query=user_query,
+            callee_history=EnrichCalleeHistoryText.parse(notice),
             settings=config,
         )
 

@@ -11,6 +11,7 @@ from threlium.fsm_emit_semantic import (
 from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 from threlium.types import (
+    EnrichCalleeHistoryText,
     EnrichRequestEchoText,
     EnrichUserQueryText,
     FsmStage,
@@ -25,11 +26,10 @@ def main(
     hb = push_subagent_hop_budget(HopBudgetLine.parse_from_email(msg), config)
     if hb is None:
         notice = render_prompt(PromptPath.SUBAGENT_INTENT_BUDGET_EXHAUSTED).strip()
-        user_query = EnrichUserQueryText.require(name="subagent budget notice", raw=notice)
         return emit_to_enrich(
             msg,
             stage,
-            user_query=user_query,
+            callee_history=EnrichCalleeHistoryText.parse(notice),
             settings=config,
         )
     task = EnrichUserQueryText.require_value(

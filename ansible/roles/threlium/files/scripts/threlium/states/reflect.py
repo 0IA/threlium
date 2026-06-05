@@ -14,7 +14,7 @@ from threlium.mime_reform import system_part_text
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
 from threlium.types import (
-    EnrichUserQueryText,
+    EnrichCalleeHistoryText,
     FsmStage,
     HopBudgetLine,
     MailHeaderName,
@@ -68,10 +68,10 @@ def main(
         remaining_hops=remaining,
         cycle_cost=CYCLE_COST,
     ).strip()
-    user_query = EnrichUserQueryText.require(name="reflect body", raw=body)
     return emit_to_enrich(
         msg,
         stage,
-        user_query=user_query,
+        callee_history=EnrichCalleeHistoryText.parse(body),
         settings=config,
     )
+

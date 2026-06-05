@@ -14,7 +14,7 @@ from threlium.response.collect import collect_ops
 from threlium.response.ops import AppendOp, parse_response_edit_stage_payload
 from threlium.response.state_summary import build_state_summary
 from threlium.settings import ThreliumSettings
-from threlium.types import FsmStage, PromptPath
+from threlium.types import EnrichRequestEchoText, FsmStage, PromptPath
 
 log = logger.bind(stage="response_edit")
 
@@ -33,6 +33,8 @@ def main(
             from_stage=stage,
             settings=config,
             prompt_path=PromptPath.RESPONSE_EDIT_ERROR_INVALID_BODY,
+            request_echo=EnrichRequestEchoText.parse(body_raw),
+            to_enrich_fast=True,
             exc=f"not a valid edit payload: {body_raw[:120]!r}",
         )
     target_position = payload.position
@@ -52,6 +54,8 @@ def main(
             from_stage=stage,
             settings=config,
             prompt_path=PromptPath.RESPONSE_EDIT_ERROR_INVALID_POSITION,
+            request_echo=EnrichRequestEchoText.parse(body_raw),
+            to_enrich_fast=True,
             position=target_position,
             new_content=payload.new_content,
             valid_positions=sorted(valid_positions),

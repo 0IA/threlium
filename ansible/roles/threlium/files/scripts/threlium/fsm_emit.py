@@ -156,6 +156,29 @@ def attach_request_echo_history(
     out.attach(part)
 
 
+def attach_callee_history_with_origin(
+    out: EmailMessage,
+    *,
+    body: str,
+    from_stage: FsmStage,
+    settings: ThreliumSettings,
+) -> None:
+    """Дописать ``<history>`` callee; origin = from_stage.rfc822_mailbox."""
+    if not body.strip():
+        return
+    score = ThreliumContentScoreWire.from_score(
+        settings.history.score_for(from_stage)
+    )
+    part = _make_inline_text_part(
+        EnrichContentId.from_history_body(body),
+        body,
+        score=score,
+    )
+    part[MailHeaderName.ORIGIN.value] = from_stage.rfc822_mailbox
+    out.attach(part)
+
+
+
 def _build_history_only_envelope(
     incoming: EmailMessage,
     *,

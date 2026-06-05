@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from threlium.irt_chain import IrtAncestorSnapshot
-from threlium.mime_reform import system_part_text_from_path
+from threlium.mail import email_message_from_path
+from threlium.mime_reform import message_has_system, system_part_text_from_path
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.types import FsmStage, NotmuchMessageIdInner
 
@@ -15,6 +16,17 @@ _ALL_RESPONSE_STAGES = _APPEND_STAGES | _EDIT_STAGES
 
 def _is_response_stage(snap: IrtAncestorSnapshot) -> bool:
     return any(snap.is_sent_from_fsm_stage(s) for s in _ALL_RESPONSE_STAGES)
+
+
+def _carries_op_payload(snap: IrtAncestorSnapshot) -> bool:
+    """``response_*``-снимок несёт CRDT-op только если в нём есть ``<system>``-payload.
+
+    Отклонённая правка (``response_edit`` invalid position/body) и прочие validation-нотисы
+    эмитятся как history-only (``emit_enrich_validation_error`` → ``<history>``, без
+    ``<system>``): мутации буфера не было → это не ``AppendOp``/``EditOp``, а контекст для
+    reasoning. collect_ops их пропускает (нотис виден reasoning'у через дельту enrich_fast).
+    """
+    return message_has_system(email_message_from_path(snap.path))
 
 
 def _is_append_stage(snap: IrtAncestorSnapshot) -> bool:
@@ -54,7 +66,7 @@ def collect_ops(start_inner: NotmuchMessageIdInner) -> list[ResponseOp]:
     """
     relevant: list[IrtAncestorSnapshot] = []
     for snap in iter_irt_ancestors_filtered(start_inner, stop_at_route=True):
-        if _is_response_stage(snap):
+        if _is_response_stage(snap) and _carries_op_payload(snap):
             relevant.append(snap)
 
     relevant.reverse()

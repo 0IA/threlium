@@ -13,6 +13,7 @@ from threlium.fsm_emit import (
     ManagedFsmHeaderValue,
     advance_hop_budget_for_simple_step,
     attach_request_echo_history,
+    attach_callee_history_with_origin,
     build_fsm_step_to_stage,
     emit_transition_preserving_payload,
     _build_history_only_envelope,
@@ -78,14 +79,19 @@ def emit_to_enrich(
     incoming: EmailMessage,
     from_stage: FsmStage,
     *,
-    user_query: EnrichUserQueryText,
+    user_query: EnrichUserQueryText | None = None,
     callee_history: EnrichCalleeHistoryText | None = None,
     request_echo: EnrichRequestEchoText | None = None,
     relay_history_from: EmailMessage | None = None,
     settings: ThreliumSettings,
     managed_headers: ManagedFsmHeaderPatch | None = None,
 ) -> EmailMessage:
-    """Единый choke-point callee → ``enrich@`` (``<user-query>`` обязателен)."""
+    """Единый choke-point callee → ``enrich@`` (хотя бы одно из user_query / callee_history / relay_history_from обязательно)."""
+    if user_query is None and callee_history is None and relay_history_from is None:
+        raise ValueError(
+            "emit_to_enrich requires at least one of user_query, callee_history, or relay_history_from"
+        )
+
     headers = (
         managed_headers
         if managed_headers is not None
@@ -97,21 +103,17 @@ def emit_to_enrich(
         from_stage=from_stage,
         managed_headers=headers,
     )
-    attach_user_query_part(out, user_query)
+    if user_query is not None:
+        attach_user_query_part(out, user_query)
     if relay_history_from is not None:
         for _cid, part in iter_history_parts(relay_history_from):
             out.attach(deepcopy(part))
-    elif callee_history is not None and callee_history.value.strip():
-        score = ThreliumContentScoreWire.from_score(
-            settings.history.score_for(from_stage)
-        )
-        body = callee_history.value
-        out.attach(
-            _make_inline_text_part(
-                EnrichContentId.from_history_body(body),
-                body,
-                score=score,
-            )
+    if callee_history is not None and callee_history.value.strip():
+        attach_callee_history_with_origin(
+            out,
+            body=callee_history.value,
+            from_stage=from_stage,
+            settings=settings,
         )
     if request_echo is not None and request_echo.value.strip():
         attach_request_echo_history(
@@ -122,6 +124,7 @@ def emit_to_enrich(
             settings=settings,
         )
     return out
+
 
 
 def emit_bridge_distill_to_enrich(
@@ -202,23 +205,59 @@ def emit_preserving_to_enrich_fast(
     )
 
 
+def emit_reenrich_to_enrich(
+    incoming: EmailMessage,
+    from_stage: FsmStage,
+    *,
+    user_query: EnrichUserQueryText | None = None,
+    relay_history_from: EmailMessage | None = None,
+    settings: ThreliumSettings,
+) -> EmailMessage:
+    """Тонкая обёртка для повторного входа в enrich@ (re-enrich)."""
+    return emit_to_enrich(
+        incoming,
+        from_stage,
+        user_query=user_query,
+        relay_history_from=relay_history_from,
+        settings=settings,
+    )
+
+
 def emit_enrich_validation_error(
     incoming: EmailMessage,
     *,
     from_stage: FsmStage,
     settings: ThreliumSettings,
     prompt_path: PromptPath,
+    request_echo: EnrichRequestEchoText | None = None,
+    to_enrich_fast: bool = False,
     **template_vars: object,
 ) -> EmailMessage:
-    """Validation-ошибка mutator-стадии → ``enrich@``; notice = ``<user-query>`` turn."""
+    """Validation-ошибка mutator-стадии → ``enrich@`` / ``enrich_fast@``.
+
+    Notice едет как ``<history>``-часть (callee history). При ``to_enrich_fast`` —
+    быстрый цикл через ``enrich_fast@``: enrich_fast соберёт notice (и опциональный
+    ``request_echo`` отклонённого запроса) в дельту и вернёт reasoning без полного RAG.
+    ``request_echo`` идёт ОТДЕЛЬНОЙ ``<history>``-частью, чтобы reasoning видел и что
+    просил, и в чём ошибся.
+    """
     body = render_prompt(prompt_path, **template_vars).strip()
-    user_query = EnrichUserQueryText.require(name="validation error", raw=body)
+    if to_enrich_fast:
+        return emit_to_enrich_fast(
+            incoming,
+            from_stage,
+            settings=settings,
+            history=EnrichCalleeHistoryText.parse(body),
+            request_echo=request_echo,
+        )
     return emit_to_enrich(
         incoming,
         from_stage,
-        user_query=user_query,
+        callee_history=EnrichCalleeHistoryText.parse(body),
+        request_echo=request_echo,
         settings=settings,
     )
+
 
 
 def managed_patch_subagent_push_to_enrich(
