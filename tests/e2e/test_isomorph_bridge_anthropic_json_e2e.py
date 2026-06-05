@@ -106,13 +106,15 @@ def test_isomorph_bridge_anthropic_json_happy_path(isomorph_json: E2EComposeRunt
 
 
 def test_isomorph_bridge_anthropic_json_multiturn_continuity(isomorph_json: E2EComposeRuntime) -> None:
-    """Голосование/непрерывность: ход-2 несёт ответ хода-1 как last-assistant → мост голосует по notmuch
-    (``hash(reply_1)`` == glue хода-1) → IRT = тот glue → ОДИН тред. Оба хода делят thread-root (старейший
-    tag:route = ingress хода-1) → их LLM-вызовы матчат тот же засиженный контекст (без нового сида)."""
+    """Непрерывность ЧЕРЕЗ ВОДЯНОЙ ЗНАК: ход-2 несёт ответ хода-1 как last-assistant; мост декодит из него
+    невидимый glue-snowflake → ``In-Reply-To`` = glue хода-1 → ОДИН тред. БЕЗ notmuch-чтения/голосования и
+    БЕЗ in-work-409 (наличие знака = ответ хода-1 уже доставлен). Оба хода делят thread-root (старейший
+    tag:route = ingress хода-1) → их LLM-вызовы матчат тот же засиженный контекст."""
     rt = isomorph_json
-    # happy-path делит thread-root с этим тестом (тот же _BODY-промпт) → оставляет phase_tasks_ledger_done
-    # в ОБЩЕМ контексте WireMock. Сбрасываем фазу ДО хода-1 (а не только между ходами), иначе reasoning
-    # хода-1 видит чужую защёлку → пропускает закрытие задач → finalize-loop (open subtasks → 120s hang).
+    # happy-path делит thread-root с этим тестом (тот же _BODY) → оставляет reasoning-защёлку
+    # phase_tasks_ledger_done в ОБЩЕМ контексте WireMock. Сброс ДО хода-1, иначе ход-1 видит чужую
+    # защёлку → пропускает фазу закрытия задач → finalize-loop. (Состояние reasoning-стаба, ортогонально
+    # тред-идентичности — остаётся после ухода голосования.)
     wiremock_state_reset_phase(
         wiremock_public_base(rt.wiremock_host, rt.wiremock_port),
         composite_context_key(_STUB_TAG, _thread_root()),
@@ -122,36 +124,27 @@ def test_isomorph_bridge_anthropic_json_multiturn_continuity(isomorph_json: E2EC
     reply1 = extract_reply_text(_SURFACE, r1)
     assert _REPLY_MARKER in reply1, r1
 
-    # Дать фоновым стадиям хода-1 (reflect/memory/lightrag) досвестись: их запись в notmuch иначе
-    # блокирует notmuch-чтение голосования хода-2 в мосту (resolve_in_reply_to зависает).
-    wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=60.0)
-    # Дождаться, пока glue хода-1 (egress_isomorph, archive-first) ПРОИНДЕКСИРОВАН notmuch: in-work-проверка
-    # моста (#ingress > #glue) иначе под нагрузкой (-n2) видит ход-1 «в полёте» и отдаёт ход-2 409.
-    poll_until(
-        lambda: True if nm_count_in_test_thread(rt, _MARKER, "from:egress_isomorph@localhost") >= 1 else None,
-        timeout=TIMEOUT_POLL_LIVE_MAIL, desc="turn-1 glue indexed before turn-2",
-    )
-    # Сбросить reasoning-защёлку phase_tasks_ledger_done на ОБЩЕМ контексте треда (E2E_ISOLATION §2.1):
-    # иначе ход-2 видит её от хода-1 → пропускает фазу закрытия задач → finalize-loop (open subtasks).
+    # Сброс reasoning-защёлки между ходами (общий контекст треда): иначе ход-2 видит её от хода-1.
     wiremock_state_reset_phase(
         wiremock_public_base(rt.wiremock_host, rt.wiremock_port),
         composite_context_key(_STUB_TAG, _thread_root()),
     )
+    # Ход-2: reply1 несёт невидимый водяной знак glue хода-1 → мост декодит → IRT (без notmuch). Пост идёт
+    # напрямую — никакого ожидания индексации glue и никакого 409-ретрая (механизмы сняты вместе с voting).
     body2 = build_continuation_body(_SURFACE, _BODY, reply1, f"continue [{_MARKER}]")
-    # Мост может вернуть 409 "prior turn still in flight" (под -n2 фоновые стадии хода-1 ещё дорабатывают) —
-    # штатный in-work-контракт с инструкцией "retry after its reply". 409 НЕ создаёт ingress (отказ до
-    # обработки), поэтому ретраи не дублируют ход. Ретраим, пока ход-2 не примут.
-    def _post_turn2() -> tuple[int, str] | None:
-        s, r = bridge_post_json(rt, port=_ISO_PORT, path=_PATH, body=body2, api_key=_API_KEY, surface=_SURFACE)
-        return (s, r) if s != 409 else None
-
-    s2, r2 = poll_until(_post_turn2, timeout=TIMEOUT_POLL_LIVE_MAIL, desc="turn-2 accepted (not 409 in-work)")
+    s2, r2 = bridge_post_json(rt, port=_ISO_PORT, path=_PATH, body=body2, api_key=_API_KEY, surface=_SURFACE)
     assert s2 == 200, r2
     assert _REPLY_MARKER in extract_reply_text(_SURFACE, r2), r2
 
+    # Дождаться индексации обоих ингрессов + glue перед notmuch-проверками (фоновый settle).
+    poll_until(
+        lambda: True if (
+            nm_count(rt, f"from:isomorph@localhost and {_MARKER}") == 2
+            and nm_count_in_test_thread(rt, _MARKER, "from:egress_isomorph@localhost") >= 1
+        ) else None,
+        timeout=TIMEOUT_POLL_LIVE_MAIL, desc="both turns + glue indexed",
+    )
     # Непрерывность: оба хода в ОДНОМ треде (иначе ход-2 ушёл бы в orphan → 2 треда), 2 разных ingress.
-    # Glue считаем >=1, а не ==2: оба хода отдают ОДИН и тот же канонный ответ "ok from llm-mock" →
-    # один контент-адресуемый glue-MID = hash(reply) → notmuch дедуп (штатный fork-by-collision §6.4).
-    assert nm_test_thread_count(rt, _MARKER) == 1, "turn-2 orphaned → voting/continuity broke"
+    assert nm_test_thread_count(rt, _MARKER) == 1, "turn-2 orphaned → watermark continuity broke"
     assert nm_count(rt, f"from:isomorph@localhost and {_MARKER}") == 2, "expected 2 distinct ingress turns"
     assert nm_count_in_test_thread(rt, _MARKER, "from:egress_isomorph@localhost") >= 1, "no egress glue"
