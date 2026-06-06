@@ -195,27 +195,6 @@ class SystemdStatusBody(_RequiredNonEmpty):
             raw=f"Bridge matrix: delivering room={rid}",
         )
 
-    @classmethod
-    def work_waiting_for_engine(cls, *, work_instance: str) -> Self:
-        return cls.require(
-            name=_VO,
-            raw=f"Work {work_instance}: waiting for engine",
-        )
-
-    @classmethod
-    def work_failed_socket(cls, *, work_instance: str) -> Self:
-        return cls.require(
-            name=_VO,
-            raw=f"Work {work_instance}: failed (cannot connect to engine socket)",
-        )
-
-    @classmethod
-    def work_failed_engine_error(cls, *, work_instance: str) -> Self:
-        return cls.require(
-            name=_VO,
-            raw=f"Work {work_instance}: failed (engine error)",
-        )
-
-    @classmethod
-    def work_done(cls, *, work_instance: str) -> Self:
-        return cls.require(name=_VO, raw=f"Work {work_instance}: done")
+    # ``work_*`` (жизненный цикл ``threlium-work@``) вынесены в лёгкий
+    # :class:`~threlium.enginewire.WorkStatusBody` — submitter грузит их на каждый
+    # FSM-hop и не должен тянуть тяжёлый ``threlium.types`` (litellm ~1.5 c).

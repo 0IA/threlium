@@ -8,8 +8,20 @@ from __future__ import annotations
 
 import os
 import socket
+from typing import Protocol
 
-from threlium.types.systemd_status import SystemdStatusBody
+
+class _StatusBody(Protocol):
+    """Структурный контракт VO статуса: ``.value`` — готовая непустая строка.
+
+    Принимаем по shape, а не импортом ``SystemdStatusBody`` из ``threlium.types``:
+    последнее тянет litellm (~1.5 c), а ``systemd_notify`` грузится submitter'ом на
+    каждый FSM-hop. Подходят и :class:`~threlium.types.systemd_status.SystemdStatusBody`
+    (движок/мосты), и :class:`~threlium.enginewire.WorkStatusBody` (submitter).
+    """
+
+    @property
+    def value(self) -> str: ...
 
 
 def ensure_systemd_user_env() -> None:
@@ -67,6 +79,6 @@ def notify_stopping() -> None:
     systemd_notify("STOPPING=1")
 
 
-def notify_status(body: SystemdStatusBody) -> None:
+def notify_status(body: _StatusBody) -> None:
     """Отправить ``STATUS=`` для VO-тела статуса (усечение только здесь)."""
     systemd_notify("STATUS=" + _truncate_line(body.value))

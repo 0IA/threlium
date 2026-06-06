@@ -5,7 +5,7 @@ from typing import IO
 
 import msgspec
 
-from threlium.types import EngineWireError, EngineWireOk, EngineWireRequest
+from threlium.enginewire import EngineWireError, EngineWireOk, EngineWireRequest
 
 
 def encode_wire_line(obj: msgspec.Struct) -> bytes:

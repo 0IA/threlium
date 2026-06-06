@@ -3,13 +3,32 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 from enum import StrEnum, nonmember
-from typing import Annotated, Self, TypeAlias, TypeVar
+from typing import Annotated, Protocol, Self, TypeAlias, TypeVar
 
 import msgspec
 import notmuch2  # pyright: ignore[reportMissingImports]
-from litellm.types.utils import ChatCompletionMessageToolCall
 
 from threlium.logutil import logger
+
+
+class _ToolFunctionLike(Protocol):
+    """Структурная форма ``litellm`` ``Function``: только ``.name``/``.arguments``."""
+
+    name: str | None
+    arguments: str
+
+
+class ChatCompletionMessageToolCall(Protocol):
+    """Структурный контракт tool-call (``.function.name``/``.arguments``).
+
+    Аннотация по shape вместо ``from litellm.types.utils import …``: тот импорт тянет
+    весь ``litellm`` (~1.5 c) в фундаментальный ``_core``, который грузится всем доменом.
+    Тело ``parse_tool_call`` использует только ``tc.function``/``func.name`` (duck-typing);
+    реальный litellm-объект совместим структурно. См. ``threlium.enginewire``, ``docs/TYPES.md``.
+    """
+
+    @property
+    def function(self) -> _ToolFunctionLike | None: ...
 
 NonEmptyStr: TypeAlias = Annotated[str, msgspec.Meta(min_length=1)]
 

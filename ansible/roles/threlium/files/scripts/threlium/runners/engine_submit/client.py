@@ -10,7 +10,7 @@ from threlium.runners.engine.wire_io import (
     encode_wire_line,
     read_wire_line,
 )
-from threlium.types import EngineWireError, EngineWireOk, EngineWireRequest
+from threlium.enginewire import EngineWireError, EngineWireOk, EngineWireRequest
 
 
 def submit_to_engine(
