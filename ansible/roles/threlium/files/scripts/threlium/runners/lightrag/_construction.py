@@ -1,6 +1,7 @@
 """RAG instance construction and e2e correlation bridge installation."""
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,9 @@ from threlium.types import (
     LitellmRoutingSite,
 )
 
+from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.runners.lightrag._adapters import (
+    LIGHTRAG_CORRELATION_KWARG,
     CallSiteResolver,
     build_embedding_func,
     build_llm_func,
@@ -156,4 +159,48 @@ def build_rag(settings: ThreliumSettings) -> LightRAG:
         rag_kwargs["llm_model_max_async"] = settings.lightrag.llm_model_max_async
         rag_kwargs["embedding_func_max_async"] = settings.lightrag.embedding_func_max_async
         rag_kwargs["max_parallel_insert"] = settings.lightrag.max_parallel_insert
-    return LightRAG(**rag_kwargs)
+    rag = LightRAG(**rag_kwargs)
+    if settings.e2e.litellm_route_correlation:
+        _install_query_correlation_bridge(rag)
+    return rag
+
+
+def _wrap_pooled_with_correlation(pooled: Any) -> Any:
+    """Обернуть ПУЛ-функцию lightrag так, чтобы на submission-границе (контекст запроса/индексации,
+    где ctxvar корректен) впрыснуть корреляцию в kwargs. Воркеры lightrag заморозили контекст при
+    создании пула (bootstrap), поэтому ctxvar внутри воркера протух — единственный пер-вызовный канал
+    к воркеру это args/kwargs очереди (см. _adapters.LIGHTRAG_CORRELATION_KWARG)."""
+
+    async def _inject(*args: Any, **kwargs: Any) -> Any:
+        if LIGHTRAG_CORRELATION_KWARG not in kwargs:
+            corr = get_litellm_correlation_from_ctxvar()
+            if corr:
+                kwargs[LIGHTRAG_CORRELATION_KWARG] = dict(corr)
+        return await pooled(*args, **kwargs)
+
+    return _inject
+
+
+def _install_query_correlation_bridge(rag: Any) -> None:
+    """Поставить kwarg-мост корреляции поверх пул-обёрток lightrag (embed/rerank/llm/role-funcs).
+
+    Вызывается ПОСЛЕ ``LightRAG(...)``: к этому моменту lightrag уже обернул наши функции
+    ``priority_limit_async_func_call`` (предсозданные воркеры). Наш мост сидит снаружи пула и читает
+    ctxvar в правильном контексте до постановки задачи в очередь."""
+    ef = getattr(rag, "embedding_func", None)
+    if ef is not None and getattr(ef, "func", None) is not None:
+        # МУТИРУЕМ тот же объект EmbeddingFunc на месте: хранилища lightrag (text_chunks_db и др.)
+        # захватили ССЫЛКУ на него при конструировании; replace() создал бы новый объект, который
+        # query-путь (operate.py: text_chunks_db.embedding_func) не увидит. EmbeddingFunc — frozen
+        # dataclass, поэтому через object.__setattr__.
+        object.__setattr__(ef, "func", _wrap_pooled_with_correlation(ef.func))
+    if getattr(rag, "rerank_model_func", None) is not None:
+        rag.rerank_model_func = _wrap_pooled_with_correlation(rag.rerank_model_func)
+    if getattr(rag, "llm_model_func", None) is not None:
+        rag.llm_model_func = _wrap_pooled_with_correlation(rag.llm_model_func)
+    roles = getattr(rag, "role_llm_configs", None)
+    if isinstance(roles, dict):
+        for key, cfg in list(roles.items()):
+            cf = getattr(cfg, "func", None)
+            if cf is not None:
+                roles[key] = replace(cfg, func=_wrap_pooled_with_correlation(cf))

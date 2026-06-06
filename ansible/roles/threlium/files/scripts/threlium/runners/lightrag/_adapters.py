@@ -48,6 +48,11 @@ log = logger.bind(stage="lightrag")
 
 _MAX_LIGHTRAG_TOOL_BRIDGE_RETRIES = 2
 
+# kwarg-мост корреляции к предсозданным воркерам lightrag (см. embed_func и
+# _construction._install_query_correlation_bridge). Имя приватное, lightrag его не трогает —
+# он лишь прокидывает kwargs через очередь от submission-границы к воркеру.
+LIGHTRAG_CORRELATION_KWARG = "_threlium_e2e_correlation"
+
 
 # Резолвер call-site точки вызова LightRAG: сигналы запроса → call-site. call-site ВСЕГДА известен.
 CallSiteResolver = Callable[..., LitellmCallSite]
@@ -131,7 +136,9 @@ def build_llm_func(
         # call-site детерминирован резолвером точки вызова (без сниффинга формата). Сам tool-call —
         # общий проектный ``ainvoke_required_tool`` (force-tool + call_site = function.name +
         # ``correlation_with_call_site`` из ctxvar-снапшота). Здесь — выбор фазы и нативная wire-конверсия.
-        kwargs.pop("_threlium_e2e_correlation", None)  # legacy kwarg-мост удалён
+        # Корреляция через kwarg-мост (предсозданные воркеры lightrag, см. embed_func): берём
+        # впрыснутую на submission-границе корреляцию, fallback на ctxvar (прод-путь без e2e).
+        injected_corr = kwargs.pop(LIGHTRAG_CORRELATION_KWARG, None)
         kwargs.pop("response_format", None)  # 1.5-хинт «нужен JSON» — не нужен (всегда tool-call → JSON)
         _log_unsupported_llm_args(stream=stream, enable_cot=enable_cot, extra=kwargs)
 
@@ -155,7 +162,7 @@ def build_llm_func(
             max_tokens=max_tokens if max_tokens is not None else closure_max_tokens,
             chat_template_kwargs=closure_ctk,
         )
-        correlation_snap = get_litellm_correlation_from_ctxvar()
+        correlation_snap = injected_corr or get_litellm_correlation_from_ctxvar()
         context = f"LightRAG phase {call_site.value}"
 
         async def _attempt() -> str:
@@ -206,12 +213,18 @@ def build_embedding_func(
     mr_def = default_max_retries
 
     async def embed_func(texts: list[str], **_kwargs: Any):
-        # thread-root + базовый call-site (index/query) — из ctxvar напрямую (как llm/rerank; без моста).
-        correlation = get_litellm_correlation_from_ctxvar()
+        # КОРРЕЛЯЦИЯ через kwarg (_threlium_e2e_correlation), а НЕ ctxvar: эта функция исполняется
+        # в предсозданном воркере lightrag (priority_limit_async_func_call), чей контекст заморожен в
+        # момент создания пула (bootstrap) — ctxvar там «протух». Мост в _construction впрыскивает
+        # корреляцию в kwargs на submission-границе (правильный контекст запроса/индексации). Fallback
+        # на ctxvar — для прод-пути без e2e-корреляции.
+        correlation = _kwargs.pop(LIGHTRAG_CORRELATION_KWARG, None) or get_litellm_correlation_from_ctxvar()
         log.info(
             "lightrag_embed_call",
             n_texts=len(texts),
+            context=_kwargs.get("context"),
             call_site=(correlation or {}).get("X-Threlium-Call-Site"),
+            thread_root=(correlation or {}).get("X-Threlium-Thread-Root"),
             first_text=(texts[0][:80] if texts else ""),
         )
         mr = embed_ep.max_retries if embed_ep.max_retries is not None else mr_def
@@ -250,8 +263,9 @@ def build_rerank_func(
     ) -> list[dict[str, Any]]:
         # rerank ставит свой call-site общим хелпером ``correlation_with_call_site`` (тем же, что внутри
         # ``ainvoke_required_tool`` для tool-вызовов): thread-root из ctxvar + гранулярный lightrag_query_rerank.
+        base_corr = _kwargs.pop(LIGHTRAG_CORRELATION_KWARG, None) or get_litellm_correlation_from_ctxvar()
         correlation = correlation_with_call_site(
-            get_litellm_correlation_from_ctxvar(),
+            base_corr,
             LitellmCallSite.LIGHTRAG_QUERY_RERANK.value,
         )
         log.info(
