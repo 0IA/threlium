@@ -316,3 +316,46 @@ def bridge_post_json(
     if len(lines) != 2 or not lines[1].strip().isdigit():
         return (-1, out)
     return (int(lines[1].strip()), lines[0])
+
+
+def bridge_post_sse(
+    rt: E2EComposeRuntime, *, port: int, path: str, body: dict[str, object],
+    api_key: str, surface: IsomorphApiSurface, timeout: float = 120.0,
+) -> str:
+    """``stream:true`` POST в мост ИЗНУТРИ SUT (loopback), читаем СЫРОЙ SSE-поток (``curl -N``).
+
+    Возвращает сырой текст потока (event/data-кадры) для побайтовой проверки wire-схемы вендора —
+    независимо от толерантности реального Cline. Тело — base64 → ``curl --data-binary @-``."""
+    raw = json.dumps(body)
+    b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
+    auth = (
+        f"-H 'x-api-key: {api_key}'"
+        if surface is IsomorphApiSurface.ANTHROPIC_MESSAGES
+        else f"-H 'authorization: Bearer {api_key}'"
+    )
+    cmd = (
+        f"echo {b64} | base64 -d | curl -sS -N --max-time {int(timeout)} "
+        f"-X POST -H 'content-type: application/json' {auth} --data-binary @- "
+        f"http://127.0.0.1:{port}{path}"
+    )
+    return sut_exec(rt, cmd, timeout=timeout + 30.0)
+
+
+def parse_sse_events(raw: str) -> list[tuple[str | None, str]]:
+    """Разобрать сырой SSE-поток в список ``(event|None, data)``.
+
+    SSE-кадр = блок строк до пустой строки; ``event:`` (опц., Anthropic) + одна/несколько ``data:``.
+    Anthropic-кадры именованы (``event: message_start``); OpenAI — только ``data:`` (+ ``[DONE]``);
+    keep-alive Anthropic — ``event: ping``, OpenAI — строка-комментарий ``: keep-alive`` (пропускаем)."""
+    events: list[tuple[str | None, str]] = []
+    for block in raw.replace("\r\n", "\n").split("\n\n"):
+        event: str | None = None
+        data_lines: list[str] = []
+        for line in block.split("\n"):
+            if line.startswith("event:"):
+                event = line[len("event:"):].strip()
+            elif line.startswith("data:"):
+                data_lines.append(line[len("data:"):].strip())
+        if event is not None or data_lines:
+            events.append((event, "\n".join(data_lines)))
+    return events
