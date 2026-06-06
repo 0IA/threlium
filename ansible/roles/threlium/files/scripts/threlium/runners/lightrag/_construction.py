@@ -124,10 +124,20 @@ def build_rag(settings: ThreliumSettings) -> LightRAG:
             ),
         ),
         "addon_params": _addon_params(settings),
-        "kv_storage": "JsonKVStorage",
-        "vector_storage": "NanoVectorDBStorage",
+        # RedisKVStorage вместо JsonKVStorage: Json пере-сериализует ВЕСЬ файл на каждый flush
+        # (kv_store_*.json, в т.ч. llm_response_cache ~2.9MB) — растущий json.dump. Redis — построчные
+        # upsert'ы, без полной перезаписи. localhost-only (bind 127.0.0.1, protected-mode yes), REDIS_URI
+        # по умолчанию redis://localhost:6379. doc_status тоже в Redis (Json писал его на КАЖДЫЙ upsert).
+        "kv_storage": "RedisKVStorage",
+        # FaissVectorDBStorage вместо NanoVectorDBStorage: nano-vdb на каждый flush (index_done_callback,
+        # раз в batch) пере-сериализует ВЕСЬ json (vdb_chunks.json ~1.1MB: вся матрица векторов base64 +
+        # все метаданные) — ~28% CPU движка в json.dump (профиль py-spy). Faiss держит бинарный индекс
+        # (faiss.write_index, инкрементальный add) + компактный meta.json. Та же конфигурация порога
+        # (cosine_better_than_threshold из vector_db_storage_cls_kwargs), файловое хранилище без внешних
+        # сервисов. Требует faiss-cpu (см. pyproject).
+        "vector_storage": "FaissVectorDBStorage",
         "graph_storage": "NetworkXStorage",
-        "doc_status_storage": "JsonDocStatusStorage",
+        "doc_status_storage": "RedisDocStatusStorage",
         "chunk_token_size": body_max,
         "chunk_overlap_token_size": overlap_toks,
         "chunking_func": threlium_email_chunking_func,
