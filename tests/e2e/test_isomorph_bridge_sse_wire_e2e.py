@@ -22,13 +22,14 @@ import pytest
 
 from threlium.types import IsomorphApiSurface
 
-from .toolkit import E2EComposeRuntime
+from .toolkit import E2EComposeRuntime, poll_until
 from .toolkit.constants import TIMEOUT_POLL_LIVE_MAIL
 from .toolkit.isomorph_cline import (
     bridge_post_sse,
     clean_isomorph_test_threads,
     e2e_explicit_root_mid,
     e2e_root_prompt_token,
+    nm_count_in_test_thread,
     parse_sse_events,
     wait_bridge_health,
 )
@@ -156,3 +157,40 @@ def test_isomorph_bridge_openai_sse_wire_shape(isomorph_sse_openai: E2EComposeRu
     )
     assert _REPLY_MARKER in content, f"reply text not in chunk deltas: {content[:200]!r}"
     assert any(c.get("choices") == [] and c.get("usage") for c in chunks), "missing usage chunk (empty choices)"
+
+
+# ============================ client disconnect (long-hold) ============================
+
+_D_MARKER = "isomorph-disconnect-e2e"
+_D_STUB_TAG = "stub-isomorph-anthropic-json-e2e-01"  # зашитый tag json-стабов (см. _A_STUB_TAG)
+_D_STUB_DIR = _STUBS_ROOT / "test_isomorph_bridge_anthropic_json_e2e"
+
+
+@pytest.fixture()
+def isomorph_disconnect(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntime, None, None]:
+    _seed(e2e_runtime, stub_tag=_D_STUB_TAG, stub_dir=_D_STUB_DIR, marker=_D_MARKER)
+    try:
+        yield e2e_runtime
+    finally:
+        wait_for_sut_threlium_user_workers_idle(e2e_runtime.project_name, timeout=60.0)
+
+
+def test_isomorph_bridge_client_disconnect_mid_hold(isomorph_disconnect: E2EComposeRuntime) -> None:
+    """Разрыв клиента ПОСРЕДИ long-hold: мост чистит pending своего коннекта (generator ``finally`` →
+    ``forget``) и переживает; in-flight ход НЕ обрывается — FSM независим от коннекта, доходит до конца
+    (glue archive, ARCHIVE-FIRST), поздний egress-push = no-op. СВОЙ thread-root (свежий reasoning-контекст
+    → без stale phase-latch/finalize-loop). Проверка: health отвечает + glue хода всё равно появляется."""
+    rt = isomorph_disconnect
+    body = _body(IsomorphApiSurface.ANTHROPIC_MESSAGES, _D_MARKER)
+    # curl --max-time 4 << оборот FSM (~30c) → клиент обрывается ПОСРЕДИ удержания (exec_run не бросает на
+    # rc!=0 → возвращает частичный вывод). Мост детектит разрыв и чистит pending своего коннекта.
+    bridge_post_sse(
+        rt, port=_ISO_PORT, path="/v1/messages", body=body,
+        api_key=_API_KEY, surface=IsomorphApiSurface.ANTHROPIC_MESSAGES, timeout=4.0,
+    )
+    wait_bridge_health(rt, port=_ISO_PORT)  # мост жив после разрыва
+    # Ход доезжает несмотря на разрыв: egress пишет glue (ARCHIVE-FIRST), затем поздний push в мост = no-op.
+    poll_until(
+        lambda: True if nm_count_in_test_thread(rt, _D_MARKER, "from:egress_isomorph@localhost") >= 1 else None,
+        timeout=TIMEOUT_POLL_LIVE_MAIL, desc="turn completes despite client disconnect (glue archived)",
+    )
