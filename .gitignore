@@ -1,4 +1,6 @@
 # Секреты и локальное окружение (см. INSTALL_CONTRACT)
+# Якорь на корень: только репозиторный scratch-каталог, НЕ ansible/.../files/scripts (прод-код).
+/scripts/
 .claude
 .cursorignore
 .vscode/
