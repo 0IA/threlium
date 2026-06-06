@@ -601,7 +601,17 @@ def run_bridge(deliver: Callable[[EmailMessage], None], *, settings: ThreliumSet
             responses = mailbox.idle.wait(timeout=idle_timeout)
             if responses:
                 log.info("idle_events", count=len(responses))
-            session_high_uid = process_inbox_tail(
-                mailbox, deliver=deliver, settings=settings,
-                session_high_uid=session_high_uid,
-            )
+            # Drain до пустого: письмо, пришедшее ВО ВРЕМЯ предыдущего process_inbox_tail
+            # (мы тогда не в IDLE — обработка блокирующая, fdm на сообщение), не попадает в тот
+            # UID SEARCH и его EXISTS может быть пропущен следующим idle.wait → письмо висит до
+            # СЛЕДУЮЩЕГО EXISTS или таймаута IDLE (до 29 мин). Под нагрузкой (-n2) это даёт
+            # неогранич. задержку забора. Повторяем UID SEARCH, пока watermark растёт: всё, что
+            # появилось за время обработки, забирается тем же циклом, без ожидания нового EXISTS.
+            while True:
+                prev_high_uid = session_high_uid
+                session_high_uid = process_inbox_tail(
+                    mailbox, deliver=deliver, settings=settings,
+                    session_high_uid=session_high_uid,
+                )
+                if session_high_uid <= prev_high_uid:
+                    break
