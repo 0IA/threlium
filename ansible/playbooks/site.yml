@@ -59,6 +59,9 @@
           - mc
           - notmuch
           - python3-notmuch2
+          # LightRAG KV/doc-status backend (RedisKVStorage/RedisDocStatusStorage): построчные upsert'ы
+          # вместо полной пере-сериализации JSON-файлов. Только localhost (см. задачу hardening ниже).
+          - redis-server
           - curl
           - git
           - python3
@@ -69,6 +72,65 @@
           - sudo
         state: present
       become: true
+      tags: [deploy]
+
+    # --- Redis (LightRAG KV/doc-status) — ТОЛЬКО localhost ---------------------------------------
+    # Безопасность: redis слушает исключительно петлевой интерфейс и работает в protected-mode.
+    # Debian-дефолт уже такой, но фиксируем явно (идемпотентно), чтобы апгрейд пакета не открыл наружу.
+    - name: Harden Redis bind to loopback only
+      ansible.builtin.lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: '^[#\s]*bind\s'
+        line: "bind 127.0.0.1 -::1"
+        state: present
+      become: true
+      notify: Restart redis-server
+      tags: [deploy]
+
+    - name: Ensure Redis protected-mode is on
+      ansible.builtin.lineinfile:
+        path: /etc/redis/redis.conf
+        regexp: '^[#\s]*protected-mode\s'
+        line: "protected-mode yes"
+        state: present
+      become: true
+      notify: Restart redis-server
+      tags: [deploy]
+
+    - name: Enable and start redis-server
+      ansible.builtin.systemd:
+        name: redis-server
+        enabled: true
+        state: started
+      become: true
+      tags: [deploy]
+
+    - name: Acceptance — Redis answers on loopback
+      ansible.builtin.command: redis-cli -h 127.0.0.1 ping
+      register: threlium_redis_ping
+      changed_when: false
+      become: true
+      tags: [deploy]
+
+    - name: Assert Redis is reachable and NOT bound to external interfaces
+      ansible.builtin.shell: >-
+        set -o pipefail;
+        ss -tlnH 'sport = :6379' | awk '{print $4}'
+      args:
+        executable: /bin/bash
+      register: threlium_redis_listen
+      changed_when: false
+      become: true
+      tags: [deploy]
+
+    - name: Fail if Redis listens on a non-loopback address
+      ansible.builtin.assert:
+        that:
+          - "'PONG' in threlium_redis_ping.stdout"
+          - threlium_redis_listen.stdout_lines | reject('match', '^(127\\.0\\.0\\.1|\\[::1\\]):6379$') | list | length == 0
+        fail_msg: >-
+          Redis слушает не только loopback ({{ threlium_redis_listen.stdout_lines }}) —
+          проверьте bind/protected-mode в /etc/redis/redis.conf.
       tags: [deploy]
 
     - name: Assert mail stack binaries exist
@@ -1198,6 +1260,12 @@
       ansible.builtin.import_tasks: tasks/refresh.yml
 
   handlers:
+    - name: Restart redis-server
+      ansible.builtin.systemd:
+        name: redis-server
+        state: restarted
+      become: true
+
     - name: restart dovecot
       ansible.builtin.systemd:
         name: dovecot
