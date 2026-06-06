@@ -16,20 +16,8 @@ import uuid
 from collections.abc import Iterator
 
 import msgspec
-from litellm.types.utils import (
-    ChatCompletionDeltaToolCall,
-    ChatCompletionMessageToolCall,
-    Choices,
-    Delta,
-    Function,
-    Message,
-    ModelResponse,
-    ModelResponseStream,
-    StreamingChoices,
-    Usage,
-)
 
-from . import anthropic_wire
+from . import anthropic_wire, openai_wire
 from .push_types import IsomorphBridgePushPayload
 from .sse import SseFrame
 
@@ -54,15 +42,11 @@ def _created() -> int:
     return int(time.time())
 
 
-def _dump(model: object) -> str:
-    """litellm-модель → JSON-строка (UTF-8, без ascii-эскейпа) на крае HTTP."""
-    return json.dumps(model.model_dump(), ensure_ascii=False)  # type: ignore[attr-defined]
-
-
-def _usage(payload: IsomorphBridgePushPayload) -> Usage:
+def _usage(payload: IsomorphBridgePushPayload) -> openai_wire.OpenAIUsage:
     total = payload.usage.total or (payload.usage.prompt + payload.usage.completion)
-    return Usage(prompt_tokens=payload.usage.prompt, completion_tokens=payload.usage.completion,
-                 total_tokens=total)
+    return openai_wire.OpenAIUsage(
+        prompt_tokens=payload.usage.prompt, completion_tokens=payload.usage.completion,
+        total_tokens=total)
 
 
 def _openai_finish_reason(payload: IsomorphBridgePushPayload) -> str:
@@ -83,58 +67,50 @@ def _anthropic_stop_reason(payload: IsomorphBridgePushPayload) -> str:
 
 
 def encode_openai_sse(payload: IsomorphBridgePushPayload) -> Iterator[SseFrame]:
-    """``chat.completion.chunk`` через ``ModelResponseStream``: role-в-первом, usage-чанк с
+    """``chat.completion.chunk`` через :mod:`.openai_wire`: role-в-первом, usage-чанк с
     пустым ``choices``, ``[DONE]``. tool_calls — одним фрагментом (фаза A)."""
     cid, created, model = _chatcmpl_id(), _created(), payload.model
 
-    def chunk(*, delta: Delta | None = None, finish_reason: str | None = None,
-              choices: list | None = None, usage: Usage | None = None) -> SseFrame:
-        c = ModelResponseStream(
-            id=cid, created=created, model=model,
-            choices=choices if choices is not None
-            else [StreamingChoices(index=0, delta=delta or Delta(), finish_reason=finish_reason)],
-        )
-        if usage is not None:
-            c.usage = usage  # type: ignore[attr-defined]
-        return SseFrame.of_data(_dump(c))
+    def chunk(*, delta: openai_wire.OpenAIDelta | None = None, finish_reason: str | None = None,
+              choices: list | None = None, usage: openai_wire.OpenAIUsage | None = None) -> SseFrame:
+        return openai_wire.chunk_frame(
+            chunk_id=cid, created=created, model=model,
+            delta=delta, finish_reason=finish_reason, choices=choices, usage=usage)
 
-    yield chunk(delta=Delta(role="assistant", content=""))
+    yield chunk(delta=openai_wire.OpenAIDelta(role="assistant", content=""))
     if payload.text:
-        yield chunk(delta=Delta(content=payload.text))
+        yield chunk(delta=openai_wire.OpenAIDelta(content=payload.text))
     if payload.tool_blocks:
         tcs = [
-            ChatCompletionDeltaToolCall(
-                id=tb.id or _call_id(), type="function", index=i,
-                function=Function(name=tb.name, arguments=tb.arguments),
+            openai_wire.OpenAIDeltaToolCall(
+                id=tb.id or _call_id(), index=i,
+                function=openai_wire.OpenAIToolFunction(name=tb.name, arguments=tb.arguments),
             )
             for i, tb in enumerate(payload.tool_blocks)
         ]
-        yield chunk(delta=Delta(tool_calls=tcs))
-    yield chunk(delta=Delta(), finish_reason=_openai_finish_reason(payload))
+        yield chunk(delta=openai_wire.OpenAIDelta(tool_calls=tcs))
+    yield chunk(delta=openai_wire.OpenAIDelta(), finish_reason=_openai_finish_reason(payload))
     yield chunk(choices=[], usage=_usage(payload))
     yield SseFrame.done()
 
 
 def encode_openai_json(payload: IsomorphBridgePushPayload) -> str:
     if payload.tool_blocks:
-        message = Message(
+        message = openai_wire.OpenAIMessage(
             role="assistant", content=None,
             tool_calls=[
-                ChatCompletionMessageToolCall(
-                    id=tb.id or _call_id(), type="function",
-                    function=Function(name=tb.name, arguments=tb.arguments),
+                openai_wire.OpenAIToolCall(
+                    id=tb.id or _call_id(),
+                    function=openai_wire.OpenAIToolFunction(name=tb.name, arguments=tb.arguments),
                 )
                 for tb in payload.tool_blocks
             ],
         )
     else:
-        message = Message(role="assistant", content=payload.text)
-    resp = ModelResponse(
-        id=_chatcmpl_id(), created=_created(), model=payload.model,
-        choices=[Choices(index=0, message=message, finish_reason=_openai_finish_reason(payload))],
-        usage=_usage(payload),
-    )
-    return _dump(resp)
+        message = openai_wire.OpenAIMessage(role="assistant", content=payload.text)
+    return openai_wire.completion_json(
+        completion_id=_chatcmpl_id(), created=_created(), model=payload.model,
+        message=message, finish_reason=_openai_finish_reason(payload), usage=_usage(payload))
 
 
 # ============================ Anthropic Messages ============================
