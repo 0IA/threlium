@@ -1608,8 +1608,10 @@ def prepare_wiremock_scenario(
     захват :func:`_wiremock_admin_api_exclusive` на весь prepare; HTTP внутри идут с
     ``skip_admin_lock`` у :func:`upsert_mapping` без лишней вложенности depth-локера.
 
-    Контекст route **не** удаляем перед сидом: уникальные ``correlation_key`` и глобальный
-    :func:`wiremock_state_reset_all_contexts` в ``pytest_sessionfinish`` (см. ``docs/E2E.md``).
+    Контекст route **не** удаляем перед сидом: изоляцию дают уникальный ``correlation_key`` +
+    per-test ``remove_wiremock_journal_by_stub_tag`` (только свой тег). Полный сброс State/журнала —
+    однократно на СТАРТЕ сессии (``_e2e_wiremock_journal_reset_once`` под IPC-локом); ``pytest_sessionfinish``
+    данные **не** трогает (пост-mortem). См. ``docs/E2E.md``.
     """
     ctx_key = composite_context_key(stub_tag, correlation_key)
     
@@ -1656,8 +1658,8 @@ def teardown_wiremock_scenario(
 
     Ранее здесь вызывался :func:`remove_wiremock_journal_by_stub_tag`; по политике репозитория
     после теста журнал не трогаем. Журнал **unmatched** здесь тоже не чистится. Контексты State
-    для route **не** удаляем. Полный сброс контекстов — ``pytest_sessionfinish`` →
-    :func:`wiremock_state_reset_all_contexts` в ``conftest.py``.
+    для route **не** удаляем. Полный сброс контекстов/журнала — однократно на СТАРТЕ сессии
+    (``_e2e_wiremock_journal_reset_once`` в ``conftest.py``); на финише данные остаются для анализа.
 
     Параметры ``public_base`` / ``stub_tag`` / ``timeout`` сохранены для совместимости вызовов;
     при необходимости выборочной очистки matched по тегу вызовите
