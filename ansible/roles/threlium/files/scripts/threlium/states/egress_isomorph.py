@@ -96,7 +96,7 @@ def main(
     reply_text = system_part_text(msg).strip()
 
     # glue-MID = snowflake (уникален независимо от тела → нет коллизии тредов при идентичных ответах,
-    # см. docs/E2E_PARALLEL_ISOLATION_REPORT §5-bis). Идемпотентность ретраев egress: на повторе берём
+    # см. docs/E2E.md §5 (collision-at-root)). Идемпотентность ретраев egress: на повторе берём
     # snowflake из УЖЕ записанного glue-архива, иначе минтим новый — тогда водяной знак (и IRT следующего
     # хода) стабилен между ретраями.
     existing = find_existing_egress_archive(msg)

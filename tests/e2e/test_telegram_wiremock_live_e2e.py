@@ -300,7 +300,7 @@ def test_live_telegram_wiremock_private_tail_307_second_message(
     Отчёт (ожидаемое при одном notmuch-треде): второе сообщение не доходит до reasoning LiteLLM,
     пока не завершится первое (mutex ``threlium-work@…`` по ``thread_id``).     После ``reasoning_release`` оба проходят; два POST ``editMessageText`` с текстом агента из стаба и
     ``reply_parameters.message_id`` на ``message_id_1`` / ``message_id_2`` в ``sendMessage`` (placeholder). В промпте reasoning для
-    второго — текст первого (общий notmuch-тред / хвост). См. ``docs/E2E_ISOLATION.md`` §8.6.
+    второго — текст первого (общий notmuch-тред / хвост). См. ``docs/E2E.md`` §8.6.
     """
     with wiremock_correlation_scope(
         e2e_runtime, TELEGRAM_WIREMOCK_STUB_TAG_TAIL_307, request.node.nodeid

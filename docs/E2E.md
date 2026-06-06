@@ -1,0 +1,488 @@
+# Threlium — E2E: harness, изоляция, параллельность
+
+Единый документ по сквозному (e2e) тестированию Threlium: **зачем** e2e — единственный
+автоматизированный gate, **как** устроен harness (Docker Compose + Testcontainers + baked-образ SUT),
+и — центрально — **как тесты изолированы** на одном общем WireMock при `pytest -n N`.
+
+Этот документ заменяет прежние `TESTING.md` и `E2E_ISOLATION.md`: они слиты и переосмыслены вокруг одного
+стержня — **коррелятора** (см. §2). Связанные контракты — в [INDEX.md](INDEX.md) (storage/fdm/nm_settle/
+LightRAG-воркер), [ORCHESTRATION.md](ORCHESTRATION.md) (serial-per-thread, parallel-across-threads),
+[PLAYBOOK.md](PLAYBOOK.md) (классы операций, тег `refresh`), [MESSAGES.md](MESSAGES.md) (канонизация MID),
+[THREAD_MODEL.md](THREAD_MODEL.md) и [BRIDGE_ISOMORPH.md](BRIDGE_ISOMORPH.md) (тред-идентичность мостов).
+
+> **Терминология «archive».** В коде встречаются два омонима: **bundle archive** (`*.tar.gz` post-deploy,
+> артефакт установки) и **mail archive** (историческая выделенная `archive/Maildir` — её больше нет: union
+> notmuch root указывает на `stages/`, каждое письмо durable в `stages/<stage>/Maildir/cur/<id>:2,S` после
+> `nm_settle()`). Хелперы вида `*_archive*` означают именно «весь тред в union-индексе поверх `stages/`».
+
+---
+
+## 1. Философия: почему e2e — единственный gate
+
+**Политика** ([ARCHITECTURE.md §1.3](ARCHITECTURE.md#13-политика-тестирования)): **единственный**
+автоматизированный pytest-gate — e2e в `tests/e2e/`. **Юнит/интеграционных тестов в проекте нет**
+(маркер `e2e` навешивается на все `test_*.py` collection-хуком; `tests/unit/` отсутствует намеренно).
+
+**Почему.** Поведение Threlium эмерджентно — композиция `fdm` (`~/.fdm.conf`: `match` → `pipe` →
+`notmuch insert … && threlium-dispatch.sh`), `notmuch`, FSM-стадий, RAG-loop **внутри** `threlium-engine`,
+мостов и LLM. Единица изоляции в проде — связка submit `threlium-work@` ↔ долгоживущий `threlium-engine`
+(handler стадии исполняется **in-process** в движке). Инварианты оркестрации (serial-per-thread, форк треда,
+fdm `insert && dispatch`, `threlium-sweep@` backstop) достоверно видны только на живом `systemd --user` в SUT
+— их нельзя замокать в юнит-тесте, не потеряв предмет проверки.
+
+**Детерминизм.** e2e проверяет **контур**, а не качество модели: стаб → ответ → журнал/инвариант. Стохастика
+реального LLM сломала бы контракт, поэтому **все** LLM/embeddings/мессенджер-API — WireMock-стабы.
+
+**Политика честности (критично).** Тест **не** правит код продукта и **не** проталкивает данные в notmuch/
+Maildir внутри SUT (никаких ручных `notmuch insert`, подкладки писем в `new/`, подмены бизнес-логики ради
+зелёного assert). Поведенческие таймауты **не** повышают, чтобы «дождаться» медленного контура — чинят стабы/
+вход/продукт. Разрешено только **чтение** диска/notmuch для сверки промежуточного состояния. Отсутствие
+Docker/Linux/extras `[e2e]` — `pytest.fail(pytrace=False)`, **не** skip: дефект среды не прячут за зелёным.
+
+---
+
+## 2. Стержень: изоляция = коррелятор
+
+Главный урок параллельного прогона (`pytest -n N` на одном WireMock): **изоляция тестов сводится к одному
+понятию — коррелятору треда** (`thread-root`). Всё остальное (State-контексты, фазовые защёлки, shared-list,
+журнальный guard) — обвязка вокруг него.
+
+**Коррелятор** — это `X-Threlium-Thread-Root`: канонический `Message-ID` **корня** notmuch-треда (старейший
+`tag:route`). Каждый исходящий LiteLLM-запрос стадии несёт его в заголовке; стаб матчится по составному имени
+контекста `{stub_tag}::{thread-root}`. Два теста с разными thread-root физически не могут cross-match: контексты
+`stub-A::root_X` и `stub-B::root_Y` — разные записи в Store.
+
+### 2.1. Три требования к корректному коррелятору
+
+Чтобы изоляция работала на `-n N`, коррелятор теста должен быть одновременно:
+
+1. **Уникальным** — у каждого теста свой; иначе стабы/треды/фазы соседей пересекаются.
+2. **Предсказуемым тесту** — тест должен знать значение **до** запроса, чтобы засидить
+   `{stub_tag}::{thread-root}` (сид — до того, как SUT сделает первый LLM-вызов; гонки «ingress→первый LLM» нет).
+3. **Collision-free по содержимому** — идентичные тела запросов НЕ должны схлопываться в один коррелятор.
+
+Третий пункт — самый коварный и был первопричиной `-n2`-регрессии. Контент-адресуемый MID (`hash(тело)`) даёт
+**одинаковый** коррелятор для одинаковых тел → notmuch дедупит/сливает треды → у соседнего теста «исчезает»
+glue/тред → unmatched и/или зависание long-hold. Вывод: **при общей notmuch-БД и контент-адресуемых
+коррелятах содержимое и запросов, И ответов должно быть test-уникальным** — либо коррелятор не должен зависеть
+от содержимого вовсе (см. §2.3).
+
+### 2.2. Стратегия A — контент-адресуемый коррелятор (precompute)
+
+Тест **предвычисляет** thread-root тем же кодом, что и продукт, из тела, которым он владеет:
+`ingress_message_id(parent="", tail=<tail>)`. Подходит, когда тест полностью владеет телом (прямой HTTP-клиент):
+`thread_root_from_body(surface, body)` ([toolkit/isomorph_cline.py](../tests/e2e/toolkit/isomorph_cline.py)).
+
+**Где ломается** (уроки сессии):
+- **Коллизии идентичных тел** (см. §2.1.3): два теста/хода с одинаковым телом → один MID. Лечится только
+  test-уникальным содержимым (разные тела + разные ответы-маркеры).
+- **Хрупкость реконструкции.** Для реального клиента (Cline) тест **реконструирует** тело, чтобы предвычислить
+  MID — и реконструкция зависит от даты/шаблона системного промпта клиента. На границе суток
+  `cline_today_mdy()` разъезжается с датой, которую инжектит сам клиент → MID не совпадает → массовый unmatched.
+  Это **не** баг продукта, а ловушка хрупкого precompute.
+
+### 2.3. Стратегия B — явный инъецированный коррелятор (`E2E_MID:`) ⭐
+
+Робастная замена precompute. Тест генерит **детерминированный уникальный** MID тем же кодом, что и egress
+(`e2e_explicit_root_mid(marker)` → `snowflake_to_mid(hash(marker))` → `<b62@localhost>`), и **кладёт его прямо
+в тело запроса** токеном `E2E_MID:<...@localhost>`. Мост в e2e-режиме (`settings.e2e.litellm_route_correlation`)
+вынимает токен (`extract_e2e_explicit_mid`, [snowflake_mid.py](../ansible/roles/threlium/files/scripts/threlium/bridges/isomorph/snowflake_mid.py))
+и берёт его как ingress thread-root — **без** content-hash. Тест сидит тот же MID. Совпадение гарантировано.
+
+Свойства: уникален (по marker), предсказуем (тест сам выбрал), collision-free (не зависит от тела/даты).
+Хелперы — `e2e_explicit_root_mid` / `e2e_root_prompt_token` / `e2e_explicit_root_corr` (inner-форма
+pending↔push коррелятора). Это **только** для тестов; прод генерит уникальный MID сам (snowflake), без токена.
+
+**Разделение test/prod.** Прод не предсказуем тесту (snowflake — случайно-уникален), поэтому e2e и прод
+разводятся флагом источника MID: прод → snowflake; e2e → `E2E_MID:`/precompute. Механизм продолжения треда
+(невидимый водяной знак glue в ответе → `In-Reply-To` следующего хода) **одинаков** в обоих режимах, поэтому
+content-режим e2e всё равно прогоняет продакшн-путь — флаг обходит лишь сам генератор MID. Производственная
+тред-идентичность мостов — [BRIDGE_ISOMORPH.md](BRIDGE_ISOMORPH.md) / [THREAD_MODEL.md](THREAD_MODEL.md).
+
+### 2.4. Коррелятор LiteLLM на проде vs e2e
+
+Снимок корреляции живёт в **ContextVar** ([litellm_route_context.py](../ansible/roles/threlium/files/scripts/threlium/litellm_route_context.py),
+set/reset на границах стадий; дочерние async-задачи наследуют копию). На границе вызова
+`merge_litellm_call_kwargs_and_log` ([litellm_client.py](../ansible/roles/threlium/files/scripts/threlium/litellm_client.py))
+переносит снимок в `extra_headers`. В снимок входят **только** whitelist-заголовки конверта (`From`, `To`,
+`Message-ID`, `In-Reply-To`) + `X-Threlium-Thread-Root` (из корня треда notmuch,
+[resolve_route_from_thread_oldest_route_tag](../ansible/roles/threlium/files/scripts/threlium/ingress_route_resolve.py))
++ `X-Threlium-Call-Site` (enum [LitellmCallSite](../ansible/roles/threlium/files/scripts/threlium/types/litellm_call_site.py)).
+
+**Различие.** На проде merge HTTP-заголовков **выключен** (`litellm_route_correlation=false` в
+[defaults](../ansible/roles/threlium/defaults/main.yml)); call-site используется лишь для выбора фазы внутри
+`llm_func`. В e2e (`group_vars/e2e.yml: threlium_e2e_litellm_route_correlation: true`) заголовки **дополнительно**
+подмешиваются для WireMock `hasContext`. Базовый `lightrag_query` штампится **всегда** (прод+e2e) — иначе
+`detect_lightrag_call_site_wire` дефолтнул бы к `lightrag_index` и вернул бы `extract_knowledge_graph` вместо
+`generate_rag_answer` (wire-мусор в `## Answer`).
+
+### 2.5. Гранулярный `X-Threlium-Call-Site`
+
+Внутри одного thread-root разные LLM-вызовы различаются вторым дискриминатором — `X-Threlium-Call-Site`.
+Для LightRAG он вычисляется в рантайме `detect_lightrag_call_site_wire` по сигналам `llm_func`
+(`keyword_extraction` / `history_messages` / `system_prompt`, **без** инспекции prompt content) и равен
+`function.name` единственного tool (`extract_knowledge_graph` / `…_gleaning` / `summarize_descriptions` /
+`extract_query_keywords` / `generate_rag_answer`). Инвариант chat-вызова с одним tool:
+`X-Threlium-Call-Site == tools[0].function.name` (исключение — reasoning multi-tool = `reasoning`); проверяется
+в `merge_litellm_call_kwargs_and_log`. Offline-аудит контракта стабов — `python scripts/audit_wiremock_tool_stubs.py`.
+
+---
+
+## 3. WireMock State Extension — механизм изоляции
+
+Изоляция держится на [wiremock-state-extension](https://github.com/wiremock/wiremock-state-extension)
+(исходники `vendor/wiremock/wiremock-state-extension`; в compose монтируется standalone-JAR в
+`/var/wiremock/extensions/`, ServiceLoader, без `--extensions`; нужен `--global-response-templating`).
+Расширение хранит **данные** между стабами (properties, shared list) и матчит запросы по состоянию.
+
+### 3.1. Модель данных
+
+| Термин | Описание |
+| --- | --- |
+| `context` | Имя ключа в Store. В Threlium — составной `{stub_tag}::{thread-root}` или shared (`matrix_rooms`, `telegram_updates`). |
+| `state` | Карта `property → value` (строки) на контекст. Повторный `recordState` **мерджит**. |
+| `property` | Поле в `state`. Значение `"null"` (строка) **удаляет** свойство. |
+| `list` | Упорядоченный список карт в контексте. Только `addFirst`/`addLast`/delete — **in-place правки нет**. |
+| `updateCount` | Счётчик изменений контекста (+1 за запрос с ≥1 write). |
+
+Store — `CaffeineStore` (in-memory, lock на весь Store; TTL по умолчанию 60 мин). **Не** распределён; для
+параллельных воркеров — **разные контексты** (§2). Шесть расширений одного `ExtensionFactory`:
+`recordState`/`deleteState`/`stateTransaction` (ServeEventListener), `state-matcher` (RequestMatcher),
+`state` (Handlebars helper), `stateAdminApi`.
+
+### 3.2. `state-matcher` — матчинг по контексту
+
+`customMatcher: {"name": "state-matcher", "parameters": {...}}`. Имя в `hasContext`/`hasNotContext` рендерится
+Handlebars **до** проверки (можно `{{request.headers.[x-threlium-thread-root]}}`). Предикаты на контексте:
+`hasContext`/`hasNotContext` (есть/нет), `hasProperty`/`hasNotProperty`, `property` (любой `StringValuePattern`),
+`list`, `updateCount*`, `listSize*`. Несколько **разных** ключей в одном flat-объекте агрегируются через **AND**.
+Логические `and`/`or`/`not` — массивами.
+
+**Базовый стаб LiteLLM:**
+```json
+{ "request": {
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": { "X-Threlium-Call-Site": { "equalTo": "generate_rag_answer" } },
+    "customMatcher": { "name": "state-matcher", "parameters": {
+        "hasContext": "stub-<scenario>-01::{{request.headers.[x-threlium-thread-root]}}" } } },
+  "response": { "status": 200, "...": "..." } }
+```
+`stub_tag` (`stub-<scenario>-01`) **захардкожен в JSON** — `upsert` его НЕ подставляет (метаданные ≠ матчер).
+Поэтому при переиспользовании каталога стабов другим тестом **сидить нужно тем же зашитым `stub_tag`**, а
+изоляция держится на СВОЁМ thread-root (урок SSE-тестов §7).
+
+### 3.3. Фазовый автомат внутри треда — без `priority`
+
+Для нескольких LLM-вызовов одного типа в одном ходу (reasoning: первый → `tool_calls`, второй → финал)
+используются **взаимоисключающие** стабы на одном контексте: один с `hasNotProperty: phase_X`, другой — с
+`hasProperty: phase_X`; первый по `recordState` ставит `phase_X`. Фазы живут **в контексте треда** → у
+параллельных тестов разные → не пересекаются.
+
+**`priority` запрещён** в сценарных стабах (`tests/e2e/wiremock_stubs/`, кроме `compose_bootstrap/`). Причина:
+при `priority` порядок решает число, а не disjoint-state; параллельные фазы становятся непредсказуемы. Если
+**два** стаба матчат один запрос одновременно — это ошибка проектирования: WireMock при равном default-priority
+(=5) отдаёт **последний зарегистрированный** mapping (`upsert` = remove+add; файлы грузятся по имени — `102_`
+позже `100_`). Модель держится на том, что state делает фазы disjoint, а не на `priority`. Также **запрещён**
+`doesNotContain`-эксклюзий чужих тестов (допустим лишь для фаз **одного** сценария). Проверка:
+`rg '"priority"' tests/e2e/wiremock_stubs/test_` → пусто.
+
+> **Ловушка stale-латч (урок client-disconnect).** Если два теста делят **marker** → делят thread-root →
+> делят State-контекст reasoning. `clean_isomorph_test_threads` чистит notmuch, но **не** фазовую защёлку в
+> WireMock. Второй тест видит чужой `phase_tasks_ledger_done` → пропускает фазу закрытия задач → finalize-loop
+> (open subtasks) → воркер не доходит до idle → teardown зависает. **Лечение: свой marker = свой thread-root =
+> свой контекст** (а не reset защёлки задним числом). Multi-turn одного теста (общий контекст с happy-path)
+> явно сбрасывает защёлку `wiremock_state_reset_phase` между ходами.
+
+### 3.4. Helper `state` — чтение в ответах (shared list)
+
+В `response-template` (только поле `body`-строка, **не** `jsonBody`): `{{#each (state context='matrix_rooms'
+property='list' default='[]')}}…{{/each}}`. Между элементами — `{{#unless @last}},{{/unless}}`. Литеральная `{`
+перед `{{#each}}` требует **пробела** (`{ {{#each`), иначе Handlebars видит triple-stache `{{{` →
+`HandlebarsException`. Спец-properties: `updateCount`/`listSize`/`list` (весь массив).
+
+### 3.5. Admin API + запись
+
+База `/__admin/state-extension/`. GET `/contexts`, GET/DELETE `/contexts/{name}`, DELETE `/contexts` (все).
+**Запись — только через стабы** (PUT/POST в Admin нет); сид — POST на публичный setup-стаб.
+
+> **Gotcha:** `DELETE …/contexts/{name}` с `::`/`<`/`>`/`@` в имени (типичный составной ключ + MID) часто
+> **no-op** (204, но контекст остаётся — имя в path не доходит до handler). Точечное снятие property —
+> POST-триггеры (`phase_reset`, `recordState` с `"null"`), не Admin DELETE.
+
+---
+
+## 4. Каналы: коррелятор + транспорт
+
+После моста все каналы → email (`build_bridge_ingress_email`) с уникальным `X-Threlium-Route`; дальше pipeline
+(enrich → reasoning → egress) изолирован **одинаково** — `hasContext` по `X-Threlium-Thread-Root`. Различается
+только **как получить коррелятор** и транспортный bootstrap.
+
+| Канал | Коррелятор (thread-root) | Транспорт-bootstrap | Egress-стаб |
+| --- | --- | --- | --- |
+| **Email** | MID старейшего `tag:route` треда; тест: inner SMTP-инъекции (`e2e_smtp_inject_ingress_route_wire_for_message_id`) | SMTP→GreenMail→IMAP bridge | `sendMessage`/msmtp (не state-matcher) |
+| **Matrix** | `RfcMessageIdWire(MatrixNativeId(room_id,event_id))` корневого события | один `/sync` + shared list `matrix_rooms` (`#each`) | `room_send`: state-matcher (nio custom_headers) |
+| **Telegram** | MID из `chat_id`/`message_id`/`message_thread_id` | один `getUpdates` + shared list `telegram_updates` | `sendMessage`: bodyPatterns (PTB не шлёт thread-root на wire) |
+| **Isomorph** | `E2E_MID:` (§2.3) или content-hash; прод — snowflake | прямой HTTP в мост (long-hold) | egress push в мост; водяной знак в ответе |
+
+**Shared-list каналы (Matrix/Telegram).** Мост делает **один** `/sync` (или `getUpdates`) на весь homeserver,
+поэтому ответ должен содержать события **всех** активных тестов. Решение — общий контекст с `list`:
+тест в setup `register_room`/`register_update` (`addLast` своей записи), bootstrap-стаб собирает ответ `#each`
+по list; в `finally` `unregister_*` (`deleteWhere` по `room_id`/`update_id` — **только своё**). Один
+bootstrap-стаб **без** `state-matcher`/`listSizeMoreThan` (пустой list → пустой ответ, не unmatched).
+List-операции из разных xdist-воркеров сериализуются тем же межпроцессным `_wiremock_admin_api_exclusive`
+(FileLock `e2e_wiremock_admin_api.lock`), что и Admin GET. Дедуп повторных событий — на мосту (notmuch по MID).
+
+**Isomorph (long-hold).** Прямой HTTP-мост: тест POST-ит тело сам → не нужен bootstrap-транспорт. Изоляция —
+`E2E_MID:` thread-root (§2.3). Egress пушит ответ обратно в мост (`/internal/v1/push`); тред-непрерывность — не
+голосование, а **невидимый водяной знак** glue-MID в content ответа (клиент возвращает его в истории →
+`In-Reply-To` следующего хода). Детали — [BRIDGE_ISOMORPH.md](BRIDGE_ISOMORPH.md).
+
+---
+
+## 5. Параллельная безопасность (`pytest -n N`)
+
+**Цель** — одновременно нагрузить и xdist-воркеры, и несколько notmuch-тредов в SUT (контракт
+*serial-per-thread, parallel-across-threads*, [ORCHESTRATION.md](ORCHESTRATION.md)). `pytest.mark.
+xdist_group("exclusive")` и любая exclusive-сериализация e2e **запрещены** — при гонках расширяют якоря, а не
+отключают параллельность.
+
+**Что параллельно-безопасно:** изолированный коррелятор на тест (§2) + узкие `bodyPatterns`/`X-Threlium-Call-Site`
++ свой каталог стабов/`stub_tag`. Несколько воркеров одновременно бьют в один WM — каждый запрос **обязан**
+сматчиться своими стабами; иначе unmatched и любой воркер падает на guard.
+
+**Журнальный guard** (нормативный инвариант целостности стабов): `GET /__admin/requests/unmatched` **глобально
+пуст** — проверяется в `pytest_runtest_call` до и после тела каждого теста ([conftest.py](../tests/e2e/conftest.py)).
+Фильтр по заголовкам **не** применяют (у unmatched-запроса может не быть `X-Threlium-Route`). Единственный
+допустимый FileLock — вокруг самого Admin GET в `wiremock_unmatched_request_entries` (иначе 500 WM при
+параллельных опросах); сам хук локами не сериализуют.
+
+**Запрещено из кода сценариев** на общем WM: `wiremock_state_reset_all_contexts`, `reset_request_journal`
+(`DELETE /__admin/requests`), глобальный `DELETE /__admin/mappings` — снесут чужие воркеры (bootstrap, State).
+Исключение — **один** координированный cold reset на инвокацию pytest (`_e2e_wiremock_journal_reset_once`: под
+FileLock лидер останавливает pipeline, `reset_non_bootstrap_wiremock_mappings`, журнал, Store, Maildir, upsert
+`compose_bootstrap/`, запуск engine).
+
+**Collision-at-root (центральный урок -n2).** Контент-адресуемые коррелятор/glue-MID **коллизируют** при
+идентичном содержимом → notmuch сливает треды → каскад unmatched/зависаний. Под `-n2` лечится: (1) test-уникальные
+тела И ответы, либо (2) явный `E2E_MID:` (§2.3). Прод снимает это в корне уникальными snowflake-MID.
+
+**Serial-only тесты (skip-under-xdist).** Тест, который меняет **глобальную** конфигурацию моста (env +
+рестарт) — несовместим с параллельными ходами и обязан:
+```python
+if os.environ.get("PYTEST_XDIST_WORKER"):
+    pytest.skip("меняет глобальный конфиг моста → serial only (-n0)")
+```
+и **восстанавливать конфиг в `finally`** фикстуры (робастно при любом исходе). Пример — upstream-timeout→504
+(§7.4): фикстура понижает `request_timeout_sec` до 8c и возвращает дефолт в teardown. Под `-n2` такой тест
+показывается как `skipped`, не ломая остальных; валидируется в обычном `-n0`-прогоне.
+
+---
+
+## 6. Харнесс
+
+### 6.1. Compose-стек
+
+[`tests/e2e/compose/docker-compose.yml`](../tests/e2e/compose/docker-compose.yml): `sut`, `greenmail`, `wiremock`.
+
+- **`sut`** — privileged + cgroup host + mount `/sys/fs/cgroup` (нужно для `loginctl enable-linger`,
+  `systemctl --user`, `.path`-юнитов с inotify). Baked-образ `threlium/e2e-sut:baked`. Cockpit HTTPS :9090,
+  Caddy HTTP :8080.
+- **`greenmail`** (`standalone:latest`) — SMTP 3025 / IMAP 3143 (pytest с хоста) / IMAPS 3993 (мост в SUT);
+  TLS PKCS#12 `greenmail.p12` (SAN `localhost`/`greenmail`/`127.0.0.1`). Динамический host-port (`"3025"`),
+  pytest находит через `_mapped_port`.
+- **`wiremock`** (`wiremock:latest`, host 9080→8080, `--global-response-templating`) — **единственный** HTTP-mock
+  для OpenAI-совместимых вызовов (`/chat/completions`, `/embeddings` — без `/v1/`), Matrix (`/_matrix/…`),
+  Telegram Bot API. State-extension JAR + classpath.
+
+### 6.2. Baked-образ SUT
+
+**Bake** — на bootstrap-образе (`geerlingguy/docker-ubuntu2404-ansible`) прогоняется тот же `site.yml`, что в
+проде → `docker commit` в `threlium/e2e-sut:baked`. В образе — развёрнутая система, **источник правды —
+`site.yml`, отдельного Dockerfile нет**. `ensure_e2e_sut_image_exists`: reuse по `docker image inspect`;
+форс — `THRELIUM_E2E_REBUILD_BAKED_IMAGE=1` или `pytest -n0 tests/e2e/wipe_bake.py` (под локом
+`/tmp/threlium_e2e_bake_image.lock`). Пересобирать при: правках `site.yml`/ролей/apt/pip/bootstrap-образа.
+Правки только Python-кода Threlium/тестов/докум. — **не** повод.
+
+### 6.3. Shared compose + filelock
+
+Дефолт — **однопоточный** `pytest tests/e2e` (лидер = единственный участник). Параллельный контракт — **явно**
+`-n N`; `addopts = -n N` в `pyproject.toml` **не** ставить. Все xdist-воркеры делят **один** compose-проект
+`threlium_e2e_shared_{hex}`: первый под `FileLock` поднимает стек и пишет `ready.flag` + `runtime.json`
+(`e2e_compose_coord_paths()`), остальные читают `project_name` / `discover_runtime`. «Мёртвый» координатор
+(файлы есть, стек остановлен) — лидер проверяет running-контейнеры через Docker API и сбрасывает флаги.
+`pytest_sessionfinish` **не** делает `compose down` (reuse; opt-in `THRELIUM_E2E_COMPOSE_DOWN=1`).
+
+### 6.4. Фикстуры и toolkit
+
+| Фикстура | Скоуп | Роль |
+| --- | --- | --- |
+| `compose_stack` | session | Attach-only к healthy стеку; journal reset WM, `runtime.json`. |
+| `e2e_runtime` | function (autouse) | Per-test: координированный reset → pipeline → idle → reset WM. |
+
+Toolkit ([`tests/e2e/toolkit/`](../tests/e2e/toolkit/)) — пакет harness: runtime/compose-обвязка, SUT image
+strategy, polling через `tenacity` (`poll_until` fixed / `poll_until_backoff` exp, progress каждые 15c),
+GreenMail/IMAP/notmuch waiters, WireMock-журнал, ansible, диагностика. Контракт-константы — `E2E_BAKED_SUT_IMAGE`,
+`E2E_THRELIUM_USER`, `E2E_WIREMOCK_CONTAINER_PORT`, `E2E_REPLY_SUBJECT`/`E2E_REPLY_BODY_SNIPPET`, …
+
+**Стабы — только закоммиченный JSON.** Нормативно: маппинги живут в git как `wiremock_stubs/<тест>/*.json`;
+`compose_bootstrap/` — инфраструктурный (`recordState` setup/phase_reset, matrix/telegram register, embeddings
+readiness; тег `THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG` переживает cold reset). **Запрещено** собирать/
+патчить **тела** маппингов из pytest (временные каталоги, `replace`/Jinja2 по JSON, Python-сборка `mapping`).
+**Разрешено** в рантайме: `wiremock_state_*` (сид/reset контекста), `upsert_wiremock_mapping_directory`
+(стабильный `id` = `wiremock_stub_id_for_e2e_stub_relpath`, в metadata — `stub_tag` для фильтра журнала),
+`{{randomValue …}}` в ответах. `stub_tag` **не** выбирает стаб на стороне WM — он для журнала/cleanup.
+
+### 6.5. Деплой в SUT + режимы прогона
+
+Сценарные тесты **не** вызывают `ansible-playbook`. `site.yml` (полный или `--tags repo` для быстрого цикла
+кода/конфигов; `--tags refresh` — сброс mail-state + рестарт user-units) — отдельный шаг до сценариев. Только
+код `scripts/threlium`+`prompts/` на живом SUT без плейбука — [FSTS_SYNC.md](FSTS_SYNC.md).
+
+| Команда | Что |
+| --- | --- |
+| `pytest tests/e2e` | Однопоточный прогон (дефолт), attach к baked-стеку. |
+| `pytest tests/e2e -n 8` | Параллельный стресс — проверка thread-parallel контракта. |
+| `pytest -n0 tests/e2e/wipe_bake.py` | Полный bake образа + сброс координаторов + `compose down`/`up`. |
+| `pytest -n0 tests/e2e/wipe_sync.py` | Только harness (`--tags refresh`) на уже поднятом SUT. |
+
+`wipe_*.py` **не** в дефолтной коллекции (имена вне `test_*.py`; не расширять `python_files` до `*.py`).
+
+---
+
+## 7. Паттерны: тестирование long-hold моста (isomorph)
+
+Мост `isomorph` держит HTTP-соединение (long-hold) до egress-push. Эти паттерны переиспользуемы для любого
+поведения долгоживущего соединения; все изолированы своим `E2E_MID:` thread-root (§2.3), стабы — переиспользуют
+L0-цепочку json-вариантов (FSM-путь тот же; surface меняет лишь кодирование запроса/ответа моста).
+
+### 7.1. Прямой SSE wire-shape (+ keep-alive)
+
+Тест — прямой `stream:true` клиент (`bridge_post_sse` → `curl -N` изнутри SUT), читает **сырой** SSE-поток и
+проверяет строгую wire-схему вендора **побайтово** (независимо от толерантности реального Cline):
+- **Anthropic**: `message_start → content_block_start → content_block_delta → content_block_stop →
+  message_delta → message_stop`; текст ответа — в дельтах.
+- **OpenAI**: role в первом чанке, content-чанк, usage-чанк с пустым `choices`, терминатор `[DONE]`, каждый
+  кадр `object == chat.completion.chunk`.
+
+`parse_sse_events` разбирает кадры в `(event|None, data)`. **Keep-alive покрывается тем же тестом**: при
+`keepalive_sec=20 < оборот FSM (~30c)` под `-n2` в потоке естественно появляется `event: ping` (Anthropic) /
+`: keep-alive` (OpenAI) **до** ответа — поэтому `ping` исключают из проверки **порядка** (он валиден где угодно),
+но требуют наличие каркасных событий.
+
+### 7.2. Client-disconnect mid-hold
+
+`bridge_post_sse(timeout=4)` обрывает клиента ПОСРЕДИ удержания (`exec_run` не бросает на `rc!=0` → возвращает
+частичный поток). Проверка: мост чистит pending своего коннекта (generator `finally` → `forget`, поздний push =
+no-op) и **переживает** (health отвечает), а in-flight ход FSM **не** обрывается (независим от коннекта) —
+доходит до glue (ARCHIVE-FIRST). **Свой fresh marker обязателен** (иначе stale phase-latch §3.3 → finalize-loop →
+teardown зависает).
+
+### 7.3. FSM-error → error-envelope
+
+`error_message` в push → мост отдаёт held-запросу вендорный error-envelope (HTTP 500 `{"error":{…}}`).
+Тест: один `sut_exec` фоном держит `stream:false` запрос, через ~5c инъектит push в `/internal/v1/push`
+(`bridge_post_json_with_pushed_error`, секрет `e2e-isomorph-push-secret`, `ingress_mid = e2e_explicit_root_corr`
+— inner-форма ровно как мост) — push **опережает** FSM (~30c), мост резолвит held ошибкой. Стабы засижены → реальный
+ход доходит чисто в фоне (late push = no-op), teardown idle без зависа.
+
+### 7.4. Upstream-timeout → 504 (serial-only)
+
+Мост отдаёт 504, если push не пришёл за `request_timeout_sec` (дефолт 180c). Чтобы не ждать — serial-only
+фикстура (skip под xdist, §5) понижает таймаут до 8c (env `THRELIUM_BRIDGES__ISOMORPH__REQUEST_TIMEOUT_SEC` в
+`/home/threlium/threlium/agent/env/threlium.env` + рестарт моста) и **восстанавливает в `finally`**. Запрос
+держится → мост снимает pending → 504. `curl --max-time 40 > 8` → ловим именно мостовой 504, не клиентский обрыв.
+
+---
+
+## 8. Жизненный цикл State
+
+```
+┌─ pytest session start (лидер под FileLock, один раз) ──────────┐
+│  cold reset: stop pipeline → flush Maildir/GreenMail            │
+│  → reset WM journal + Store + non-bootstrap mappings           │
+│  → bootstrap stubs → start engine → idle → journal reset       │
+├─ per-test setup (фикстура сценария) ───────────────────────────┤
+│  wait idle → wait bridge health → clean_*_test_threads(marker)  │
+│  → upsert stubs (свой каталог/stub_tag) → seed context          │
+│  → [matrix/tg] register_room / register_update                  │
+├─ test body ────────────────────────────────────────────────────┤
+│  SUT: bridge → ingress → enrich → reasoning → egress            │
+│  каждый LiteLLM-запрос несёт X-Threlium-Thread-Root + Call-Site │
+│  state-matcher: composite hasContext + phase; recordState        │
+│  guard: GET /requests/unmatched пуст (до и после тела)          │
+├─ test teardown (finally) ──────────────────────────────────────┤
+│  [matrix/tg] unregister (deleteWhere — только своё)             │
+│  контекст route НЕ удалять (поздний трафик SUT)                 │
+│  matched-журнал НЕ чистить (остаётся для отладки)               │
+├─ pytest_sessionfinish (один раз) ──────────────────────────────┤
+│  wait idle + assert zero unmatched → wiremock_state_reset_all   │
+│  при FAIL: укороченный drain (FAIL_DRAIN_SEC, 30c)              │
+└────────────────────────────────────────────────────────────────┘
+```
+
+Контекст route в function-teardown **не** удаляют: поздние LiteLLM-запросы SUT (after test body) должны
+по-прежнему матчиться. Полный сброс Store — только в `pytest_sessionfinish` (`wiremock_state_reset_all_contexts`)
+**после** idle и пустого unmatched. `e2e_clean_sut_messages_for_test(stub_tag, correlation_key)` между тестами
+удаляет на SUT только письма прошлых запусков **этого** marker'а, сохраняя тред текущего `correlation_key` для
+multi-turn.
+
+---
+
+## 9. Практические gotchas
+
+- **`bodyPatterns[].matches` — full-match** (как `String.matches()`): regex должен покрыть **всё** тело
+  (`"(?s).*….*"`). Для подстрок — `contains`/`matchesJsonPath`.
+- **Handlebars `{` перед блоком** — нужен пробел: `"join":{ {{#each …}}` (иначе `{{{` = triple-stache → exception);
+  закрытие `{{/each}} }`.
+- **LLM-кэш lightrag-hku** на долгоживущем SUT: повторный `aquery` с тем же текстом/keywords может **не** вызвать
+  HTTP backend (`cache_type=keywords/query`) → ожидаемой фазы нет в журнале. Варьировать вход хэша — уникальный
+  суффикс в seed-ответе/keywords-JSON/первом сообщении; для chat/embeddings — State-контекст.
+- **WireMock OSS metadata** в шаблонах ответа не работает (`{{stub.metadata.…}}` → пусто); вариативность —
+  `{{randomValue}}` в ответах, не второй слой шаблонизации до `upsert`.
+- **307-цепочка для «долгого LLM»** (без удержания сокета): стаб несколько раз отвечает 307 `Location` на тот же
+  URL (httpx следует редиректам внутри одного `send()`, POST→POST для 307); переключение «тест отпустил» — второй
+  стаб по `hasProperty`/POST-триггеру. Лимиты: httpx `DEFAULT_MAX_REDIRECTS=20`, reasoning `timeout ≈120c` на всю
+  цепочку, `max_retries=0` не отключает следование редиректам. Пример —
+  `test_live_telegram_wiremock_private_tail_307_second_message`.
+- **Notmuch-дедуп при повторном `/sync`** — штатно (`duplicate Message-ID, skip`).
+- **Sessionfinish после FAIL** — это **не** «зависание» runner: guard всё равно ждёт idle + пустой unmatched
+  (укороченный `FAIL_DRAIN_SEC=30c`). Параллельные smoke на том же compose с runner не запускать.
+
+---
+
+## 10. Переменные окружения (ключевые)
+
+Ни одна не обязательна для дефолта. Полный список — в коде conftest/toolkit; критичные:
+
+| Переменная | Дефолт | Назначение |
+| --- | --- | --- |
+| `THRELIUM_E2E_REBUILD_BAKED_IMAGE` | unset | `1` → форс-bake лидером `compose_stack`. |
+| `THRELIUM_E2E_SUT_IMAGE` | `threlium/e2e-sut:baked` | Образ `sut` (не-дефолт → off auto-bake). |
+| `THRELIUM_E2E_LITELLM_ROUTE_CORRELATION` | e2e: on | Merge HTTP-заголовков корреляции для WM `hasContext`. |
+| `THRELIUM_E2E_POLL_SHORT` | `30` | **Постоянный** таймаут poll'ов — не повышать ради медленного контура (чинят стабы/вход/продукт). |
+| `THRELIUM_E2E_SESSIONFINISH_DRAIN_SEC` | `120` | Ожидание idle + пустой unmatched перед сбросом Store. |
+| `THRELIUM_E2E_COMPOSE_DOWN` | unset | `1` → явный `compose down` после сессии. |
+| `THRELIUM_E2E_ANSIBLE_TAGS` / `_SKIP_TAGS` | unset | `--tags`/`--skip-tags` для `ansible-playbook`. |
+
+Команды:
+```bash
+.venv/bin/pip install -e ".[e2e,dev]"
+pytest tests/e2e -vv                                   # дефолт (один процесс)
+pytest tests/e2e -n 8 -vv                              # параллельный контракт
+pytest -n0 tests/e2e/wipe_bake.py -vv -s && pytest tests/e2e   # полная подготовка
+THRELIUM_E2E_COMPOSE_DOWN=1 pytest tests/e2e           # с явным down
+```
+
+---
+
+## 11. Связь документов
+
+| Документ | Роль |
+| --- | --- |
+| [INDEX.md](INDEX.md) | Master-контракт: storage (union root `stages/`), fdm `insert && dispatch`, `nm_settle()`, error handling, LightRAG-воркер. e2e-инварианты выводятся отсюда. |
+| [ARCHITECTURE.md §1.3](ARCHITECTURE.md#13-политика-тестирования) | Политика: e2e — единственный quality gate. |
+| [ORCHESTRATION.md](ORCHESTRATION.md) | serial-per-thread / parallel-across-threads — контракт, который проверяет `-n N`. |
+| [PLAYBOOK.md §2.1](PLAYBOOK.md) | Классы операций (A/B), ограничения, тег `refresh` как тестовая надстройка. |
+| [MESSAGES.md](MESSAGES.md) | Канонизация `Message-ID` на границах — основа уникальных коррелятов. |
+| [THREAD_MODEL.md](THREAD_MODEL.md) / [BRIDGE_ISOMORPH.md](BRIDGE_ISOMORPH.md) | Производственная тред-идентичность мостов (snowflake-MID, водяной знак glue) — прод-аналог §2.3. |
+| [FSTS_SYNC.md](FSTS_SYNC.md) | Синхронизация только кода `scripts/`+`prompts/` на живой SUT без плейбука. |

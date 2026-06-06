@@ -6,7 +6,7 @@ Cline (запечён в baked-образе SUT, см. [docs/BRIDGE_ISOMORPH.md]
 egress пушит ответ обратно в мост → Cline получает SSE. Два слоя моков: **Cline = реальный клиент**,
 **WireMock = LiteLLM** за FSM.
 
-**Изоляция ([E2E_ISOLATION.md](../../docs/E2E_ISOLATION.md) §2/§7).** Стабы — статическая L0-цепочка в
+**Изоляция ([E2E.md](../../docs/E2E.md) §2/§7).** Стабы — статическая L0-цепочка в
 ``wiremock_stubs/test_isomorph_bridge_anthropic_cline_e2e/`` (как у mailflow). Коррелятор стабов —
 ``X-Threlium-Thread-Root`` = контент-адресуемый ingress-MID = ``hash(хвост)``, где хвост = ВСЁ присланное
 Cline (системный промпт + промпт + ``[SYSTEM]``-суффикс), слитое в один ``<system>``. Тест **предвычисляет**

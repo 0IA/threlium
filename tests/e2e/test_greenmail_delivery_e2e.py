@@ -1,4 +1,4 @@
-"""E2e smoke: доставка в GreenMail и чтение по IMAP (уровень 1 из ``docs/TESTING.md``).
+"""E2e smoke: доставка в GreenMail и чтение по IMAP (уровень 1 из ``docs/E2E.md``).
 
 **Тест-кейс: SMTP → ящик GreenMail → IMAP на хосте pytest.** Проверяется только почтовый контур до
 бриджа/SUT: письмо дошло до тестового сервера и видно по якорям во входящих.
@@ -8,7 +8,7 @@
 запущенный e2e-стек. На общем WireMock регистрируются стабы ``test_greenmail_delivery_e2e`` (якорь в теле —
 ``GREENMAIL_SMOKE_BODY_ANCHOR``), чтобы исходящие HTTP-вызовы конвейера (если письмо заберёт бридж)
 не пересекались с чужими ``bodyPatterns``. Индексацию notmuch/Maildir в SUT **вручную не подменяем** —
-см. §8 «политика честности» в ``docs/TESTING.md``; полный контур — ``test_mailflow_*``.
+см. §8 «политика честности» в ``docs/E2E.md``; полный контур — ``test_mailflow_*``.
 """
 from __future__ import annotations
 

@@ -277,7 +277,7 @@ def run_greenmail_host_readiness_probe(
     При **``through_agent_mailbox=True``** — прежнее поведение: ``To`` = ``E2E_FETCHMAIL_USER``
     (``test@…``), ожидание забора бриджем (письмо ушло из INBOX через UID MOVE); если задан ``wiremock_seed_base``, до SMTP
     вызывается :func:`tests.e2e.wiremock_client.wiremock_state_seed_context` под ожидаемый
-    ``X-Threlium-Thread-Root`` (см. ``docs/TESTING.md`` §4.4.x).
+    ``X-Threlium-Thread-Root`` (см. ``docs/E2E.md`` §4.4.x).
 
     Returns inner ``Message-ID`` (без угловых скобок) — тот же идентификатор, что в
     ``Message-ID: <…>`` на проволке.

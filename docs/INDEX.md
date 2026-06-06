@@ -932,13 +932,13 @@ python -c "import lightrag; from importlib.metadata import version; print(versio
 ### 11.4 Версионная политика
 
 - `lightrag-hku` зафиксирован как `>=1.4.15,<2.0.0`. Major-bump (2.x) — потенциально breaking; апгрейд требует ревизии storage-layout, ключей `PROMPTS`, поведения `addon_params` и сигнатур `ainsert` / `aquery`.
-- `notmuch` — берём системный (там же, где runtime). Жёсткой минимальной версии не объявляем; проверка через smoke-test в [`TESTING.md`](TESTING.md).
+- `notmuch` — берём системный (там же, где runtime). Жёсткой минимальной версии не объявляем; проверка через smoke-test в [`E2E.md`](E2E.md).
 
 ---
 
 ## 12. Glossary & cross-references
 
-Глоссарий ниже — **мастер-источник терминов** этой архитектуры. Остальные документы (`ARCHITECTURE.md`, `FSM.md`, `MESSAGES.md`, `ORCHESTRATION.md`, `PLAYBOOK.md`, `MEMORY_TABLE.md`, `SUBAGENT_TABLE.md`, `TESTING.md`) ссылаются сюда вместо своих копий определений.
+Глоссарий ниже — **мастер-источник терминов** этой архитектуры. Остальные документы (`ARCHITECTURE.md`, `FSM.md`, `MESSAGES.md`, `ORCHESTRATION.md`, `PLAYBOOK.md`, `MEMORY_TABLE.md`, `SUBAGENT_TABLE.md`, `E2E.md`) ссылаются сюда вместо своих копий определений.
 
 ### 12.1 Термины
 
@@ -975,4 +975,4 @@ python -c "import lightrag; from importlib.metadata import version; print(versio
 - [`MEMORY_TABLE.md`](MEMORY_TABLE.md) — `thread_memory` / `global_memory` как FSM-stage'ы. Граф LightRAG общий; разведение записей — по mailbox стадии / `From:`, чанки несут thread id из ingest-строки; см. [§7.6](#76-per-thread-scoping-soft-через-маркеры).
 - [`PLAYBOOK.md`](PLAYBOOK.md) — операционные процедуры (`database.path = ~/threlium/stages`, деплой user-юнитов, миграция со старого `archive/Maildir/`).
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — общий обзор архитектуры (после реализации §8.5/§8.6 будут ссылаться сюда как на источник истины об индексации).
-- [`TESTING.md`](TESTING.md) — стратегия тестирования (`assert_notmuch_thread_fully_in_union`, e2e).
+- [`E2E.md`](E2E.md) — стратегия тестирования (`assert_notmuch_thread_fully_in_union`, e2e).

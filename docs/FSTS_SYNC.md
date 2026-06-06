@@ -2,7 +2,7 @@
 
 **FSTS** (fast SUT sync): обновить на уже поднятом e2e-стеке Python-пакет `threlium`, Jinja-промпты и при необходимости очистить локальное состояние почты и журнал WireMock — **без** `ansible-playbook`, rebake образа и `wipe_sync` / `wipe_bake`.
 
-Инварианты и полный контур — [TESTING.md](TESTING.md), [PLAYBOOK.md §2.1](PLAYBOOK.md#21-текущее-поведение-повторного-прогона-и-его-границы). Здесь только ручной «инкремент» для итерации по коду.
+Инварианты и полный контур — [E2E.md](E2E.md), [PLAYBOOK.md §2.1](PLAYBOOK.md#21-текущее-поведение-повторного-прогона-и-его-границы). Здесь только ручной «инкремент» для итерации по коду.
 
 ---
 
@@ -121,7 +121,7 @@ docker exec "$CID" bash -lc \
   'su - threlium -s /bin/bash -c "export XDG_RUNTIME_DIR=/run/user/\$(id -u); systemctl --user --state=running list-units threlium-engine.service threlium-bridge@email.service"'
 ```
 
-Дальше — целевой pytest, например live mailflow (см. [TESTING.md §5–7](TESTING.md)).
+Дальше — целевой pytest, например live mailflow (см. [E2E.md §5–7](E2E.md)).
 
 ---
 

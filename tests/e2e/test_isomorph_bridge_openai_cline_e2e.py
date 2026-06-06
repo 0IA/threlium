@@ -6,7 +6,7 @@
 SUT. Мост держит соединение (long-hold + keep-alive), FSM прогоняет ход → ``egress_isomorph`` пушит ответ →
 Cline получает OpenAI-SSE. Два слоя моков: **Cline = реальный клиент**, **WireMock = LiteLLM** за FSM.
 
-**Изоляция ([E2E_ISOLATION.md](../../docs/E2E_ISOLATION.md) §2/§7).** Стабы — статическая L0-цепочка в
+**Изоляция ([E2E.md](../../docs/E2E.md) §2/§7).** Стабы — статическая L0-цепочка в
 ``wiremock_stubs/test_isomorph_bridge_openai_cline_e2e/`` (своя папка, свой ``stub_tag``). OpenAI шлёт
 системный промпт первым элементом ``messages`` (role=system) + промпт + ``[SYSTEM]``-суффикс ДВУМЯ
 отдельными user-сообщениями; мост сливает ВСЁ присланное в один хвост (см. ``bridges/isomorph/history.py``),

@@ -6,7 +6,7 @@ WireMock — :func:`upsert_wiremock_mapping_directory` (``PUT /__admin/mappings/
 ``POST``), без удаления маппингов в конце прогона. **Не** удалять маппинги чужих сценариев между
 тестами — изоляция на общем инстансе через **WireMock State Extension** (``state-matcher`` + сид
 контекста; полный сброс контекстов в ``pytest_sessionfinish``, не в function-teardown), см.
-``docs/E2E_ISOLATION.md`` и ``compose/wiremock/README.md``.
+``docs/E2E.md`` и ``compose/wiremock/README.md``.
 На **общем** инстансе не вызывать :func:`reset_request_journal` из
 кода сценариев — он чистит весь журнал; разрешён **один** автоматический вызов до прогона e2e в
 ``conftest.py``. **Unmatched** (``GET /__admin/requests/unmatched``) после старта тестов **не**
@@ -434,7 +434,7 @@ def wiremock_state_reasoning_gate_release(
     """Выставить в контексте State Extension свойство ``reasoning_release`` (снять 307-gate у reasoning).
 
     ``correlation_key`` должен быть составным (см. :func:`composite_context_key`).
-    См. ``docs/E2E_ISOLATION.md`` §8.6.
+    См. ``docs/E2E.md`` §8.6.
     """
     with _wiremock_admin_api_exclusive(timeout=timeout):
         url = wiremock_e2e_state_reasoning_release_post_url(public_base)
@@ -1595,7 +1595,7 @@ def prepare_wiremock_scenario(
     correlation_key: str,
     timeout: float = TIMEOUT_POLL_SHORT,
 ) -> None:
-    """Подготовка сценария на общем WireMock (``docs/TESTING.md`` §4.4.x).
+    """Подготовка сценария на общем WireMock (``docs/E2E.md`` §4.4.x).
 
     Порядок: :func:`upsert_wiremock_mapping_directory` →
     :func:`remove_wiremock_journal_by_stub_tag` (только matched по тегу; unmatched не трогает) →
@@ -1609,7 +1609,7 @@ def prepare_wiremock_scenario(
     ``skip_admin_lock`` у :func:`upsert_mapping` без лишней вложенности depth-локера.
 
     Контекст route **не** удаляем перед сидом: уникальные ``correlation_key`` и глобальный
-    :func:`wiremock_state_reset_all_contexts` в ``pytest_sessionfinish`` (см. ``docs/E2E_ISOLATION.md``).
+    :func:`wiremock_state_reset_all_contexts` в ``pytest_sessionfinish`` (см. ``docs/E2E.md``).
     """
     ctx_key = composite_context_key(stub_tag, correlation_key)
     
@@ -2568,9 +2568,9 @@ def wiremock_unmatched_requests_count(
 _WIREMOCK_UNMATCHED_DEBUG_HINT = (
     "После теста unmatched не чистятся — только assert; "
     "предсессионный cold reset: ``conftest._e2e_wiremock_journal_reset_once`` "
-    "(§8.3 ``docs/E2E_ISOLATION.md``).\n"
+    "(§8.3 ``docs/E2E.md``).\n"
     "\n"
-    "Отладка e2e / WireMock / SUT (``docs/E2E_ISOLATION.md``, ``docs/TESTING.md``):\n"
+    "Отладка e2e / WireMock / SUT (``docs/E2E.md``, ``docs/E2E.md``):\n"
     "  • Источники: journald SUT (связка писем), Maildir, WireMock (журнал/unmatched ниже), лог pytest (-s).\n"
     "  • Изоляция: ``state-matcher`` + composite ``hasContext`` "
     "``{stub_tag}::{{x-threlium-thread-root}}``; дискриминаторы ``X-Threlium-Call-Site``, "

@@ -1,6 +1,6 @@
 """Snowflake-MID для isomorph: уникальный MID независимо от тела + водяной знак тред-непрерывности.
 
-Зачем (см. docs/E2E_PARALLEL_ISOLATION_REPORT §5-bis): контент-адресуемый glue-MID = ``hash(reply)`` даёт
+Зачем (см. docs/E2E.md §5 (collision-at-root)): контент-адресуемый glue-MID = ``hash(reply)`` даёт
 КОЛЛИЗИЮ при идентичных ответах (два теста/хода → один MID → notmuch сливает треды). Snowflake — уникальный
 63-битный k-сортируемый id (``time|instance|seq``) → MID уникален независимо от тела, коллизий нет в корне.
 

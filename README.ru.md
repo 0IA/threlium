@@ -147,7 +147,7 @@ journalctl --user -u threlium-engine.service -f
 
 ## Тестирование
 
-Единственный автоматизированный слой — e2e ([docs/TESTING.md](docs/TESTING.md)):
+Единственный автоматизированный слой — e2e ([docs/E2E.md](docs/E2E.md)):
 
 ```bash
 .venv/bin/pip install -e ".[e2e]"
@@ -187,6 +187,6 @@ docs/                          # контракты архитектуры
 | [docs/FSM.md](docs/FSM.md) | Граф стадий и контракт handler |
 | [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | systemd, dispatch, параллелизм |
 | [docs/PLAYBOOK.md](docs/PLAYBOOK.md) | Ansible-деплой |
-| [docs/TESTING.md](docs/TESTING.md) | E2e harness |
+| [docs/E2E.md](docs/E2E.md) | E2e harness |
 | [docs/TYPES.md](docs/TYPES.md) | msgspec / wire-типы |
 | [docs/ARTICLE.md](docs/ARTICLE.md) | Развёрнутая статья с диаграммами |

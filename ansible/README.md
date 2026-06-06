@@ -62,7 +62,7 @@ ansible-playbook playbooks/site-interactive.yml
 
 Ограничение: `vars_prompt` всегда показывает все промпты — условного пропуска веток нет. Это осознанный trade-off ради простоты wrapper'а.
 
-Дефолтный [`ansible.cfg`](ansible.cfg) для **прода** — **без** `skip_tags` в `[defaults]`; в `[ssh_connection]` включены **pipelining** и **SSH ControlMaster** (меньше задержек при работе по SSH). Очистка harness в `tasks/refresh.yml` помечена **`never` + `refresh`**: при обычном `ansible-playbook site.yml` без `--tags` она **не** выполняется (см. [docs/PLAYBOOK.md §12A](../docs/PLAYBOOK.md#12a-теги-плейбука)). WireMock — **compose-сервис `wiremock`** в `tests/e2e/compose/docker-compose.yml`, с плейбуком не связан (см. [../docs/TESTING.md §4.4](../docs/TESTING.md#44-wiremock-openai-http-mock-e2e)).
+Дефолтный [`ansible.cfg`](ansible.cfg) для **прода** — **без** `skip_tags` в `[defaults]`; в `[ssh_connection]` включены **pipelining** и **SSH ControlMaster** (меньше задержек при работе по SSH). Очистка harness в `tasks/refresh.yml` помечена **`never` + `refresh`**: при обычном `ansible-playbook site.yml` без `--tags` она **не** выполняется (см. [docs/PLAYBOOK.md §12A](../docs/PLAYBOOK.md#12a-теги-плейбука)). WireMock — **compose-сервис `wiremock`** в `tests/e2e/compose/docker-compose.yml`, с плейбуком не связан (см. [../docs/E2E.md §4.4](../docs/E2E.md#44-wiremock-openai-http-mock-e2e)).
 
 **E2e (docker-SUT, pytest mailflow, bake-образ):** перед `ansible-playbook` задайте конфиг e2e, например из каталога `ansible/`:
 
@@ -100,7 +100,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/ruff check ansible/roles/threlium/files/scripts
 ```
 
-**Тесты:** **единственный** автоматизированный pytest-слой — **e2e** в `tests/e2e` (Docker + extras `[e2e]`; изоляция WireMock — [docs/E2E_ISOLATION.md](../docs/E2E_ISOLATION.md)). В корне [`pyproject.toml`](../pyproject.toml) задано `testpaths = ["tests/e2e"]`. Из корня репозитория:
+**Тесты:** **единственный** автоматизированный pytest-слой — **e2e** в `tests/e2e` (Docker + extras `[e2e]`; изоляция WireMock — [docs/E2E.md](../docs/E2E.md)). В корне [`pyproject.toml`](../pyproject.toml) задано `testpaths = ["tests/e2e"]`. Из корня репозитория:
 
 ```bash
 .venv/bin/pip install -e ".[e2e]"

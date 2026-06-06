@@ -4,7 +4,7 @@
 bake и Ansible в этом модуле. Проверяется, что ``threlium-bridge@isomorph.service`` поднят в baked-образе
 и отдаёт корректный wire на границе HTTP (health / models / auth / push-secret).
 
-**Изоляция e2e** ([E2E_ISOLATION.md](../../docs/E2E_ISOLATION.md), [TESTING.md](../../docs/TESTING.md)):
+**Изоляция e2e** ([E2E.md](../../docs/E2E.md), [E2E.md](../../docs/E2E.md)):
 эти кейсы **намеренно** дёргают только HTTP-границу моста и **не запускают FSM** (GET, либо POST,
 отбиваемый на auth/secret до ``deliver``). Значит **ни одного запроса к WireMock** не порождается →
 не нужны State-Extension setup/seed/teardown, и guard «zero unmatched» в ``pytest_runtest_call`` /
@@ -12,7 +12,7 @@ bake и Ansible в этом модуле. Проверяется, что ``threl
 ``service_exec`` curl на ``127.0.0.1:<listen_port>`` (мост bind'ится на loopback, к WireMock не ходит).
 
 **Полный round-trip** (Cline → bridge → FSM → WireMock LiteLLM → SSE-ответ + archive ``egress_isomorph``)
-порождает WireMock-трафик и потому ОБЯЗАН следовать модели §2/§7 [E2E_ISOLATION.md](../../docs/E2E_ISOLATION.md):
+порождает WireMock-трафик и потому ОБЯЗАН следовать модели §2/§7 [E2E.md](../../docs/E2E.md):
 коррелятор ``X-Threlium-Thread-Root`` = **контент-адресуемый** ingress-MID, который тест предвычисляет из
 тела запроса (`bridges.isomorph.history.extract_tail` + `IsomorphContentHashWire`), сидирует контекст
 (`composite_context_key(stub_tag, thread_root)`) и регистрирует ту же L0-цепочку стабов, что mailflow.

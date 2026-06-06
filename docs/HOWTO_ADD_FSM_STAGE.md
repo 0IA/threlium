@@ -120,6 +120,6 @@
 | fdm | для типовой стадии — только переразкатка `fdm.conf.j2`; иначе — отдельный `action`/`match` |
 | Граф | при необходимости `reasoning` / роутеры / `SUBAGENT_TABLE.md` |
 | Доки | `FSM.md` §2.1 + при необходимости `MESSAGES` / `PLAYBOOK` |
-| Тесты | новые сценарии — каталог `tests/e2e/wiremock_stubs/<…>/` + модуль в `tests/e2e/` ([TESTING.md](TESTING.md), [E2E_ISOLATION.md](E2E_ISOLATION.md)) |
+| Тесты | новые сценарии — каталог `tests/e2e/wiremock_stubs/<…>/` + модуль в `tests/e2e/` ([E2E.md](E2E.md), [E2E.md](E2E.md)) |
 
 После изменений локально: регрессия контура — **`pytest tests/e2e/…`**; инвариант **`set(STAGE_MAIN_MODULES) == set(FsmStage)`** ловит рассинхрон enum и реестра без отдельного теста.

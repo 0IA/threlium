@@ -21,7 +21,7 @@
 #   pytest -vv -s                                # все e2e-тесты на свежезапечённом образе
 #
 # Обычному пользователю этот скрипт руками запускать не нужно: `pytest -n0 tests/e2e/wipe_bake.py`
-# (или `THRELIUM_E2E_REBUILD_BAKED_IMAGE=1` в сессии с тестами) вызывает bake под тем же локом, что compose (см. docs/TESTING.md §3, §5).
+# (или `THRELIUM_E2E_REBUILD_BAKED_IMAGE=1` в сессии с тестами) вызывает bake под тем же локом, что compose (см. docs/E2E.md §3, §5).
 #
 set -euo pipefail
 

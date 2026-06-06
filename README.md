@@ -147,7 +147,7 @@ journalctl --user -u threlium-engine.service -f
 
 ## Testing
 
-E2e is the only automated test layer ([docs/TESTING.md](docs/TESTING.md)):
+E2e is the only automated test layer ([docs/E2E.md](docs/E2E.md)):
 
 ```bash
 .venv/bin/pip install -e ".[e2e]"
@@ -187,6 +187,6 @@ docs/                          # architecture contracts (mostly Russian)
 | [docs/FSM.md](docs/FSM.md) | Stage graph and handler contract |
 | [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md) | systemd, dispatch, concurrency |
 | [docs/PLAYBOOK.md](docs/PLAYBOOK.md) | Ansible deployment |
-| [docs/TESTING.md](docs/TESTING.md) | E2e harness |
+| [docs/E2E.md](docs/E2E.md) | E2e harness |
 | [docs/TYPES.md](docs/TYPES.md) | msgspec / wire types |
 | [docs/ARTICLE.md](docs/ARTICLE.md) | Long-form architecture article (RU) |

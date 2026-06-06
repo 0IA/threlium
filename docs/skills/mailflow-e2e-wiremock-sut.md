@@ -1,6 +1,6 @@
 # Mailflow e2e / WireMock / SUT — отладка и правки
 
-Skill для агента: как расследовать падения mailflow и соседних e2e на общем compose (`sut`, `greenmail`, `wiremock`), чинить **тесты и стабы**, не ломая политику проекта. Нормативная база по harness и изоляции — [`docs/TESTING.md`](../TESTING.md), [`docs/E2E_ISOLATION.md`](../E2E_ISOLATION.md). Ручная отладка **без полного pytest** — [`e2e-compose-debug-without-full-run.md`](e2e-compose-debug-without-full-run.md).
+Skill для агента: как расследовать падения mailflow и соседних e2e на общем compose (`sut`, `greenmail`, `wiremock`), чинить **тесты и стабы**, не ломая политику проекта. Нормативная база по harness и изоляции — [`docs/E2E.md`](../E2E.md), [`docs/E2E.md`](../E2E.md). Ручная отладка **без полного pytest** — [`e2e-compose-debug-without-full-run.md`](e2e-compose-debug-without-full-run.md).
 
 ---
 
@@ -73,7 +73,7 @@ pytest -n0 -s -vv --tb=short 'tests/e2e/test_foo_e2e.py::test_bar' \
 
 ## 3. Модель изоляции (стабы и корреляторы)
 
-Следовать [`docs/E2E_ISOLATION.md`](../E2E_ISOLATION.md) и §4.4 [`docs/TESTING.md`](../TESTING.md).
+Следовать [`docs/E2E.md`](../E2E.md) и §4.4 [`docs/E2E.md`](../E2E.md).
 
 ### 3.1. Между тестами
 
@@ -89,7 +89,7 @@ pytest -n0 -s -vv --tb=short 'tests/e2e/test_foo_e2e.py::test_bar' \
 ### 3.3. Запрещённые якоря
 
 - **Не** использовать как **основной** способ изоляции: **имя WireMock scenario**, матч по **subject/body** письма, `doesNotContain` по телу чужих тестов, `priority` между стабами.
-- Subject/body допустимы только как **вторичные** маркеры в assert GreenMail (уровень 2 в TESTING.md), не как замена Route/state.
+- Subject/body допустимы только как **вторичные** маркеры в assert GreenMail (уровень 2 в E2E.md), не как замена Route/state.
 
 ### 3.4. Маппинги
 
@@ -98,7 +98,7 @@ pytest -n0 -s -vv --tb=short 'tests/e2e/test_foo_e2e.py::test_bar' \
 
 ### 3.5. Enrich / overflow (один hop `enrich@`)
 
-Call sites на enrich-hop: `enrich_task_plan` (до RAG, стаб `081_*`), LightRAG tool phases (`extract_query_keywords` обязателен — assert в `wiremock_client.py`), `enrich_task_hypotheses` (после RAG, стаб `083_*`), при переполнении — `summarize_thread_context`. Стабы `080_chat_enrich_plan.json` / `enrich_query_plan` **удалены**. Overflow e2e: низкий `model_context_tokens` в `ansible/group_vars/e2e.yml`; регрессии — `test_summarize_context_e2e`, `test_unified_context_roles_e2e`, `test_reasoning_litellm_context_trim_e2e`. Контракт — [`CONTEXT_CONTRACT.md`](../CONTEXT_CONTRACT.md) §4, [`FSM.md`](../FSM.md) §5.2, [`E2E_ISOLATION.md`](../E2E_ISOLATION.md) §6.
+Call sites на enrich-hop: `enrich_task_plan` (до RAG, стаб `081_*`), LightRAG tool phases (`extract_query_keywords` обязателен — assert в `wiremock_client.py`), `enrich_task_hypotheses` (после RAG, стаб `083_*`), при переполнении — `summarize_thread_context`. Стабы `080_chat_enrich_plan.json` / `enrich_query_plan` **удалены**. Overflow e2e: низкий `model_context_tokens` в `ansible/group_vars/e2e.yml`; регрессии — `test_summarize_context_e2e`, `test_unified_context_roles_e2e`, `test_reasoning_litellm_context_trim_e2e`. Контракт — [`CONTEXT_CONTRACT.md`](../CONTEXT_CONTRACT.md) §4, [`FSM.md`](../FSM.md) §5.2, [`E2E.md`](../E2E.md) §6.
 
 ---
 
@@ -135,7 +135,7 @@ User units: `XDG_RUNTIME_DIR=/run/user/$(id -u threlium) systemctl --user list-u
 ### 4.4. GreenMail
 
 - `docker logs <greenmail>` при SMTP/IMAP сбоях;
-- IMAP poll в тесте — по якорям `Message-ID` / `In-Reply-To` ([`docs/TESTING.md`](../TESTING.md) §2, уровни 1–2).
+- IMAP poll в тесте — по якорям `Message-ID` / `In-Reply-To` ([`docs/E2E.md`](../E2E.md) §2, уровни 1–2).
 
 ### 4.5. Таблица сопоставления (шаг 1 workflow)
 
@@ -155,7 +155,7 @@ User units: `XDG_RUNTIME_DIR=/run/user/$(id -u threlium) systemctl --user list-u
 2. Обновить SUT без bake: `docker cp` из репозитория в `/home/threlium/threlium/agent/scripts/...` (или обратно — вытащить патч для коммита в `tests/`).
 3. Очистить WireMock state: рестарт сервиса `wiremock` в compose → bootstrap.
 4. Прогнать **один** тест (§2.2) или очередь через `./test-runs/run_individual_e2e.sh`.
-5. Не злоупотреблять полным wipe Maildir / global reset state store между тестами при `-n>1` (см. TESTING.md).
+5. Не злоупотреблять полным wipe Maildir / global reset state store между тестами при `-n>1` (см. E2E.md).
 
 Синхронизация кода SUT с репозиторием — точечно (`docker cp`, `FSTS_SYNC.md`), не цепочкой wipe bake → wipe sync для каждой правки стаба.
 
