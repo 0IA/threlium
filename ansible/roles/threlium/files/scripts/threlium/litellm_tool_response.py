@@ -1,7 +1,7 @@
 """Валидация LiteLLM chat completion с ``tool_choice=required``."""
 from __future__ import annotations
 
-from litellm.types.utils import ChatCompletionMessageToolCall, Message, ModelResponse
+from threlium.llm_wire import LlmToolCall as ChatCompletionMessageToolCall, LlmAssistantMessage as Message, LlmChatResponse as ModelResponse
 
 
 class LiteLlmToolResponseError(RuntimeError):

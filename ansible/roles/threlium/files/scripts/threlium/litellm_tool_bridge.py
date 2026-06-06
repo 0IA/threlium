@@ -11,7 +11,7 @@ from typing import TypeVar
 
 import jsonschema
 import msgspec
-from litellm.types.utils import Message
+from threlium.llm_wire import LlmAssistantMessage as Message
 
 from threlium.litellm_tool_response import require_single_tool_call
 from threlium.litellm_tool_spec import (

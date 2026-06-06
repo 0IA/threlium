@@ -5,7 +5,7 @@ import json
 from typing import cast
 
 import jsonschema
-from litellm.types.utils import ChatCompletionMessageToolCall, Message
+from threlium.llm_wire import LlmToolCall as ChatCompletionMessageToolCall, LlmAssistantMessage as Message
 
 from threlium.prompts import render_prompt
 from threlium.types import PromptPath

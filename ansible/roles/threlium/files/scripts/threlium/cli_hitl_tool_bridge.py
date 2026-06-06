@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from litellm.types.utils import Message
+from threlium.llm_wire import LlmAssistantMessage as Message
 
 from threlium.litellm_tool_bridge import parse_single_tool, parse_tool_args_from_wire
 from threlium.litellm_tool_spec import load_tool_spec, tool_spec_parameters

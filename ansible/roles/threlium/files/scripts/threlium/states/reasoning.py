@@ -14,7 +14,7 @@ from threlium.litellm_required_tool import build_site_call, correlation_with_cal
 from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.litellm_tool_completion import completion_required_tool_sync
 from threlium.litellm_tool_response import require_tool_calls_response
-from litellm.types.utils import Message
+from threlium.llm_wire import LlmAssistantMessage as Message
 
 from threlium.fsm_emit import build_fsm_step_to_stage, hop_budget_remaining
 from threlium.logutil import clip_log_text, logger

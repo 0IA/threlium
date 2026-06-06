@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import msgspec
-from litellm.types.utils import Message
+from threlium.llm_wire import LlmAssistantMessage as Message
 
 from threlium.litellm_tool_bridge import parse_single_tool
 from threlium.types.lightrag_tool_args import (

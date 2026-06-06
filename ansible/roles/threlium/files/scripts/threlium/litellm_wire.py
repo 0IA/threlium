@@ -1,44 +1,23 @@
-"""Узкая граница типов ответов LiteLLM для прод-вызовов без streaming.
+"""Узкая граница типов ответов LLM (наш OpenAI-совместимый клиент, без litellm).
 
-См. ``litellm.main``:
-
-* ``completion`` / ``acompletion`` аннотированы как
-  ``Union[ModelResponse, CustomStreamWrapper]``. Здесь ожидается только
-  ``ModelResponse`` (вызовы с ``stream=False`` — как в
-  ``threlium.states.reasoning`` и runner ``lightrag``).
-
-* ``aembedding`` → ``EmbeddingResponse``; элементы ``resp.data`` после
-  :func:`require_embedding_response` — всегда :class:`litellm.types.utils.Embedding`
-  (LiteLLM кладёт в ``data`` сырые ``dict`` после ``model_dump`` / конвертера).
-
-Форма ``ModelResponse`` / ``Embedding`` совпадает с e2e CustomLLM
-``tests/e2e/reference_l0/threlium_e2e_l0.py`` (объекты
-``litellm.types.utils``).
+Клиент (:mod:`threlium.openai_compatible_client`) уже декодирует ответ в типизированные
+msgspec-VO (:mod:`threlium.llm_wire`), поэтому здесь — только сужение типа (assert) для
+вызовов ``stream=False`` (chat) и embeddings; форма совпадает с e2e CustomLLM-стабами.
 """
 from __future__ import annotations
 
-from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
-from litellm.types.utils import Embedding, EmbeddingResponse, ModelResponse
-from pydantic import TypeAdapter
-
-_embedding_rows_ta = TypeAdapter(list[Embedding])
+from threlium.llm_wire import LlmChatResponse, LlmEmbeddingResponse
 
 
-def require_chat_model_response(resp: object) -> ModelResponse:
-    """Сузить ответ chat completion до ``ModelResponse`` (не stream)."""
-    if isinstance(resp, CustomStreamWrapper):
-        raise TypeError(
-            "expected ModelResponse with stream=False; got CustomStreamWrapper"
-        )
-    if isinstance(resp, ModelResponse):
+def require_chat_model_response(resp: object) -> LlmChatResponse:
+    """Сузить ответ chat completion до :class:`LlmChatResponse`."""
+    if isinstance(resp, LlmChatResponse):
         return resp
-    raise TypeError(f"expected ModelResponse; got {type(resp).__name__!r}")
+    raise TypeError(f"expected LlmChatResponse; got {type(resp).__name__!r}")
 
 
-def require_embedding_response(resp: object) -> EmbeddingResponse:
-    """Сузить ответ embedding до ``EmbeddingResponse`` с типизированным ``data``."""
-    if isinstance(resp, EmbeddingResponse):
-        raw = list(resp.data or [])
-        resp.data = _embedding_rows_ta.validate_python(raw)
+def require_embedding_response(resp: object) -> LlmEmbeddingResponse:
+    """Сузить ответ embedding до :class:`LlmEmbeddingResponse`."""
+    if isinstance(resp, LlmEmbeddingResponse):
         return resp
-    raise TypeError(f"expected EmbeddingResponse; got {type(resp).__name__!r}")
+    raise TypeError(f"expected LlmEmbeddingResponse; got {type(resp).__name__!r}")

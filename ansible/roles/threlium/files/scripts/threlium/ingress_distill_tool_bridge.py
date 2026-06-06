@@ -6,7 +6,7 @@ Caller предзагружает tool spec с jinja-vars (``distill_max_chars``
 """
 from __future__ import annotations
 
-from litellm.types.utils import Message
+from threlium.llm_wire import LlmAssistantMessage as Message
 
 from threlium.litellm_tool_bridge import parse_tool_args_from_wire
 from threlium.litellm_tool_response import require_single_tool_call

@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Literal
 
-from litellm import acompletion, aembedding, arerank as litellm_arerank_sdk, completion as litellm_completion
+from threlium import openai_compatible_client
 
 from threlium.settings import ThreliumSettings, resolve_llm_endpoint
 from threlium.logutil import logger
@@ -343,7 +343,7 @@ async def litellm_acompletion(
         stream=stream,
         correlation_override=correlation_override,
     )
-    return await acompletion(**merged, stream=stream)
+    return await openai_compatible_client.chat_completions_async(merged)
 
 
 async def litellm_aembedding(
@@ -360,7 +360,7 @@ async def litellm_aembedding(
         stream=None,
         correlation_override=correlation_override,
     )
-    return await aembedding(**merged)
+    return await openai_compatible_client.embeddings_async(merged)
 
 
 async def litellm_arerank(
@@ -377,10 +377,7 @@ async def litellm_arerank(
         stream=None,
         correlation_override=correlation_override,
     )
-    extra = merged.pop("extra_headers", None)
-    if extra:
-        merged["headers"] = {**merged.get("headers", {}), **extra}
-    return await litellm_arerank_sdk(**merged)
+    return await openai_compatible_client.rerank_async(merged)
 
 
 def litellm_completion_sync(
@@ -398,6 +395,6 @@ def litellm_completion_sync(
         stream=stream,
         correlation_override=correlation_override,
     )
-    return litellm_completion(**merged, stream=stream)
+    return openai_compatible_client.chat_completions_sync(merged)
 
 

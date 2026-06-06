@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar, cast
 
-from litellm.types.utils import Message
+from threlium.llm_wire import LlmAssistantMessage as Message
 
 from threlium.litellm_tool_completion import (
     acompletion_required_tool,

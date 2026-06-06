@@ -11,7 +11,7 @@ from email.message import EmailMessage
 from typing import Self
 
 import msgspec
-from litellm.types.utils import ChatCompletionMessageToolCall, Message, ModelResponse
+from threlium.llm_wire import LlmToolCall as ChatCompletionMessageToolCall, LlmAssistantMessage as Message, LlmChatResponse as ModelResponse
 
 from threlium.mime_reform import (
     EnrichPartId,

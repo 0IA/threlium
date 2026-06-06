@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from litellm.types.utils import ModelResponse
+from threlium.llm_wire import LlmChatResponse as ModelResponse
 
 from threlium.litellm_client import litellm_acompletion, litellm_completion_sync
 from threlium.litellm_tool_response import require_tool_calls_response

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Self
 
-from litellm.types.utils import ChatCompletionMessageToolCall
+from threlium.llm_wire import LlmToolCall as ChatCompletionMessageToolCall
 
 from threlium.types._core import _OptionalStripEmpty
 

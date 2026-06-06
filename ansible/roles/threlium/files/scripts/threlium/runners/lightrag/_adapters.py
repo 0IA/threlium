@@ -6,7 +6,7 @@ from typing import Any
 
 import jsonschema
 import numpy as np
-from litellm.types.utils import Embedding
+from threlium.llm_wire import LlmEmbedding as Embedding
 
 from threlium.litellm_client import litellm_aembedding, litellm_arerank
 from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
@@ -140,6 +140,12 @@ def build_llm_func(
             has_system_prompt=bool(system_prompt),
         )
         phase = lightrag_tool_phase_for_call_site(call_site.value)
+        log.info(
+            "lightrag_llm_call",
+            call_site=call_site.value,
+            has_history=bool(history_messages),
+            prompt=prompt[:80],
+        )
         tool_spec = load_tool_spec(phase.tool_spec_path)
         call = build_site_call(
             settings,
@@ -202,6 +208,12 @@ def build_embedding_func(
     async def embed_func(texts: list[str], **_kwargs: Any):
         # thread-root + базовый call-site (index/query) — из ctxvar напрямую (как llm/rerank; без моста).
         correlation = get_litellm_correlation_from_ctxvar()
+        log.info(
+            "lightrag_embed_call",
+            n_texts=len(texts),
+            call_site=(correlation or {}).get("X-Threlium-Call-Site"),
+            first_text=(texts[0][:80] if texts else ""),
+        )
         mr = embed_ep.max_retries if embed_ep.max_retries is not None else mr_def
         call = LiteLlmAembeddingKwargs(
             model=embed_ep.model,
@@ -242,6 +254,12 @@ def build_rerank_func(
             get_litellm_correlation_from_ctxvar(),
             LitellmCallSite.LIGHTRAG_QUERY_RERANK.value,
         )
+        log.info(
+            "lightrag_rerank_call",
+            n_docs=len(documents),
+            call_site=correlation.get("X-Threlium-Call-Site"),
+            query=query[:80],
+        )
         mr = rerank_ep.max_retries if rerank_ep.max_retries is not None else mr_def
         effective_top_n = top_n if top_n is not None else rerank_ep.top_n
         call = LiteLlmArerankKwargs(
@@ -262,7 +280,7 @@ def build_rerank_func(
             correlation_override=correlation,
         )
         return [
-            {"index": r["index"], "relevance_score": r["relevance_score"]}
+            {"index": r.index, "relevance_score": r.relevance_score}
             for r in (resp.results or [])
         ]
 
