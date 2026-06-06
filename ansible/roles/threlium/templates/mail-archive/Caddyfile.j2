@@ -16,7 +16,7 @@
         respond 404
     }
     handle_path {{ threlium_mail_archive_isomorph_path }}/* {
-        reverse_proxy 127.0.0.1:{{ threlium_bridges.isomorph.listen_port }} {
+        reverse_proxy 127.0.0.1:{{ threlium_bridges_effective.isomorph.listen_port }} {
             flush_interval -1
         }
     }
