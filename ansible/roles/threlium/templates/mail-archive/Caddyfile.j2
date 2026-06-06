@@ -8,6 +8,18 @@
     handle /webmail {
         redir /webmail/ permanent
     }
+    # isomorph-bridge: внутренний egress-callback наружу НЕ публикуем.
+    # client.host за Caddy всегда 127.0.0.1 → localhost-проверка в push.handle_push
+    # обессмысливается, поэтому /internal/* режем на крае. Более длинный путь
+    # выигрывает у {{ threlium_mail_archive_isomorph_path }}/* по специфичности (handle-блоки взаимоисключающие).
+    handle {{ threlium_mail_archive_isomorph_path }}/internal/* {
+        respond 404
+    }
+    handle_path {{ threlium_mail_archive_isomorph_path }}/* {
+        reverse_proxy 127.0.0.1:{{ threlium_bridges.isomorph.listen_port }} {
+            flush_interval -1
+        }
+    }
     route * {
         reverse_proxy 127.0.0.1:9090 {
             transport http {

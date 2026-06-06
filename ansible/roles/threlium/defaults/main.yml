@@ -106,6 +106,8 @@ threlium_msmtp:
 # Веб-архив почты: Caddy + Cockpit + Roundcube + Dovecot.
 threlium_mail_archive_web_enabled: true
 threlium_mail_archive_caddy_bind_port: 8080
+# Путь, под которым isomorph-bridge публикуется за Caddy (cockpit занимает корень /).
+threlium_mail_archive_isomorph_path: "/isomorph"
 threlium_mail_archive_web_root: "{{ threlium_home }}/www/cockpit-mail-plugin"
 threlium_mail_archive_cockpit_origins_extra: []
 

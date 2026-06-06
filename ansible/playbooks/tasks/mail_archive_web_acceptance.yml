@@ -44,6 +44,18 @@
   retries: 15
   delay: 2
 
+- name: "Acceptance — mail-archive web: Caddy isomorph health on loopback reachable"
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ threlium_mail_archive_caddy_bind_port }}{{ threlium_mail_archive_isomorph_path }}/health"
+    status_code: [200]
+    validate_certs: false
+    follow_redirects: none
+  register: threlium_acceptance_caddy_isomorph
+  until: threlium_acceptance_caddy_isomorph is succeeded
+  retries: 15
+  delay: 2
+  when: threlium_isomorph_bridge_creds_ok | default(false) | bool
+
 - name: "Acceptance — mail-archive web: Roundcube elastic CSS (not PHP login HTML)"
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ threlium_mail_archive_caddy_bind_port }}/webmail/skins/elastic/styles/styles.min.css"
