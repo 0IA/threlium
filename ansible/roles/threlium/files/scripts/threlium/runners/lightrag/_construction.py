@@ -1,7 +1,6 @@
 """RAG instance construction and e2e correlation bridge installation."""
 from __future__ import annotations
 
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -198,9 +197,15 @@ def _install_query_correlation_bridge(rag: Any) -> None:
         rag.rerank_model_func = _wrap_pooled_with_correlation(rag.rerank_model_func)
     if getattr(rag, "llm_model_func", None) is not None:
         rag.llm_model_func = _wrap_pooled_with_correlation(rag.llm_model_func)
-    roles = getattr(rag, "role_llm_configs", None)
-    if isinstance(roles, dict):
-        for key, cfg in list(roles.items()):
-            cf = getattr(cfg, "func", None)
-            if cf is not None:
-                roles[key] = replace(cfg, func=_wrap_pooled_with_correlation(cf))
+    # Роль-LLM (extract/keyword/query) — мост ВНУТРЬ ``_role_llm_states[role].wrapped``: query-путь
+    # читает именно отсюда (lightrag.py: _build_global_config → role_llm_funcs[role] = state.wrapped,
+    # пересобирается на КАЖДЫЙ запрос). ``role_llm_configs`` — input-only (читается лишь в __post_init__),
+    # его подмена постфактум НЕ влияет на вызов (был баг: keyword/query несли протухший thread-root первого
+    # треда из замороженного воркер-пула → второй тест ловил 0 query-вызовов под своим stub_tag). Оборачиваем
+    # уже-пулезированную ``wrapped`` снаружи: ctxvar читается на submission-границе и едет в воркер kwarg-ом.
+    states = getattr(rag, "_role_llm_states", None)
+    if isinstance(states, dict):
+        for _name, state in states.items():
+            wrapped = getattr(state, "wrapped", None)
+            if wrapped is not None:
+                state.wrapped = _wrap_pooled_with_correlation(wrapped)
