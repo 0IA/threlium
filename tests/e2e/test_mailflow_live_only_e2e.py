@@ -605,25 +605,14 @@ def test_live_subagent_table_shallow_chain_on_running_stack(e2e_runtime: E2EComp
             timeout=TIMEOUT_POLL_LIVE_MAIL,
             desc="live SUBAGENT_TABLE: agent reply after nested frame",
         )
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_id=FsmStage.SUBAGENT_INTENT.value,
-        )
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.SUBAGENT_INTENT.value,
-                FsmStage.SUBAGENT_END.value,
-                FsmStage.REASONING.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_ROUTER.value,
-                FsmStage.EGRESS_EMAIL.value,
-                FsmStage.ARCHIVE.value,
-            ),
-        )
+        # subagent-поток по STATE (без docker-exec notmuch): POP-результат дочернего L1-фрейма
+        # ('e2e L1 subagent frame result (POP to L0)') вернулся в L0 reasoning-промпт после subagent_end —
+        # content-flag saw_subagent_result на post-subagent reasoning-стабе, строго СИЛЬНЕЕ «SUBAGENT_END-папка
+        # существует» (доказывает, что результат субагента вернулся в родительский контур). Прямое чтение
+        # после ответа GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_subagent_result") == "1"
+        ), "L1 subagent POP result must reach L0 reasoning prompt (state saw_subagent_result)"
     finally:
         # Контекст WM не удалять здесь — см. two_turn finally.
         assert_wiremock_zero_unmatched_requests(wm_base)
@@ -663,7 +652,6 @@ def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2ECompose
         _smtp_send(smtp_h, smtp_p, m)
 
         uinner = user_mid.strip().strip("<>")
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
 
         def _agent_reply() -> bool | None:
             rows = _pytest_inbox_rows(
@@ -684,25 +672,15 @@ def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2ECompose
             timeout=TIMEOUT_POLL_LIVE_MAIL,
             desc="live SUBAGENT_TABLE: agent reply after budget exhausted nested frame",
         )
-        matches = find_wiremock_requests_by_body_contains(
-            wm_base,
-            E2E_SUBAGENT_BUDGET_EXHAUSTED_NOTICE,
-            stub_tag=LIVE_SUBAGENT_BUDGET_EXHAUSTED_STUB_TAG,
-        )
-        chat = [
-            e for e in matches
-            if "/chat/completions" in (e.get("request", {}).get("url") or "")
-        ]
-        assert chat, "budget exhausted notice must reach L1 reasoning prompt via enrich_fast relay"
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.SUBAGENT_INTENT.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_EMAIL.value,
-            ),
-        )
+        # budget-exhausted-поток по STATE (без journal-скана и docker-exec notmuch): notice enrich_fast
+        # ('hop-budget for this thread is exhausted') долетел до L1 reasoning-промпта после блока бюджета —
+        # content-flag saw_budget_exhausted_notice на L1-стабе (104), та же семантика, что прежний
+        # journal find_wiremock_requests_by_body_contains, но дёшево из state. Прямое чтение после ответа
+        # GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_budget_exhausted_notice")
+            == "1"
+        ), "budget exhausted notice must reach L1 reasoning prompt (state saw_budget_exhausted_notice)"
     finally:
         e2e_refresh_hop_budget_default(rt.project_name, repo_root=REPO_ROOT)
         assert_wiremock_zero_unmatched_requests(wm_base)
