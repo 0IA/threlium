@@ -57,7 +57,7 @@ _async_clients: dict[int, tuple[asyncio.AbstractEventLoop, httpx.AsyncClient]] =
 def _get_sync_client() -> httpx.Client:
     global _sync_client
     if _sync_client is None or _sync_client.is_closed:
-        _sync_client = httpx.Client(verify=_SSL_CONTEXT)
+        _sync_client = httpx.Client(verify=_SSL_CONTEXT, follow_redirects=True)
     return _sync_client
 
 
@@ -70,7 +70,7 @@ def _get_async_client() -> httpx.AsyncClient:
     for k, (lp, _cl) in list(_async_clients.items()):
         if lp.is_closed():
             _async_clients.pop(k, None)
-    client = httpx.AsyncClient(verify=_SSL_CONTEXT)
+    client = httpx.AsyncClient(verify=_SSL_CONTEXT, follow_redirects=True)
     _async_clients[key] = (loop, client)
     return client
 
