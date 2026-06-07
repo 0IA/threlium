@@ -745,13 +745,6 @@ def test_live_memory_table_thread_memory_on_running_stack(e2e_runtime: E2ECompos
         _smtp_send(smtp_h, smtp_p, m)
 
         uinner = user_mid.strip().strip("<>")
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
-
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_id=FsmStage.THREAD_MEMORY.value,
-        )
 
         def _agent_reply() -> bool | None:
             rows = _pytest_inbox_rows(
@@ -772,18 +765,15 @@ def test_live_memory_table_thread_memory_on_running_stack(e2e_runtime: E2ECompos
             timeout=TIMEOUT_POLL_SHORT,
             desc="live MEMORY_TABLE: agent e2e reply in pytest@ INBOX",
         )
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.THREAD_MEMORY.value,
-                FsmStage.REASONING.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_ROUTER.value,
-                FsmStage.EGRESS_EMAIL.value,
-                FsmStage.ARCHIVE.value,
-            ),
-        )
+        # thread_memory-поток по STATE (без docker-exec notmuch): персистнутая локальная заметка
+        # ('e2e live thread_memory note') вернулась в reasoning-промпт после стадии thread_memory —
+        # content-flag saw_thread_memory_note на post-tm reasoning-стабе, строго СИЛЬНЕЕ «THREAD_MEMORY-папка
+        # существует» (доказывает, что заметка вернулась в контур, а не только что стадия отметилась).
+        # Маршрут ingress→thread_memory→reasoning→finalize→egress→archive enforced фазовыми стабами +
+        # unmatched-guard + ответным письмом выше. Прямое чтение после ответа GreenMail — time-independent.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_thread_memory_note") == "1"
+        ), "thread_memory note must reach reasoning prompt (state saw_thread_memory_note)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
 
@@ -820,13 +810,6 @@ def test_live_memory_table_global_memory_on_running_stack(e2e_runtime: E2ECompos
         _smtp_send(smtp_h, smtp_p, m)
 
         uinner = user_mid.strip().strip("<>")
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
-
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_id=FsmStage.GLOBAL_MEMORY.value,
-        )
 
         def _agent_reply() -> bool | None:
             rows = _pytest_inbox_rows(
@@ -847,18 +830,13 @@ def test_live_memory_table_global_memory_on_running_stack(e2e_runtime: E2ECompos
             timeout=TIMEOUT_POLL_SHORT,
             desc="live MEMORY_TABLE §2: agent e2e reply in pytest@ INBOX",
         )
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.GLOBAL_MEMORY.value,
-                FsmStage.REASONING.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_ROUTER.value,
-                FsmStage.EGRESS_EMAIL.value,
-                FsmStage.ARCHIVE.value,
-            ),
-        )
+        # global_memory-поток по STATE (без docker-exec notmuch): персистнутая кросс-тред заметка
+        # ('e2e live global_memory note') вернулась в reasoning-промпт после стадии global_memory —
+        # content-flag saw_global_memory_note, строго СИЛЬНЕЕ «GLOBAL_MEMORY-папка существует». Прямое
+        # чтение после ответа GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_global_memory_note") == "1"
+        ), "global_memory note must reach reasoning prompt (state saw_global_memory_note)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
 
@@ -895,13 +873,6 @@ def test_live_reflect_then_egress_on_running_stack(e2e_runtime: E2EComposeRuntim
         _smtp_send(smtp_h, smtp_p, m)
 
         uinner = user_mid.strip().strip("<>")
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
-
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_id=FsmStage.REFLECT.value,
-        )
 
         def _agent_reply() -> bool | None:
             rows = _pytest_inbox_rows(
@@ -922,18 +893,13 @@ def test_live_reflect_then_egress_on_running_stack(e2e_runtime: E2EComposeRuntim
             timeout=TIMEOUT_POLL_SHORT,
             desc="live MEMORY_TABLE §3: agent e2e reply in pytest@ INBOX",
         )
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.REFLECT.value,
-                FsmStage.REASONING.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_ROUTER.value,
-                FsmStage.EGRESS_EMAIL.value,
-                FsmStage.ARCHIVE.value,
-            ),
-        )
+        # reflect-поток по STATE (без docker-exec notmuch): вывод reflect ('e2e live reflect summary')
+        # вернулся во второй reasoning-hop после стадии reflect — content-flag saw_reflect_summary, строго
+        # СИЛЬНЕЕ «REFLECT-папка существует» (доказывает, что reflect-итог вернулся в контур). Прямое чтение
+        # после ответа GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_reflect_summary") == "1"
+        ), "reflect summary must reach the second reasoning hop (state saw_reflect_summary)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
 

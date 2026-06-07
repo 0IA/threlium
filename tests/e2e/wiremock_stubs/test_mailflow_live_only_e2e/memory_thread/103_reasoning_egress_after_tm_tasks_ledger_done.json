@@ -77,6 +77,9 @@
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
           }
+        },
+        "state": {
+          "saw_thread_memory_note": "{{#if (contains request.body 'e2e live thread_memory note')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_thread_memory_note' default='0'}}{{/if}}"
         }
       }
     }
