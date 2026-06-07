@@ -31,20 +31,22 @@ fetchmail. Ответы агента тест читает из отдельно
 ---
 
 **Усечённая цепочка SUBAGENT_TABLE.** Проверяется ветка с вложенным кадром: ответ агента в pytest@,
-затем по **notmuch** на SUT (тред якорного ``Message-ID``) — письма в папках стадий, включая
-``subagent_intent`` / ``subagent_end``.
+затем по **STATE** (content-flag ``saw_subagent_result``) — POP-результат дочернего L1-кадра вернулся
+в L0 reasoning-промпт (строго сильнее «папка ``subagent_end`` существует»). Без docker-exec/notmuch.
 
 ---
 
-**Локальная память (MEMORY_TABLE, ветка thread_memory).** Метка сценария в теме; ожидание стадии
-``thread_memory`` через ``poll_notmuch_thread_in_stage_folder``, затем ответ агента в pytest@ и
-матрица папок notmuch.
+**Локальная память (MEMORY_TABLE, ветки thread_memory / global_memory / reflect).** Метка сценария в
+теме; проверка по **STATE** (content-flag ``saw_thread_memory_note`` / ``saw_global_memory_note`` /
+``saw_reflect_summary``) — персистнутая заметка/итог reflect вернулись в reasoning-промпт; ответ
+агента в pytest@ как барьер. Без docker-exec/notmuch (E2E.md §3.6.2).
 
 ---
 
-**Полная матрица SUBAGENT_TABLE с подтверждением CLI (HITL).** Письмо с маркером в теле; ожидание
-``CLI_INTENT`` в notmuch-треде; HITL-письмо в pytest@ (IMAP UID SEARCH по треду); ответ «yes»;
-финальный ответ агента; полная матрица папок включая ``cli_exec``.
+**Полная матрица SUBAGENT_TABLE с подтверждением CLI (HITL).** Письмо с маркером в теле; HITL-письмо
+в pytest@ (IMAP UID SEARCH по треду); ответ «yes»; финальный ответ агента; проверка по **STATE**
+(content-flag ``saw_hitl_cli_echo``) — привилегированная cli-команда выполнилась после подтверждения и
+её вывод вернулся в reasoning. Без docker-exec/notmuch.
 
 ---
 
@@ -70,7 +72,6 @@ from pathlib import Path
 import imaplib
 import os
 import re
-import shlex
 
 import uuid
 
@@ -104,23 +105,16 @@ from .toolkit import (
     E2E_GREENMAIL_REPLY_USER,
     E2E_REPLY_BODY_SNIPPET,
     REPO_ROOT,
-    assert_notmuch_folder_contains_body_token,
-    assert_notmuch_thread_has_messages_in_folders,
-    E2E_REMOTE_THRELIUM_HOME,
     e2e_refresh_hop_budget_default,
     e2e_refresh_hop_budget_sub,
-    poll_notmuch_thread_in_stage_folder,
     e2e_dense_threlium_ctx_body,
     e2e_greenmail_mailbox_address,
     e2e_thread_root_mid_for_message_id,
-    email_ingress_notmuch_id_inner,
     poll_until,
     rfc_first_message_id_in_in_reply_to_header,
-    service_exec,
 )
 from .wiremock_client import (
     assert_wiremock_zero_unmatched_requests,
-    find_wiremock_requests_by_body_contains,
     prepare_wiremock_scenario,
     wiremock_admin_base,
     wiremock_public_base,
@@ -922,15 +916,8 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(e2e_runtime: E2EC
                 correlation_key=correlation_key,
             )
         )
-        root_mid_inner = email_ingress_notmuch_id_inner(user_mid)
         _debug_greenmail_smtp_payload("hitl_matrix_root", m)
         _smtp_send(smtp_h, smtp_p, m)
-
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=root_mid_inner,
-            stage_folder_id=FsmStage.CLI_INTENT.value,
-        )
 
         root_inner = user_mid.strip().strip("<>")
 
@@ -1026,24 +1013,16 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(e2e_runtime: E2EC
         assert yes_inner.lower() in (agent_irt or "").lower(), (
             f"expected final reply In-Reply-To to reference user yes message {yes_inner!r}, got {agent_irt!r}"
         )
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.SUBAGENT_INTENT.value,
-                FsmStage.SUBAGENT_END.value,
-                FsmStage.CLI_INTENT.value,
-                FsmStage.CLI_HITL_OUT.value,
-                FsmStage.CLI_RESUME.value,
-                FsmStage.CLI_EXEC.value,
-                FsmStage.REASONING.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_ROUTER.value,
-                FsmStage.EGRESS_EMAIL.value,
-                FsmStage.ARCHIVE.value,
-            ),
-        )
+        # HITL+cli-поток по STATE (без docker-exec notmuch): после подтверждения пользователем ('yes')
+        # привилегированная cli-команда (echo 'e2e-hitl-cli-xyzzy') выполнилась в cli_exec и её вывод
+        # вернулся в reasoning-промпт — content-flag saw_hitl_cli_echo на post-cli reasoning-стабе, строго
+        # СИЛЬНЕЕ «CLI_EXEC/CLI_RESUME-папки существуют» (доказывает, что HITL-resume провёл cli и результат
+        # вернулся в контур). Прямое чтение после финального ответа GreenMail (выше) — time-independent;
+        # маршрут SUBAGENT→CLI_INTENT→HITL_OUT→RESUME→CLI_EXEC→reasoning→egress enforced фазовыми стабами +
+        # unmatched-guard; финальный IRT на письмо 'yes' проверен выше.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_hitl_cli_echo") == "1"
+        ), "post-HITL cli_exec echo output must reach reasoning (state saw_hitl_cli_echo)"
     finally:
         # Контекст WM не удалять здесь — см. two_turn finally.
         assert_wiremock_zero_unmatched_requests(wm_base)
@@ -1151,14 +1130,7 @@ def test_live_hitl_user_rejects_cli_on_running_stack(e2e_runtime: E2EComposeRunt
                 correlation_key=correlation_key,
             )
         )
-        root_mid_inner = email_ingress_notmuch_id_inner(user_mid)
         _smtp_send(smtp_h, smtp_p, m)
-
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=root_mid_inner,
-            stage_folder_id=FsmStage.CLI_INTENT.value,
-        )
 
         root_inner = user_mid.strip().strip("<>")
 
@@ -1234,58 +1206,23 @@ def test_live_hitl_user_rejects_cli_on_running_stack(e2e_runtime: E2EComposeRunt
                 return True
             return None
 
-        def _decline_in_egress_email_maildir() -> bool | None:
-            snippet = shlex.quote(E2E_HITL_RESUME_NO_BODY_SNIPPET)
-            th = shlex.quote(E2E_REMOTE_THRELIUM_HOME)
-            script = (
-                f"grep -ql {snippet} "
-                f"{th}/stages/egress_email/Maildir/cur/* "
-                f"{th}/stages/egress_router/Maildir/cur/* 2>/dev/null"
-            )
-            r = service_exec(
-                rt.project_name,
-                "sut",
-                ["bash", "-lc", script],
-                repo_root=REPO_ROOT,
-            )
-            return True if r.returncode == 0 else None
-
-        def _decline_notice() -> bool | None:
-            if _decline_notice_imap() is True:
-                return True
-            return _decline_in_egress_email_maildir()
-
         poll_until(
-            _decline_notice,
+            _decline_notice_imap,
             timeout=TIMEOUT_POLL_SHORT,
             interval=1.0,
-            desc="live HITL resume no: decline in pytest@ INBOX or egress Maildir",
+            desc="live HITL resume no: decline reply in pytest@ INBOX (GreenMail)",
         )
 
-        assert_notmuch_folder_contains_body_token(
-            rt.project_name,
-            stage_folder_id=FsmStage.ENRICH_FAST.value,
-            body_token="user did not confirm the CLI command",
-            repo_root=REPO_ROOT,
-        )
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.SUBAGENT_INTENT.value,
-                FsmStage.SUBAGENT_END.value,
-                FsmStage.CLI_INTENT.value,
-                FsmStage.CLI_HITL_OUT.value,
-                FsmStage.CLI_RESUME.value,
-                FsmStage.ENRICH_FAST.value,
-                FsmStage.REASONING.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_ROUTER.value,
-                FsmStage.EGRESS_EMAIL.value,
-                FsmStage.ARCHIVE.value,
-            ),
-        )
+        # HITL-reject-поток по STATE (без docker-exec notmuch): после ответа пользователя 'no' cli_exec НЕ
+        # запускался; enrich_fast сформировал decline-notice ('user did not confirm the CLI command'), и она
+        # вернулась в reasoning-промпт после reject — content-flag saw_decline_notice на post-reject
+        # reasoning-стабе (072), строго СИЛЬНЕЕ прежних «ENRICH_FAST-папка содержит токен» + «папки стадий
+        # существуют» (доказывает, что отказ долетел до контура, а не только осел в Maildir). Прямое чтение
+        # после decline-ответа GreenMail (выше) — time-independent; маршрут enforced фазовыми стабами +
+        # unmatched-guard (route-wire в finally).
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_decline_notice") == "1"
+        ), "HITL decline notice must reach reasoning prompt (state saw_decline_notice)"
     finally:
         assert_wiremock_zero_unmatched_requests(
             wm_base,

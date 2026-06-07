@@ -50,7 +50,7 @@
                 "type": "function",
                 "function": {
                   "name": "cli_intent",
-                  "arguments": "{\"argv\": [\"id\"], \"privileged\": true, \"reasoning\": \"e2e SUBAGENT_TABLE+HITL: run id after user confirms CLI (mock).\"}"
+                  "arguments": "{\"argv\": [\"echo\", \"e2e-hitl-cli-xyzzy\"], \"privileged\": true, \"reasoning\": \"e2e SUBAGENT_TABLE+HITL: run echo marker after user confirms privileged CLI (mock).\"}"
                 }
               }
             ]
