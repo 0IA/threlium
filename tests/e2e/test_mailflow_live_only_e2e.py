@@ -124,6 +124,7 @@ from .wiremock_client import (
     prepare_wiremock_scenario,
     wiremock_admin_base,
     wiremock_public_base,
+    wiremock_state_thread_root_property,
 )
 
 # Каталоги стабов и ``stub_tag`` этого модуля; корреляция LiteLLM — ``X-Threlium-Thread-Root``
@@ -1135,18 +1136,6 @@ def test_live_cli_intent_allow_echo_on_running_stack(e2e_runtime: E2EComposeRunt
         _smtp_send(smtp_h, smtp_p, m)
 
         uinner = user_mid.strip().strip("<>")
-        nm_root = email_ingress_notmuch_id_inner(user_mid)
-
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_id=FsmStage.CLI_INTENT.value,
-        )
-        poll_notmuch_thread_in_stage_folder(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_id=FsmStage.CLI_EXEC.value,
-        )
 
         def _agent_reply() -> bool | None:
             rows = _pytest_inbox_rows(
@@ -1172,21 +1161,15 @@ def test_live_cli_intent_allow_echo_on_running_stack(e2e_runtime: E2EComposeRunt
             timeout=TIMEOUT_POLL_SHORT,
             desc="live cli_intent allow echo: agent e2e reply in pytest@ INBOX",
         )
-        assert_notmuch_thread_has_messages_in_folders(
-            rt.project_name,
-            anchor_message_id=nm_root,
-            stage_folder_ids=(
-                FsmStage.INGRESS.value,
-                FsmStage.ENRICH.value,
-                FsmStage.REASONING.value,
-                FsmStage.CLI_INTENT.value,
-                FsmStage.CLI_EXEC.value,
-                FsmStage.RESPONSE_FINALIZE.value,
-                FsmStage.EGRESS_ROUTER.value,
-                FsmStage.EGRESS_EMAIL.value,
-                FsmStage.ARCHIVE.value,
-            ),
-        )
+        # cli-поток по STATE (без docker-exec notmuch): эхо-вывод cli_exec ('e2e-cli-allow-xyzzy') дошёл до
+        # reasoning — content-flag saw_cli_echo на post-cli reasoning-стабе, строго СИЛЬНЕЕ «CLI_EXEC-папка
+        # существует» (доказывает, что вывод вернулся в контур, а не только что стадия отметилась).
+        # Маршрут ingress→enrich→reasoning→cli_intent→cli_exec→finalize→egress→archive enforced фазовыми
+        # стабами (egress gated hasProperty round1_ledger_done) + unmatched-guard + ответным письмом выше.
+        # Прямое чтение: ассерт после ответа GreenMail (контур завершён) — time-independent.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_cli_echo") == "1"
+        ), "cli_exec echo output must reach reasoning (state saw_cli_echo)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
 
