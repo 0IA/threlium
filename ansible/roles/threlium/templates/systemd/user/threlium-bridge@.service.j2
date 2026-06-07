@@ -13,7 +13,7 @@ Type=simple
 EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env
 Environment=PATH={{ threlium_repo_path }}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart={{ threlium_repo_path }}/.venv/bin/python -m threlium.runners.bridge %i
-Restart=on-failure
+Restart={{ threlium_systemd_bridge_restart }}
 {% include '_restart_backoff_service.inc.j2' %}
 
 SyslogIdentifier=threlium-bridge-%i

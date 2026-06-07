@@ -116,6 +116,14 @@ threlium_systemd_restart_sec: 1s
 threlium_systemd_restart_steps: 10
 threlium_systemd_restart_max_delay_sec: 5min
 
+# Политика Restart= по сервису (настраиваемая). Прод: воркеры/мосты перезапускаются при падении,
+# движок — всегда. E2E может выставить "no" (см. group_vars/e2e.yml), чтобы упавший воркер на
+# «отравленном» сообщении не уходил в бесконечный крэш-луп (systemd auto-restart), а падал один раз —
+# тест сразу видит проблему, стек не отравляется, прогон быстрее. См. [[fsm-worker-crashloop-poison]].
+threlium_systemd_worker_restart: on-failure
+threlium_systemd_bridge_restart: on-failure
+threlium_systemd_engine_restart: always
+
 # systemd user units (списки для loop в site.yml / refresh.yml).
 threlium_engine_units: ['threlium-engine.service']
 threlium_work_slice: ['threlium-work.slice']

@@ -16,7 +16,7 @@ OnSuccess=threlium-sweep@%i.service
 
 [Service]
 Type=exec
-Restart=on-failure
+Restart={{ threlium_systemd_worker_restart }}
 {% include '_restart_backoff_service.inc.j2' %}
 
 EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env

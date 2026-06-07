@@ -14,7 +14,7 @@ EnvironmentFile=-{{ threlium_repo_path }}/env/threlium.env
 Environment=PATH={{ threlium_repo_path }}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WorkingDirectory={{ threlium_repo_path }}
 ExecStart={{ threlium_repo_path }}/.venv/bin/python -m threlium.runners.engine
-Restart=always
+Restart={{ threlium_systemd_engine_restart }}
 {% include '_restart_backoff_service.inc.j2' %}
 
 TimeoutStartSec=150

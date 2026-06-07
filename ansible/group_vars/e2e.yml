@@ -5,6 +5,15 @@ ansible_user: root
 # SUT: подробные structlog/journald при отладке e2e (см. threlium.yaml + env/threlium.env).
 threlium_log_level: "DEBUG"
 
+# E2E: воркеры НЕ перезапускаются при падении. На «отравленном» сообщении (детерминированная
+# ошибка стадии — напр. 404 от WireMock из-за пробела в стабах) прод-политика Restart=on-failure
+# уводит work@ в бесконечный крэш-луп: воркер не идёт в idle, последующие тесты падают каскадом,
+# время прогона раздувается. С "no" воркер падает один раз — тест сразу видит проблему, стек не
+# отравляется, прогон быстрее. Затрагивает только путь ОШИБКИ (успех идёт через OnSuccess→sweep,
+# не через Restart). Движок/мосты оставляем на дефолтной политике (их крэш-луп — не наша проблема,
+# а cold-reset переподнимает движок). См. defaults: threlium_systemd_*_restart.
+threlium_systemd_worker_restart: "no"
+
 threlium_bundle_enabled: false
 threlium_ssh_hardening_enabled: false
 threlium_agent_login_password: "threlium"
