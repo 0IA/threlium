@@ -42,7 +42,7 @@ from email.utils import formatdate, getaddresses
 
 import notmuch2  # pyright: ignore[reportMissingImports]
 from imap_tools import MailBox, MailBoxUnencrypted
-from imap_tools.errors import MailboxUidsError
+from imap_tools.errors import MailboxTaggedResponseError, MailboxUidsError
 from imap_tools.mailbox import BaseMailBox, Criteria
 from imap_tools.utils import check_command_status
 
@@ -600,7 +600,22 @@ def run_bridge(deliver: Callable[[EmailMessage], None], *, settings: ThreliumSet
         )
 
         while True:
-            responses = mailbox.idle.wait(timeout=idle_timeout)
+            try:
+                responses = mailbox.idle.wait(timeout=idle_timeout)
+            except MailboxTaggedResponseError as idle_exc:
+                # Незапрошенный untagged-ответ (напр. ``* N EXISTS`` — пришло новое письмо) прилетел
+                # на старте IDLE ДО ``+ idling`` → imap_tools падает в ``idle.start()``. Но IDLE на
+                # соединении уже АКТИВЕН (``_idle_tag`` выставлен до проверки), а ``__exit__`` не
+                # сработал. Это и есть нужное событие (новое письмо), не повод падать: краш → рестарт
+                # моста → провал доставки. Корректно завершаем IDLE (``DONE`` + consume), затем
+                # обычным циклом забираем почту. Если соединение всё же сломано — следующая IMAP-
+                # команда в ``process_inbox_tail`` поднимет ошибку и сработает штатный рестарт.
+                log.info("idle_start_unsolicited_resp", detail=str(idle_exc))
+                try:
+                    mailbox.idle.stop()
+                except Exception as stop_exc:  # noqa: BLE001
+                    log.warning("idle_stop_after_unsolicited_failed", detail=str(stop_exc))
+                responses = None
             if responses:
                 log.info("idle_events", count=len(responses))
             # Drain до пустого: письмо, пришедшее ВО ВРЕМЯ предыдущего process_inbox_tail
