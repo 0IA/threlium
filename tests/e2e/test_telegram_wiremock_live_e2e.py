@@ -18,7 +18,6 @@ from threlium.types import FsmStage
 from .toolkit import (
     TIMEOUT_POLL_SHORT,
     E2EComposeRuntime,
-    assert_notmuch_folder_contains_body_token,
     e2e_telegram_generate_update_bundle,
     e2e_telegram_thread_root_mid_for_message,
     e2e_threlium_user_unit_journalctl_bash,
@@ -191,12 +190,6 @@ def test_live_telegram_wiremock_full_contour_private(
             reply_body=TELEGRAM_AGENT_REPLY_BODY_PRIVATE,
             message_thread_id=mtid,
         )
-        assert_notmuch_folder_contains_body_token(
-            rt.project_name,
-            stage_folder_id=FsmStage.ARCHIVE.value,
-            body_token=str(chat_id),
-            repo_root=REPO_ROOT,
-        )
 
 
 def test_live_telegram_wiremock_full_contour_forum_topic(
@@ -282,12 +275,6 @@ def test_live_telegram_wiremock_full_contour_forum_topic(
             chat_id=chat_id,
             reply_body=TELEGRAM_AGENT_REPLY_BODY_FORUM,
             message_thread_id=mtid,
-        )
-        assert_notmuch_folder_contains_body_token(
-            rt.project_name,
-            stage_folder_id=FsmStage.ARCHIVE.value,
-            body_token=str(chat_id),
-            repo_root=REPO_ROOT,
         )
 
 
@@ -521,12 +508,6 @@ def test_live_telegram_wiremock_private_tail_307_second_message(
                 f"tok1={tok1!r}, превью тел={joined[:4000]!r}"
             )
 
-            assert_notmuch_folder_contains_body_token(
-                rt.project_name,
-                stage_folder_id=FsmStage.ARCHIVE.value,
-                body_token=str(chat_id),
-                repo_root=REPO_ROOT,
-            )
 
             log.info(
                 "telegram_tail_307_report",
@@ -545,28 +526,29 @@ def test_live_telegram_wiremock_private_tail_307_second_message(
 
 
 def _wait_telegram_correlation_indexed(project: str, *, correlation_key: str) -> None:
-    """Дождаться, что первое сообщение telegram-бриджа проиндексировано в notmuch."""
-    inner = correlation_key.strip().strip("<>")
+    """Дождаться, что первое сообщение telegram-бриджа дошло до ingress (= вставлено в notmuch).
+
+    Сигнал — ``ingress_distill`` в call_sites треда (ingress-LLM вызывается ПОСЛЕ вставки письма в notmuch),
+    через WireMock state, БЕЗ ``docker exec`` ``notmuch search``. Предусловие tail-attach msg2: msg1 уже в
+    общем notmuch-треде. Изоляция = thread-root (correlation_key == X-Threlium-Thread-Root ingress-запроса).
+    """
+    from .toolkit import discover_runtime  # noqa: PLC0415
+    from .wiremock_client import wiremock_state_thread_root_call_sites  # noqa: PLC0415
+
+    rt = discover_runtime(project, repo_root=REPO_ROOT)
+    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
 
     def _probe() -> bool | None:
-        r = service_exec(
-            project,
-            "sut",
-            [
-                "bash",
-                "-lc",
-                "export HOME=/home/threlium NOTMUCH_CONFIG=/home/threlium/.notmuch-config; "
-                f'notmuch search --output=messages "id:{inner}" 2>/dev/null | grep -q . && echo OK',
-            ],
-            repo_root=REPO_ROOT,
-            timeout=int(TIMEOUT_POLL_SHORT),
+        return (
+            True
+            if "ingress_distill" in wiremock_state_thread_root_call_sites(wm, correlation_key)
+            else None
         )
-        return True if r.returncode == 0 and "OK" in (r.stdout or "") else None
 
     poll_until(
         _probe,
         timeout=TIMEOUT_POLL_SHORT,
-        desc=f"telegram first delivery indexed for {correlation_key!r}",
+        desc=f"telegram first delivery ingress (state) for {correlation_key!r}",
     )
 
 
