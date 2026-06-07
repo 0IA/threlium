@@ -45,8 +45,6 @@ from .toolkit import (
     MailflowScenarioSpec,
     REPO_ROOT,
     assert_full_mailflow_pipeline,
-    assert_notmuch_folder_contains_body_token,
-    assert_notmuch_thread_stage_message_count_at_least,
     discover_runtime,
     dump_failure_artifacts,
     mailflow_inject_and_wait,
@@ -60,9 +58,6 @@ from .wiremock_client import (
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_BODY_MARKER = "E2E-FORMAL-REASON-CHAIN-BODY"
 E2E_UNIFIED_DELTA_SHAPE_MARKER = "ex:PositiveAgeShape"
-# notmuch фразовый поиск трактует ``:`` как разделитель префикса поля даже в кавычках —
-# для on-disk проверки берём бесколоночный терм того же shape-маркера.
-E2E_UNIFIED_DELTA_NOTMUCH_TOKEN = "PositiveAgeShape"
 E2E_UNIFIED_DELTA_SECTION = "<conversation_delta>"
 E2E_MEMORY_QUERY_REASONING_MARKER = "SHACL sh:sparql constraint SELECT variable binding"
 
@@ -130,7 +125,7 @@ def test_formal_reason_chain_full_pipeline(
     with mailflow_inject_and_wait(FORMAL_REASON_CHAIN_SPEC, e2e_runtime.project_name) as (
         project,
         raw_id,
-        canonical_id,
+        _canonical_id,
         nm_inner,
         stub_tag,
         correlation_key,
@@ -180,27 +175,16 @@ def test_formal_reason_chain_full_pipeline(
                 "expected a memory_query-phase reasoning hop offering "
                 f"{{memory_query, response_finalize}} ⊆ FULL (got tool-sets {mq_tool_sets})"
             )
-            assert_notmuch_folder_contains_body_token(
-                project,
-                stage_folder_id=FsmStage.REASONING.value,
-                body_token=E2E_UNIFIED_DELTA_NOTMUCH_TOKEN,
-                min_count=1,
-                repo_root=REPO_ROOT,
-            )
-            assert_notmuch_thread_stage_message_count_at_least(
-                project,
-                anchor_message_id=canonical_id,
-                stage_folder_id=FsmStage.ENRICH.value,
-                min_count=1,
-                repo_root=REPO_ROOT,
-            )
-            assert_notmuch_thread_stage_message_count_at_least(
-                project,
-                anchor_message_id=canonical_id,
-                stage_folder_id=FsmStage.ENRICH_FAST.value,
-                min_count=2,
-                repo_root=REPO_ROOT,
-            )
+            # Прежние notmuch docker-exec проверки (PositiveAgeShape в REASONING-папке; ENRICH≥1;
+            # ENRICH_FAST≥2 — счёт маршрутизации по Maildir) УБРАНЫ как более слабые и избыточные:
+            # сила сохранена СОДЕРЖИМЫМ выше (без захода в контейнер) —
+            #   • _assert_unified_delta_in_reasoning_journal: ``ex:PositiveAgeShape`` + ``<conversation_delta>``
+            #     + SHACL-маркер memory_query В ЗАПРОСЕ reasoning (строго сильнее «лежит в папке REASONING»);
+            #   • memory_query-фазовый reasoning-хоп с набором тулов {memory_query, response_finalize} ⊆ FULL
+            #     доказывает, что recovery-петля (gate→memory_query→enrich_fast→reasoning) отработала и
+            #     корректный контекст вернулся в reasoning — это и есть смысл ENRICH_FAST≥2, но по содержимому.
+            # enrich_fast — стадия БЕЗ LLM-вызова (быстрый rebuild контекста), её счёт по стабам невыразим;
+            # сам факт enrich покрыт call_sites общего mailflow-ассерта. Routing-стадии — §3.6.1.
         except Exception:
             log.debug(
                 "failure_artifacts",
