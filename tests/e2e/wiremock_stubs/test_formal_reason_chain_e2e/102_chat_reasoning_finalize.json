@@ -18,14 +18,14 @@
         "contains": "\"tools\""
       },
       {
-        "comment": "enrich_fast накапливает relay-части: observation от formal_reason (hop1) НЕ затёрта observation от memory_query (hop2). Оба маркера обязаны присутствовать в промпте 3-го reasoning.",
+        "comment": "enrich_fast \u043d\u0430\u043a\u0430\u043f\u043b\u0438\u0432\u0430\u0435\u0442 relay-\u0447\u0430\u0441\u0442\u0438: observation \u043e\u0442 formal_reason (hop1) \u041d\u0415 \u0437\u0430\u0442\u0451\u0440\u0442\u0430 observation \u043e\u0442 memory_query (hop2). \u041e\u0431\u0430 \u043c\u0430\u0440\u043a\u0435\u0440\u0430 \u043e\u0431\u044f\u0437\u0430\u043d\u044b \u043f\u0440\u0438\u0441\u0443\u0442\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c \u0432 \u043f\u0440\u043e\u043c\u043f\u0442\u0435 3-\u0433\u043e reasoning.",
         "contains": "conforms: True"
       },
       {
         "contains": "SHACL-SPARQL reference after successful validation"
       },
       {
-        "comment": "unified-delta durability: дельта 1-го цикла (вход formal_reason, ex:PositiveAgeShape) перенесена в E_prev через части прошлого enrich_fast и видна в промпте 4-го reasoning (finalize) вместе с дельтой 2-го цикла (вход memory_query).",
+        "comment": "unified-delta durability: \u0434\u0435\u043b\u044c\u0442\u0430 1-\u0433\u043e \u0446\u0438\u043a\u043b\u0430 (\u0432\u0445\u043e\u0434 formal_reason, ex:PositiveAgeShape) \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0435\u043d\u0430 \u0432 E_prev \u0447\u0435\u0440\u0435\u0437 \u0447\u0430\u0441\u0442\u0438 \u043f\u0440\u043e\u0448\u043b\u043e\u0433\u043e enrich_fast \u0438 \u0432\u0438\u0434\u043d\u0430 \u0432 \u043f\u0440\u043e\u043c\u043f\u0442\u0435 4-\u0433\u043e reasoning (finalize) \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u0434\u0435\u043b\u044c\u0442\u043e\u0439 2-\u0433\u043e \u0446\u0438\u043a\u043b\u0430 (\u0432\u0445\u043e\u0434 memory_query).",
         "contains": "ex:PositiveAgeShape"
       }
     ],
@@ -81,6 +81,11 @@
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
           }
+        },
+        "state": {
+          "saw_delta_section": "{{#if (contains request.body '<conversation_delta>')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_delta_section' default='0'}}{{/if}}",
+          "saw_delta_shape": "{{#if (contains request.body 'ex:PositiveAgeShape')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_delta_shape' default='0'}}{{/if}}",
+          "saw_mq_shacl": "{{#if (contains request.body 'SHACL sh:sparql constraint SELECT variable binding')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_mq_shacl' default='0'}}{{/if}}"
         }
       }
     }

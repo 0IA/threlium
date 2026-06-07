@@ -53,6 +53,7 @@ from .wiremock_client import (
     _wiremock_headers_get_ci,
     find_wiremock_requests_by_body_contains,
     wiremock_public_base,
+    wiremock_state_thread_root_property,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -91,31 +92,25 @@ FORMAL_REASON_CHAIN_SPEC = MailflowScenarioSpec(
 )
 
 
-def _assert_chat_journal_contains(
-    wm_base: str, stub_tag: str, needle: str
-) -> None:
-    matches = find_wiremock_requests_by_body_contains(
-        wm_base, needle, stub_tag=stub_tag
-    )
-    chat_matches = [
-        e
-        for e in matches
-        if "/chat/completions" in (e.get("request", {}).get("url") or "")
-    ]
-    assert chat_matches, (
-        f"No chat/completions requests contain {needle!r} (stub_tag={stub_tag!r})"
-    )
+def _assert_unified_delta_in_reasoning_state(project: str, correlation_key: str) -> None:
+    """2-й/3-й reasoning: unified-delta relay дошёл до LLM-промпта (не только observation) — по STATE.
 
-
-def _assert_unified_delta_in_reasoning_journal(project: str, stub_tag: str) -> None:
-    """2-й/3-й reasoning: unified-delta relay дошёл до LLM-промпта (не только observation)."""
+    Вместо journal-скана читаем content-flags, записанные reasoning-стабами на лету при попадании маркера
+    в их промпт: ``<conversation_delta>`` (секция дельты), ``ex:PositiveAgeShape`` (форма из входной дельты)
+    и SHACL-маркер наблюдения memory_query. «At least one reasoning request contains needle» = sticky-флаг
+    стал ``1`` хотя бы на одном reasoning-хопе. Прямое чтение после барьера ответа GreenMail
+    (``assert_full_mailflow_pipeline``) — time-independent, дёшево из state, без скана журнала. §3.6.2."""
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    for needle in (E2E_UNIFIED_DELTA_SECTION, E2E_UNIFIED_DELTA_SHAPE_MARKER):
-        _assert_chat_journal_contains(wm_base, stub_tag, needle)
-    for needle in (E2E_UNIFIED_DELTA_SHAPE_MARKER, E2E_MEMORY_QUERY_REASONING_MARKER):
-        _assert_chat_journal_contains(wm_base, stub_tag, needle)
-    log.info("formal_reason_chain_unified_delta_journal_verified", stub_tag=stub_tag)
+    for flag, marker in (
+        ("saw_delta_section", E2E_UNIFIED_DELTA_SECTION),
+        ("saw_delta_shape", E2E_UNIFIED_DELTA_SHAPE_MARKER),
+        ("saw_mq_shacl", E2E_MEMORY_QUERY_REASONING_MARKER),
+    ):
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, flag) == "1"
+        ), f"unified-delta needle {marker!r} must reach a reasoning prompt (state {flag})"
+    log.info("formal_reason_chain_unified_delta_state_verified", correlation_key=correlation_key)
 
 
 def test_formal_reason_chain_full_pipeline(
@@ -141,7 +136,7 @@ def test_formal_reason_chain_full_pipeline(
                 stub_tag=stub_tag,
                 correlation_key=correlation_key,
             )
-            _assert_unified_delta_in_reasoning_journal(project, stub_tag)
+            _assert_unified_delta_in_reasoning_state(project, correlation_key)
             assert_all_reasoning_gate_absent(wm_base, stub_tag)
             mq_matches = find_wiremock_requests_by_body_contains(
                 wm_base, E2E_MEMORY_QUERY_REASONING_MARKER, stub_tag=stub_tag
