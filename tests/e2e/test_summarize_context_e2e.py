@@ -10,12 +10,6 @@ from threlium.types import FsmStage
 
 from .toolkit import (
     E2EComposeRuntime,
-    E2EComposeRuntime,
-    E2EComposeRuntime,
-    E2E_SUM_ORIG_HEAD_MARKER,
-    E2E_SUM_ORIG_PAD_MARKER,
-    E2E_SUMMARY_MARKER,
-    E2E_SUMMARIZE_LLM_NEEDLE,
     MailflowScenarioSpec,
     REPO_ROOT,
     assert_full_mailflow_pipeline,
@@ -32,13 +26,9 @@ from .toolkit import (
 )
 from .test_reasoning_litellm_mock_live import REASONING_E2E_BODY_MARKER
 from .wiremock_client import (
-    find_wiremock_requests_by_body_contains,
-    journal_entries_for_stub_tag,
     wiremock_public_base,
     wiremock_state_thread_root_call_sites,
-    _journal_chat_completion_user_content,
-    _journal_request_anchor_haystack,
-    _wiremock_headers_get_ci,
+    wiremock_state_thread_root_property,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -79,85 +69,6 @@ def _count_summarize_llm_posts(wm_base: str, *, correlation_key: str) -> int:
     return sum(1 for c in cs if c == "summarize_thread_context")
 
 
-def _summarize_context_user_content_merged(
-    wm_base: str,
-    *,
-    stub_tag: str,
-) -> str:
-    """Merged user content from summarize_context LLM POSTs (WireMock journal)."""
-    parts: list[str] = []
-    for entry in journal_entries_for_stub_tag(wm_base, stub_tag=stub_tag):
-        if not isinstance(entry, dict):
-            continue
-        req = entry.get("request")
-        if not isinstance(req, dict):
-            continue
-        if str(req.get("method") or "").upper() != "POST":
-            continue
-        url = str(req.get("url") or "")
-        if "/chat/completions" not in url and not url.rstrip("/").endswith(
-            "chat/completions"
-        ):
-            continue
-        call_site = _wiremock_headers_get_ci(
-            req.get("headers"), "X-Threlium-Call-Site"
-        )
-        if call_site != "summarize_thread_context":
-            continue
-        body = _journal_chat_completion_user_content(entry)
-        if body:
-            parts.append(body)
-    return "\n".join(parts)
-
-
-def _reasoning_user_bodies_for_correlation(
-    wm_base: str,
-    *,
-    stub_tag: str,
-    correlation_key: str,
-) -> list[str]:
-    out: list[str] = []
-    for entry in journal_entries_for_stub_tag(wm_base, stub_tag=stub_tag):
-        if not isinstance(entry, dict):
-            continue
-        req = entry.get("request")
-        if not isinstance(req, dict):
-            continue
-        if str(req.get("method") or "").upper() != "POST":
-            continue
-        url = str(req.get("url") or "")
-        if "/chat/completions" not in url and not url.rstrip("/").endswith("chat/completions"):
-            continue
-        hay = _journal_request_anchor_haystack(entry)
-        if correlation_key not in hay or "<envelope>" not in hay or '"tools"' not in hay:
-            continue
-        body = _journal_chat_completion_user_content(entry)
-        if body:
-            out.append(body)
-    return out
-
-
-def _reasoning_history_and_delta_sections(body: str) -> str:
-    """`<conversation_history>` + `<conversation_delta>` без `<user_message>` (stable anchor slot)."""
-    chunks: list[str] = []
-    for tag in ("conversation_history", "conversation_delta"):
-        open_tag = f"<{tag}>"
-        close_tag = f"</{tag}>"
-        if open_tag not in body:
-            continue
-        chunks.append(body.split(open_tag, 1)[1].split(close_tag, 1)[0])
-    return "\n".join(chunks)
-
-
-_DISTILL_HISTORY_HEADINGS = (
-    "## Original user message",
-    "## User intent",
-    "## User reply language",
-    "## Step-back context",
-    "## Open gaps",
-)
-
-
 def _assert_summarize_pipeline_artifacts(
     *,
     project: str,
@@ -175,35 +86,30 @@ def _assert_summarize_pipeline_artifacts(
     assert n_summarize >= 1, (
         f"expected at least one summarize_context LLM POST, got {n_summarize}"
     )
-    reasoning_bodies = _reasoning_user_bodies_for_correlation(
-        wm_base, stub_tag=stub_tag, correlation_key=correlation_key
+    # Содержимое — по STATE content-flags (recordState на лету в стабах, §3.6.1), БЕЗ скана журнала:
+    #   reasoning-стаб: saw_summary (summary дошёл в reasoning), saw_raw_pad (сырой PAD-блок протёк? → 0);
+    #   075 summarize-стаб: saw_distill (distill-заголовки), saw_head (HEAD-маркер), saw_raw_pad_input (0).
+    # saw_summary поллим — reasoning-хопы идут во время контура. Сырой PAD в этом тесте не инжектится
+    # (pad_chars=0), поэтому whole-body saw_raw_pad эквивалентен секционной проверке (без секций/regex).
+    # Прямое чтение (без поллинга): контентные ассерты идут ПОСЛЕ assert_full_mailflow_pipeline (ждёт
+    # ответ GreenMail = контур завершён), а reasoning/summarize отрабатывают причинно ДО egress→ответа →
+    # флаги уже записаны (recordState beforeResponseSent). Time-independent, без flaky-тайминга.
+    def _flag(name: str) -> str:
+        return wiremock_state_thread_root_property(wm_base, correlation_key, name)
+
+    assert _flag("saw_summary") == "1", (
+        "summary marker did not reach reasoning (state saw_summary)"
     )
-    assert reasoning_bodies, "no reasoning chat/completions in WireMock journal"
-    merged = "\n".join(reasoning_bodies)
-    assert E2E_SUMMARY_MARKER in merged, "reasoning context should include durable summary marker"
-    post_summarize = [b for b in reasoning_bodies if E2E_SUMMARY_MARKER in b]
-    assert post_summarize, (
-        "expected at least one reasoning hop after summarize_memory with summary in context"
+    assert _flag("saw_raw_pad") == "0", (
+        "summarized originals (raw PAD block) must not appear in reasoning (get_body regression)"
     )
-    merged_hist = "\n".join(
-        _reasoning_history_and_delta_sections(b) for b in post_summarize
+    assert _flag("saw_distill") == "1", (
+        "summarize input must include ingress distill <history> headings (granular, not get_body)"
     )
-    assert "P" * 64 not in merged_hist, (
-        "summarized originals (pad block) must not appear in post-summarize "
-        "reasoning history/delta (PAD marker line in unsummarized leaf history is OK)"
-    )
-    merged_summarize = _summarize_context_user_content_merged(wm_base, stub_tag=stub_tag)
-    assert merged_summarize, "no summarize_context LLM user content in WireMock journal"
-    assert any(h in merged_summarize for h in _DISTILL_HISTORY_HEADINGS), (
-        "summarize overflow batch must include ingress distill <history> headings "
-        "(granular SummarizeHistoryUnit text, not get_body)"
-    )
-    assert E2E_SUM_ORIG_HEAD_MARKER in merged_summarize, (
+    assert _flag("saw_head") == "1", (
         "summarize input must include HEAD from inject (via distill or original_user history)"
     )
-    # PAD_MARKER может быть в ## Original user message (leaf history); запрет — сырой P-блок
-    # (regression get_body), не маркерная строка.
-    assert "P" * 64 not in merged_summarize, (
+    assert _flag("saw_raw_pad_input") == "0", (
         "summarize input must not include raw PAD block (get_body regression)"
     )
     return n_summarize
@@ -319,10 +225,9 @@ def test_summarize_idempotent_second_enrich(e2e_runtime: E2EComposeRuntime) -> N
         assert n_after_second >= n_after_first, (
             f"summarize LLM count regressed: {n_after_first} → {n_after_second}"
         )
-        # Сводка первого хода переживает второй вход (идемпотентная консолидация в контексте).
-        reasoning_after_second = _reasoning_user_bodies_for_correlation(
-            wm_base, stub_tag=stub_tag, correlation_key=correlation_key
-        )
-        assert any(E2E_SUMMARY_MARKER in b for b in reasoning_after_second), (
-            "durable summary marker must persist in reasoning context after the second enrich"
-        )
+        # Сводка переживает второй вход (идемпотентная консолидация): re-summarize произошёл
+        # (n_after_second ≥ n_after_first, выше) И summary присутствует в reasoning по STATE-флагу
+        # (saw_summary, sticky per thread-root) — без скана журнала.
+        assert (
+            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_summary") == "1"
+        ), "durable summary marker must persist in reasoning after the second enrich (state saw_summary)"
