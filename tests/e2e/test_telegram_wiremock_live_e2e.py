@@ -28,6 +28,7 @@ from .toolkit import (
 from .wiremock_client import (
     WiremockCorrelation,
     assert_wiremock_telegram_e2e_openai_coverage,
+    assert_wiremock_transport_egress_via_state,
     composite_context_key,
     find_wiremock_requests_by_body_contains,
     journal_has_compose_bootstrap_request,
@@ -134,36 +135,19 @@ def test_live_telegram_wiremock_full_contour_private(
             chat_title="",
         )
 
-        def _send_seen() -> bool | None:
-            if journal_has_request(
-                base,
-                stub_tag=test_id,
-                method="POST",
-                url_contains="editMessageText",
-            ):
-                return True
-            return None
-
+        # Контур telegram по STATE (без journal): egress editMessageText записал ответ агента
+        # ('ok telegram wiremock live e2e private') в content-flag saw_egress_edit (по thread-root),
+        # sendMessage-placeholder — saw_egress_send; LLM-фазы — call_sites. Egress асинхронный → поллим
+        # флаг. Без stub_tag/журнала. Транспортный egress = тоже WireMock-вызов с X-Threlium-Thread-Root.
         try:
-            poll_until(
-                _send_seen,
-                timeout=TIMEOUT_POLL_SHORT,
-                interval=3.0,
-                desc="WireMock journal: POST editMessageText (private)",
+            assert_wiremock_transport_egress_via_state(
+                base, correlation_key=correlation_key
             )
         finally:
             try:
                 wiremock_telegram_unregister_update(base, update_id=update_id)
             except Exception:  # noqa: BLE001
                 pass
-
-        assert_wiremock_telegram_e2e_openai_coverage(
-            base,
-            test_id=test_id,
-            chat_id=chat_id,
-            reply_body=TELEGRAM_AGENT_REPLY_BODY_PRIVATE,
-            message_thread_id=mtid,
-        )
 
 
 def test_live_telegram_wiremock_full_contour_forum_topic(
@@ -213,36 +197,17 @@ def test_live_telegram_wiremock_full_contour_forum_topic(
             chat_title="E2E Telegram Forum",
         )
 
-        def _send_seen() -> bool | None:
-            if journal_has_request(
-                base,
-                stub_tag=test_id,
-                method="POST",
-                url_contains="editMessageText",
-            ):
-                return True
-            return None
-
+        # Контур по STATE (forum topic): egress editMessageText → saw_egress_edit (ответ агента дошёл),
+        # sendMessage → saw_egress_send, LLM → call_sites. Поллим асинхронный egress-флаг. Без журнала.
         try:
-            poll_until(
-                _send_seen,
-                timeout=TIMEOUT_POLL_SHORT,
-                interval=3.0,
-                desc="WireMock journal: POST editMessageText (forum topic)",
+            assert_wiremock_transport_egress_via_state(
+                base, correlation_key=correlation_key
             )
         finally:
             try:
                 wiremock_telegram_unregister_update(base, update_id=update_id)
             except Exception:  # noqa: BLE001
                 pass
-
-        assert_wiremock_telegram_e2e_openai_coverage(
-            base,
-            test_id=test_id,
-            chat_id=chat_id,
-            reply_body=TELEGRAM_AGENT_REPLY_BODY_FORUM,
-            message_thread_id=mtid,
-        )
 
 
 def test_live_telegram_wiremock_private_tail_307_second_message(

@@ -14,7 +14,9 @@
     "headers": {
       "Content-Type": "application/json"
     },
-    "transformers": ["response-template"],
+    "transformers": [
+      "response-template"
+    ],
     "jsonBody": {
       "ok": true,
       "result": {
@@ -35,5 +37,16 @@
         "text": "{{{formData request.body 'fd' urlDecode=true}}}{{fd.text}}"
       }
     }
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "state": {
+          "saw_egress_send": "1"
+        }
+      }
+    }
+  ]
 }

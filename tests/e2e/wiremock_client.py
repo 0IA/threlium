@@ -422,6 +422,51 @@ def wiremock_state_thread_root_call_sites(
     return [str(x) for x in cs] if isinstance(cs, list) else []
 
 
+def assert_wiremock_transport_egress_via_state(
+    public_base: str,
+    *,
+    correlation_key: str,
+    min_chat_posts: int = 1,
+    min_embedding_posts: int = 1,
+    require_send_flag: bool = True,
+    timeout: float = TIMEOUT_POLL_SHORT,
+) -> None:
+    """Контур транспортного канала (telegram/matrix) по STATE — без journal-скана.
+
+    Транспортный egress — это тоже WireMock-вызов с ``X-Threlium-Thread-Root`` (editMessageText /
+    sendMessage / matrix room send). На egress-стабах стоит ``recordState`` content-flag
+    ``saw_egress_edit`` (тело ответа агента дошло до egress: ``contains fd.text <reply_body>``) и
+    presence-флаг ``saw_egress_send``. LLM-фазы — из общего call-site списка (§3.6.1). Egress приходит
+    АСИНХРОННО (нет GreenMail-барьера), поэтому поллим флаг (истинно асинхронный сигнал, §3.6.2).
+    Изоляция — thread-root; ни ``stub_tag``/журнала/``docker exec``."""
+    _EMBED = {"lightrag_index", "lightrag_query"}
+    _RERANK = "lightrag_query_rerank"
+
+    def _probe() -> bool | None:
+        if wiremock_state_thread_root_property(public_base, correlation_key, "saw_egress_edit") != "1":
+            return None
+        cs = wiremock_state_thread_root_call_sites(public_base, correlation_key)
+        chat = [c for c in cs if c not in _EMBED and c != _RERANK]
+        embed = [c for c in cs if c in _EMBED]
+        if len(chat) < min_chat_posts or len(embed) < min_embedding_posts:
+            return None
+        return True
+
+    poll_until(
+        _probe,
+        timeout=timeout,
+        interval=2.0,
+        desc=(
+            "transport egress via state: saw_egress_edit + "
+            f"chat>={min_chat_posts} embed>={min_embedding_posts}"
+        ),
+    )
+    if require_send_flag:
+        assert (
+            wiremock_state_thread_root_property(public_base, correlation_key, "saw_egress_send") == "1"
+        ), "transport placeholder egress (sendMessage) not recorded (state saw_egress_send)"
+
+
 def wiremock_state_reset_phase(
     public_base: str, correlation_key: str, *, timeout: float = TIMEOUT_POLL_SHORT
 ) -> None:
