@@ -122,6 +122,13 @@ E2E_SESSIONFINISH_FAIL_DRAIN_SEC_ENV = "THRELIUM_E2E_SESSIONFINISH_FAIL_DRAIN_SE
 
 _E2E_TESTS_ROOT = Path(__file__).resolve().parent
 
+# Cold-reset: пауза между опустошением источников (WireMock State telegram_updates/matrix_rooms +
+# GreenMail) и flush Maildir. Даёт живому telegram/matrix-мосту докрутить in-flight getUpdates/sync,
+# если он уже забрал утёкший update до сброса, чтобы последующий flush убрал отравленное сообщение
+# из ingress Maildir. Мост долго-поллит, но WireMock-стаб getUpdates/sync отвечает сразу → реального
+# простоя ≈ один RTT; 5 с с запасом. См. ``_e2e_wiremock_journal_reset_once``.
+_E2E_BRIDGE_INJECT_SETTLE_SEC = 5.0
+
 _THRELIUM_E2E_WM_JOURNAL_RESET_STASH = pytest.StashKey[bool]()
 _THRELIUM_E2E_SESSION_TMP_DIR = pytest.StashKey[Path]()
 
@@ -210,13 +217,21 @@ def _e2e_wiremock_journal_reset_once(
         try:
             rt = discover_runtime(pn)
             e2e_stop_threlium_user_pipeline_services(rt)
-            e2e_flush_sut_fsm_maildirs(rt)
-            e2e_flush_greenmail_inboxes(rt)
+            # Порядок важен против отравления следующей сессии (мосты НЕ останавливаем — общий стек,
+            # параллельность). telegram/matrix-мост жив и поллит WireMock: при непустых
+            # ``telegram_updates`` / ``matrix_rooms`` (утечка прошлой сессии) он переинжектил бы update
+            # в ingress Maildir уже ПОСЛЕ flush → engine крэш-луп (ingress_distill 404, контекст очищен).
+            # Поэтому сперва опустошаем ИСТОЧНИКИ (WireMock State + GreenMail), пока engine/work/sweep
+            # сняты; затем settle на цикл поллинга моста (докрутить in-flight инжект); и только потом
+            # flush Maildir (SINK). После пустого State/GreenMail мост больше ничего не отдаёт.
             wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
             reset_request_journal(wm)
             wiremock_state_reset_all_contexts(wm)
             reset_non_bootstrap_wiremock_mappings(wm)
             upsert_wiremock_compose_bootstrap_stubs(wm)
+            e2e_flush_greenmail_inboxes(rt)
+            time.sleep(_E2E_BRIDGE_INJECT_SETTLE_SEC)
+            e2e_flush_sut_fsm_maildirs(rt)
             e2e_start_threlium_user_pipeline_services(rt)
             wait_for_sut_threlium_user_workers_idle(pn, timeout=120.0)
             reset_request_journal(wm)

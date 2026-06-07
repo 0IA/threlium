@@ -67,9 +67,12 @@ echo '=== journalctl --user-unit "threlium-sweep@*.service" (as {E2E_THRELIUM_US
 def e2e_stop_threlium_user_pipeline_bash() -> str:
     """Bash-скрипт: остановить engine, work, sweep (user systemd на SUT).
 
-    Мосты (``threlium-bridge@*``) НЕ трогаем на cold-reset: они лишь поллят IMAP→fdm и не
-    делают HTTP к WireMock (за это отвечают engine/work), поэтому останавливать их незачем —
-    рестарт только гоняет IMAP-переподключения без пользы. Оставляем работающими между сессиями.
+    Мосты (``threlium-bridge@*``) НЕ трогаем: их рестарт сломал бы параллельность (общий стек) и
+    замедлил старт. Гонку «живой telegram/matrix-мост переинжектит утёкший update в окне сброса»
+    закрываем порядком cold-reset, а не остановкой моста: сперва ``wiremock_state_reset_all_contexts``
+    (``telegram_updates`` / ``matrix_rooms`` пусты → ``getUpdates``/``/sync`` ничего не отдаёт),
+    затем settle на цикл поллинга моста и только потом flush Maildir — см.
+    ``conftest._e2e_wiremock_journal_reset_once``.
     """
     u = E2E_THRELIUM_USER
     return f"""set -eu
