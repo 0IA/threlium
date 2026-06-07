@@ -1,4 +1,13 @@
 {
+  "metadata": {
+    "comment": [
+      "tail-307 reasoning ПОСЛЕ release, когда ledger закрыт ('(0 open, 1 done'): response_finalize → egress",
+      "(editMessageText). Дискриминатор — ТЕКСТ ledger в промпте, а не sticky-state, чтобы каждое из двух",
+      "сообщений треда финализилось по СВОЕМУ закрытому ledger (100_chat_reasoning_egress_tasks_ledger_done",
+      "закрывает открытую подзадачу до этого). Изоляция/параллельность на общем стабе: композитный",
+      "hasContext '<stub_tag>::<X-Threlium-Thread-Root>'; updates тестов копятся в общий telegram_updates."
+    ]
+  },
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
@@ -18,7 +27,7 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "Task ledger:"
+        "contains": "(0 open, 1 done"
       }
     ],
     "customMatcher": {

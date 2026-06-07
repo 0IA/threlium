@@ -362,172 +362,186 @@ def test_live_telegram_wiremock_private_tail_307_second_message(
             correlation_key=correlation_key,
         )
 
-        wiremock_telegram_register_update(
-            base,
-            update_id=update_id_1,
-            chat_id=chat_id,
-            message_id=message_id_1,
-            text=f"e2e telegram ({test_id}) msg1 {tok1}",
-            thread_kind="",
-            chat_title="",
-        )
+        registered_update_ids: list[int] = []
         ctx_key = composite_context_key(test_id, correlation_key)
-
         try:
-            poll_until(
-                lambda: _reasoning_chat_completion_seen(tok1),
-                timeout=TIMEOUT_POLL_SHORT,
-                interval=2.0,
-                desc="WireMock: reasoning POST chat/completions с текстом msg1 (307 gate)",
+            wiremock_telegram_register_update(
+                base,
+                update_id=update_id_1,
+                chat_id=chat_id,
+                message_id=message_id_1,
+                text=f"e2e telegram ({test_id}) msg1 {tok1}",
+                thread_kind="",
+                chat_title="",
             )
-        except TimeoutError:
-            if _telegram_bridge_journal_suggests_missing_env(rt.project_name):
-                pytest.skip(
-                    "Нет reasoning для msg1: telegram-бридж без THRELIUM_TELEGRAM_* "
-                    "(по journal user unit)."
+            registered_update_ids.append(update_id_1)
+
+            try:
+                poll_until(
+                    lambda: _reasoning_chat_completion_seen(tok1),
+                    timeout=TIMEOUT_POLL_SHORT,
+                    interval=2.0,
+                    desc="WireMock: reasoning POST chat/completions с текстом msg1 (307 gate)",
                 )
-            raise
+            except TimeoutError:
+                if _telegram_bridge_journal_suggests_missing_env(rt.project_name):
+                    pytest.skip(
+                        "Нет reasoning для msg1: telegram-бридж без THRELIUM_TELEGRAM_* "
+                        "(по journal user unit)."
+                    )
+                raise
 
-        wiremock_telegram_register_update(
-            base,
-            update_id=update_id_2,
-            chat_id=chat_id,
-            message_id=message_id_2,
-            text=f"e2e telegram ({test_id}) msg2 {tok2}",
-            thread_kind="",
-            chat_title="",
-        )
-
-        msg2_reasoning_before_release = False
-        try:
-            poll_until(
-                lambda: True if _reasoning_chat_completion_seen(tok2) else None,
-                timeout=5.0,
-                interval=1.0,
-                desc="WireMock: проба — reasoning для второго сообщения до release (ожидаем таймаут)",
+            # Детерминизм tail-attachment: msg2 привяжется к треду msg1 только если bridge-сообщение
+            # msg1 уже проиндексировано в notmuch с тегом ``route`` (anchor-запрос
+            # ``resolve_bridge_tail_mid_for_space``: ``tag:route AND from:telegram AND Threliumspace``).
+            # Видимость reasoning msg1 в журнале WM этого НЕ гарантирует (индекс notmuch коммитится
+            # асинхронно от стадии) → без явного ожидания msg2 иногда стартует свой тред и
+            # ``tok1 in msg2.reasoning`` флапает. Ждём индексацию msg1 до регистрации msg2.
+            _wait_telegram_correlation_indexed(
+                rt.project_name, correlation_key=correlation_key
             )
-            msg2_reasoning_before_release = True
-        except TimeoutError:
+
+            wiremock_telegram_register_update(
+                base,
+                update_id=update_id_2,
+                chat_id=chat_id,
+                message_id=message_id_2,
+                text=f"e2e telegram ({test_id}) msg2 {tok2}",
+                thread_kind="",
+                chat_title="",
+            )
+            registered_update_ids.append(update_id_2)
+
             msg2_reasoning_before_release = False
+            try:
+                poll_until(
+                    lambda: True if _reasoning_chat_completion_seen(tok2) else None,
+                    timeout=5.0,
+                    interval=1.0,
+                    desc="WireMock: проба — reasoning для второго сообщения до release (ожидаем таймаут)",
+                )
+                msg2_reasoning_before_release = True
+            except TimeoutError:
+                msg2_reasoning_before_release = False
 
-        log.debug(
-            "telegram_tail_307_reasoning_before_release",
-            msg2_reasoning_before_release=msg2_reasoning_before_release,
-        )
+            log.debug(
+                "telegram_tail_307_reasoning_before_release",
+                msg2_reasoning_before_release=msg2_reasoning_before_release,
+            )
 
-        wiremock_state_reasoning_gate_release(base, ctx_key)
+            wiremock_state_reasoning_gate_release(base, ctx_key)
 
-        def _two_agent_sendmessages_seen() -> bool | None:
-            bs = wiremock_journal_telegram_sendmessage_bodies_matching_agent_reply(
+            def _two_agent_sendmessages_seen() -> bool | None:
+                bs = wiremock_journal_telegram_sendmessage_bodies_matching_agent_reply(
+                    base,
+                    stub_tag=test_id,
+                    chat_id=chat_id,
+                    reply_body=TELEGRAM_AGENT_REPLY_BODY_TAIL_307,
+                    message_thread_id=mtid,
+                )
+                return True if len(bs) >= 2 else None
+
+            try:
+                poll_until(
+                    _two_agent_sendmessages_seen,
+                    timeout=TIMEOUT_POLL_SHORT,
+                    interval=3.0,
+                    desc=(
+                        "WireMock journal: ≥2 POST editMessageText с chat_id и текстом ответа агента "
+                        f"({TELEGRAM_AGENT_REPLY_BODY_TAIL_307!r})"
+                    ),
+                )
+            except TimeoutError:
+                if _telegram_bridge_journal_suggests_missing_env(rt.project_name):
+                    pytest.skip(
+                        "Нет двух editMessageText с ответом агента: telegram-бридж без THRELIUM_TELEGRAM_* "
+                        "(по journal user unit)."
+                    )
+                raise
+
+            assert_wiremock_telegram_e2e_openai_coverage(
+                base,
+                test_id=test_id,
+                chat_id=chat_id,
+                reply_body=TELEGRAM_AGENT_REPLY_BODY_TAIL_307,
+                message_thread_id=mtid,
+            )
+
+            reply_bodies = wiremock_journal_telegram_sendmessage_bodies_matching_agent_reply(
                 base,
                 stub_tag=test_id,
                 chat_id=chat_id,
                 reply_body=TELEGRAM_AGENT_REPLY_BODY_TAIL_307,
                 message_thread_id=mtid,
             )
-            return True if len(bs) >= 2 else None
-
-        try:
-            poll_until(
-                _two_agent_sendmessages_seen,
-                timeout=TIMEOUT_POLL_SHORT,
-                interval=3.0,
-                desc=(
-                    "WireMock journal: ≥2 POST editMessageText с chat_id и текстом ответа агента "
-                    f"({TELEGRAM_AGENT_REPLY_BODY_TAIL_307!r})"
-                ),
+            assert len(reply_bodies) == 2, (
+                "Ожидались ровно два исходящих ответа агента (POST editMessageText с текстом из reasoning-стаба); "
+                f"получено {len(reply_bodies)}. Превью тел: {[b[:900] for b in reply_bodies]!r}"
             )
-        except TimeoutError:
-            if _telegram_bridge_journal_suggests_missing_env(rt.project_name):
-                pytest.skip(
-                    "Нет двух editMessageText с ответом агента: telegram-бридж без THRELIUM_TELEGRAM_* "
-                    "(по journal user unit)."
-                )
-            raise
+            placeholder_bodies = wiremock_journal_telegram_sendmessage_placeholder_bodies(
+                base,
+                stub_tag=test_id,
+                chat_id=chat_id,
+            )
+            reply_targets = [
+                wiremock_telegram_sendmessage_body_reply_target_message_id(b) for b in placeholder_bodies
+            ]
+            reply_targets = [t for t in reply_targets if t is not None]
+            assert len(reply_targets) >= 2, (
+                "В каждом sendMessage (placeholder) ожидался JSON ``reply_parameters`` с ``message_id`` входящего сообщения; "
+                f"targets={reply_targets!r}, превью тел: {[b[:1200] for b in placeholder_bodies]!r}"
+            )
+            assert set(reply_targets) == {message_id_1, message_id_2}, (
+                "Ответы должны быть reply на msg1 и msg2 (разные ``routing.message_id``); "
+                f"ожидалось множество {{{message_id_1}, {message_id_2}}}, получено {set(reply_targets)!r}"
+            )
 
-        assert_wiremock_telegram_e2e_openai_coverage(
-            base,
-            test_id=test_id,
-            chat_id=chat_id,
-            reply_body=TELEGRAM_AGENT_REPLY_BODY_TAIL_307,
-            message_thread_id=mtid,
-        )
+            msg2_reasoning_bodies: list[str] = []
+            for e in find_wiremock_requests_by_body_contains(
+                base, tok2, stub_tag=test_id, timeout=2.0
+            ):
+                req = e.get("request")
+                if not isinstance(req, dict):
+                    continue
+                url = str(req.get("url") or "")
+                if "chat/completions" not in url:
+                    continue
+                b = wiremock_journal_request_body(e)
+                if "<envelope>" in b and '"tools"' in b:
+                    msg2_reasoning_bodies.append(b)
 
-        reply_bodies = wiremock_journal_telegram_sendmessage_bodies_matching_agent_reply(
-            base,
-            stub_tag=test_id,
-            chat_id=chat_id,
-            reply_body=TELEGRAM_AGENT_REPLY_BODY_TAIL_307,
-            message_thread_id=mtid,
-        )
-        assert len(reply_bodies) == 2, (
-            "Ожидались ровно два исходящих ответа агента (POST editMessageText с текстом из reasoning-стаба); "
-            f"получено {len(reply_bodies)}. Превью тел: {[b[:900] for b in reply_bodies]!r}"
-        )
-        placeholder_bodies = wiremock_journal_telegram_sendmessage_placeholder_bodies(
-            base,
-            stub_tag=test_id,
-            chat_id=chat_id,
-        )
-        reply_targets = [
-            wiremock_telegram_sendmessage_body_reply_target_message_id(b) for b in placeholder_bodies
-        ]
-        reply_targets = [t for t in reply_targets if t is not None]
-        assert len(reply_targets) >= 2, (
-            "В каждом sendMessage (placeholder) ожидался JSON ``reply_parameters`` с ``message_id`` входящего сообщения; "
-            f"targets={reply_targets!r}, превью тел: {[b[:1200] for b in placeholder_bodies]!r}"
-        )
-        assert set(reply_targets) == {message_id_1, message_id_2}, (
-            "Ответы должны быть reply на msg1 и msg2 (разные ``routing.message_id``); "
-            f"ожидалось множество {{{message_id_1}, {message_id_2}}}, получено {set(reply_targets)!r}"
-        )
+            assert msg2_reasoning_bodies, (
+                "После завершения контура ожидался хотя бы один POST reasoning с телом msg2 "
+                f"(needle {tok2!r})."
+            )
+            joined = "\n".join(msg2_reasoning_bodies)
+            assert tok1 in joined, (
+                "В reasoning для второго сообщения ожидался текст msg1 в unified mail context "
+                "(доказательство общего notmuch-треда через tail attachment): "
+                f"tok1={tok1!r}, превью тел={joined[:4000]!r}"
+            )
 
-        msg2_reasoning_bodies: list[str] = []
-        for e in find_wiremock_requests_by_body_contains(
-            base, tok2, stub_tag=test_id, timeout=2.0
-        ):
-            req = e.get("request")
-            if not isinstance(req, dict):
-                continue
-            url = str(req.get("url") or "")
-            if "chat/completions" not in url:
-                continue
-            b = wiremock_journal_request_body(e)
-            if "<envelope>" in b and '"tools"' in b:
-                msg2_reasoning_bodies.append(b)
+            assert_notmuch_folder_contains_body_token(
+                rt.project_name,
+                stage_folder_id=FsmStage.ARCHIVE.value,
+                body_token=str(chat_id),
+                repo_root=REPO_ROOT,
+            )
 
-        assert msg2_reasoning_bodies, (
-            "После завершения контура ожидался хотя бы один POST reasoning с телом msg2 "
-            f"(needle {tok2!r})."
-        )
-        joined = "\n".join(msg2_reasoning_bodies)
-        assert tok1 in joined, (
-            "В reasoning для второго сообщения ожидался текст msg1 в unified mail context "
-            "(доказательство общего notmuch-треда через tail attachment): "
-            f"tok1={tok1!r}, превью тел={joined[:4000]!r}"
-        )
-
-        assert_notmuch_folder_contains_body_token(
-            rt.project_name,
-            stage_folder_id=FsmStage.ARCHIVE.value,
-            body_token=str(chat_id),
-            repo_root=REPO_ROOT,
-        )
-
-        log.info(
-            "telegram_tail_307_report",
-            tail_attachment_confirmed=True,
-            tok1=tok1,
-            msg2_reasoning_before_release=msg2_reasoning_before_release,
-            agent_send_message_n=len(reply_bodies),
-            reply_targets=sorted(reply_targets),
-        )
-
-        for uid in (update_id_2, update_id_1):
-            try:
-                wiremock_telegram_unregister_update(base, update_id=uid)
-            except Exception:  # noqa: BLE001
-                pass
+            log.info(
+                "telegram_tail_307_report",
+                tail_attachment_confirmed=True,
+                tok1=tok1,
+                msg2_reasoning_before_release=msg2_reasoning_before_release,
+                agent_send_message_n=len(reply_bodies),
+                reply_targets=sorted(reply_targets),
+            )
+        finally:
+            for uid in reversed(registered_update_ids):
+                try:
+                    wiremock_telegram_unregister_update(base, update_id=uid)
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def _wait_telegram_correlation_indexed(project: str, *, correlation_key: str) -> None:

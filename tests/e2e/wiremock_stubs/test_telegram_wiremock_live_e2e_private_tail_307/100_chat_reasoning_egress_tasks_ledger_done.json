@@ -1,4 +1,18 @@
 {
+  "metadata": {
+    "comment": [
+      "tail-307 reasoning ПОСЛЕ release, пока в ledger есть открытая подзадача: закрыть её через",
+      "tasks_upsert. enrich_task_plan (081) уже создал подзадачу 'Complete the user request' (open);",
+      "content_id детерминирован из текста, поэтому upsert с ТЕМ ЖЕ текстом и status=done апсёртит её",
+      "в done (а не плодит вторую). Без этого response_finalize fail-closed (есть открытая задача) и FSM",
+      "циклит enrich_fast→reasoning. Дискриминатор фаз — ТЕКСТ ledger в промпте ('(1 open, 0 done'),",
+      "НЕ sticky-state: для второго сообщения того же треда ledger снова '1 open' (свой enrich), и оно",
+      "тоже само закрывает задачу — sticky phase_tasks_ledger_done сломал бы msg2 (он бы пропустил upsert).",
+      "Параллельность tg-тестов на общем Bot-API стабе: апдейты копятся в общий массив telegram_updates",
+      "через state-extension; изоляция — композитным hasContext '<stub_tag>::<X-Threlium-Thread-Root>'.",
+      "reasoning_release снимает 307-гейт (098) — см. wiremock_state_reasoning_gate_release."
+    ]
+  },
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
@@ -18,7 +32,7 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "No subtasks recorded yet"
+        "contains": "(1 open, 0 done"
       }
     ],
     "customMatcher": {
@@ -35,7 +49,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-tasks-ledger-empty",
+      "id": "chatcmpl-e2e-tail307-tasks-ledger-done",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -48,7 +62,7 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_e2e_tasks_ledger_empty",
+                "id": "call_e2e_tail307_tasks_ledger_done",
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
