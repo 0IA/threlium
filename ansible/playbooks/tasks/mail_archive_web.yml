@@ -306,6 +306,18 @@
   become: true
   notify: restart dovecot
 
+# Dovecot строит список ящиков на старте: если он поднялся до создания virtual_mail/All
+# (и папок-стадий), Virtual/All «не существует» и в Roundcube виден только INBOX. Прогоняем
+# отложенный restart СЕЙЧАС — после создания virtual_mail выше — чтобы ящик появился, затем подписываем.
+- name: Flush handlers so Dovecot restarts after virtual_mail is created
+  ansible.builtin.meta: flush_handlers
+
+- name: Subscribe agent user to INBOX and the unified Virtual/All folder
+  ansible.builtin.command:
+    cmd: doveadm mailbox subscribe -u {{ threlium_user }} INBOX Virtual/All
+  become: true
+  changed_when: false
+
 - name: Deploy Roundcube configuration
   ansible.builtin.template:
     src: "{{ threlium_role_templates }}/mail-archive/config.inc.php.j2"
@@ -315,6 +327,20 @@
     group: www-data
   become: true
   no_log: true
+
+- name: Ensure threlium_default_folder plugin directory exists
+  ansible.builtin.file:
+    path: /usr/share/roundcube/plugins/threlium_default_folder
+    state: directory
+    mode: "0755"
+  become: true
+
+- name: Deploy threlium_default_folder Roundcube plugin (open Virtual/All after login)
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../roles/threlium/files/mail-archive/roundcube-plugins/threlium_default_folder/threlium_default_folder.php"
+    dest: /usr/share/roundcube/plugins/threlium_default_folder/threlium_default_folder.php
+    mode: "0644"
+  become: true
 
 - name: Initialize Roundcube SQLite database
   ansible.builtin.shell:

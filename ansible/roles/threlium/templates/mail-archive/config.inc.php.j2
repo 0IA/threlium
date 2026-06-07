@@ -5,12 +5,20 @@ $config['default_host'] = 'localhost';
 $config['default_port'] = 143;
 $config['smtp_server'] = ''; // read-only interface, no SMTP
 $config['des_key'] = '{{ roundcube_des_key_slurp.content | b64decode }}';
-$config['plugins'] = array('archive', 'zipdownload');
+// threlium_default_folder — открывать сводную Virtual/All сразу после логина (вместо INBOX).
+$config['plugins'] = array('archive', 'zipdownload', 'threlium_default_folder');
 $config['language'] = 'en_US';
 $config['ignore_subscriptions'] = true;
 $config['session_lifetime'] = 1440;
 // Не слать STORE «прочитано» при открытии (см. mail_read_time в defaults.inc.php); в паре с Dovecot ACL lr.
 $config['mail_read_time'] = -1;
+
+// Кэш сообщений/индексов в той же SQLite БД (db_dsnw) — без отдельного сервера БД.
+// Roundcube не перетягивает заголовки/тела с IMAP при каждом открытии папки → заметно быстрее.
+$config['messages_cache'] = 'db';
+$config['imap_cache'] = 'db';
+// Кэшировать тела сообщений ≤ этого размера (КБ); крупные не раздувают SQLite.
+$config['messages_cache_threshold'] = 50;
 
 // Threlium: threads + date sort; сводная виртуальная папка как «архив» и в default_folders.
 $config['message_sort_col'] = 'date';

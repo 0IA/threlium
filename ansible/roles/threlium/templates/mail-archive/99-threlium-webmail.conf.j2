@@ -23,7 +23,10 @@ namespace inbox {
 namespace virtual {
   prefix = Virtual/
   separator = /
-  location = virtual:{{ threlium_home }}/virtual_mail:INDEX=MEMORY
+  # Файловый (персистентный) индекс virtual-папки вместо INDEX=MEMORY: dovecot не
+  # пересканирует все исходные ящики при каждом открытии Virtual/All (это собственный
+  # lib-index dovecot на ФС, БД-сервер не нужен). Ускоряет открытие сводной папки.
+  location = virtual:{{ threlium_home }}/virtual_mail
 }
 
 plugin {
