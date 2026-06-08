@@ -1,4 +1,4 @@
-"""Mailflow scenario DSL: inject, assert, RAG warmup."""
+"""Mailflow scenario DSL: inject, assert (state-only, без notmuch/docker-exec во внутренней части)."""
 from __future__ import annotations
 
 import contextlib
@@ -8,32 +8,23 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
-from threlium.lightrag_drain_query import lightrag_drain_pending_search
 
 from .bridges.email import (
     canonical_external_msgid,
     email_ingress_notmuch_id_inner,
     e2e_thread_root_mid_for_message_id,
 )
-from .constants import E2E_SUT_NOTMUCH_BASH_EXPORT, REPO_ROOT, TIMEOUT_POLL_SHORT
+from .constants import REPO_ROOT, TIMEOUT_POLL_SHORT
 from .diag import (
     mailflow_fsm_maildir_systemd_snapshot,
-    mailflow_pipeline_diag,
     mailflow_wait_fsm_maildir_activity,
     reset_maildrop_debug_log,
 )
-from .lightrag_assert import assert_notmuch_mailflow_thread_has_lightrag_indexed
 from .notmuch_assert import (
     assert_notmuch_thread_fully_in_stages,
-    assert_notmuch_thread_has_messages_in_folders,
-    assert_notmuch_thread_has_no_unread,
-    poll_lightrag_indexed_positive,
     wait_for_notmuch_message,
 )
 from .wiremock_assert import (
-    assert_wiremock_mailflow_min_embedding_posts,
-    assert_wiremock_mailflow_min_rerank_posts,
-    assert_wiremock_mailflow_received_chat_completion_posts,
     assert_wiremock_mailflow_zero_unmatched,
 )
 from .fixtures import (
@@ -49,7 +40,7 @@ from .greenmail import (
     wait_for_greenmail_user_reply,
 )
 from .poll import mailflow_diag_block, mailflow_log_phase, poll_until
-from .runtime import E2EComposeRuntime, discover_runtime, service_exec
+from .runtime import discover_runtime
 from .smtp_ingress import smtp_inject_inbound
 
 @dataclass(frozen=True)
@@ -85,110 +76,6 @@ class MailflowScenarioSpec:
     wiremock_journal_ready_needle: str | None = None
     assert_thread_no_unread: bool = False
     length_recovery_e2e: bool = False
-
-
-def _wait_rag_drain_idle(project_name: str, *, label: str) -> None:
-    """Poll until the LightRAG pending selector returns empty (drain finished)."""
-    selector = lightrag_drain_pending_search()
-    cmd = [
-        "bash", "-lc",
-        f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; "
-        f"notmuch count '{selector}' 2>/dev/null || echo 99",
-    ]
-
-    def _probe() -> str | None:
-        r = service_exec(project_name, "sut", cmd, repo_root=REPO_ROOT, timeout=int(TIMEOUT_POLL_SHORT))
-        if r.returncode != 0:
-            return None
-        try:
-            n = int((r.stdout or "").strip())
-        except ValueError:
-            return None
-        return "0" if n == 0 else None
-
-    poll_until(_probe, timeout=TIMEOUT_POLL_SHORT, interval=2.0, desc="rag pending count == 0")
-    mailflow_log_phase(f"{label}: rag drain idle (no pending messages)")
-
-
-def _inject_rag_warmup(
-    project_name: str,
-    *,
-    rt: E2EComposeRuntime,
-    wm_base: str,
-    stub_tag: str,
-    body_head: str,
-    body_extra: str,
-    label: str,
-) -> None:
-    """Ensure vectordb has data for rerank; inject warm-up only if needed.
-
-    If vectordb already contains data (from a previous test in the same session),
-    skip injection entirely. Otherwise inject a warm-up message through the agent
-    mailbox and wait for LightRAG drain to populate the vectordb.
-    """
-    from tests.e2e.wiremock_client import (  # noqa: PLC0415
-        composite_context_key,
-        wiremock_state_seed_context,
-        wiremock_state_standard_tasks_ledger_enable,
-    )
-
-    cmd = [
-        "bash", "-lc",
-        "stat --printf='%s' /home/threlium/threlium/data/lightrag/faiss_index_chunks.index.meta.json 2>/dev/null || echo 0",
-    ]
-    r = service_exec(project_name, "sut", cmd, repo_root=REPO_ROOT, timeout=int(TIMEOUT_POLL_SHORT))
-    try:
-        sz = int((r.stdout or "").strip())
-    except ValueError:
-        sz = 0
-    if sz > 10:
-        _wait_rag_drain_idle(project_name, label=label)
-        # Cold session bootstrap knowledge leaves a small vdb (~8KiB) without rerank-ready
-        # scenario vectors; do not skip warmup on that footprint (see enrich_task_hypotheses briefing).
-        _RAG_WARMUP_SKIP_MIN_BYTES = 32_768
-        if sz >= _RAG_WARMUP_SKIP_MIN_BYTES:
-            mailflow_log_phase(
-                f"{label}: vectordb already has data ({sz} bytes), skip warmup"
-            )
-            return
-        mailflow_log_phase(
-            f"{label}: vdb {sz} bytes (< {_RAG_WARMUP_SKIP_MIN_BYTES}), run warmup after bootstrap"
-        )
-
-    warmup_id = f"e2e-rag-warmup-{uuid.uuid4().hex[:12]}@localhost"
-    warmup_corr = e2e_thread_root_mid_for_message_id(warmup_id)
-    warmup_ctx = composite_context_key(stub_tag, warmup_corr)
-    wiremock_state_seed_context(wm_base, warmup_ctx)
-    # Стандартный reasoning-путь (100_tasks → tasks_upsert → 100_egress): без
-    # phase_standard_tasks_ledger ни один reasoning-стаб не матчится → unmatched.
-    wiremock_state_standard_tasks_ledger_enable(wm_base, warmup_ctx)
-
-    warmup_body = e2e_dense_threlium_ctx_body(
-        head=body_head, correlation_key=warmup_corr
-    )
-    if body_extra:
-        warmup_body = warmup_body.rstrip("\n") + "\n" + body_extra + "\n"
-    smtp_inject_inbound(
-        project_name,
-        checkout="/unused",
-        repo_root=REPO_ROOT,
-        message_id=warmup_id,
-        body=warmup_body,
-    )
-    mailflow_log_phase(f"{label}: rag warmup injected mid={warmup_id!r}")
-
-    wait_for_greenmail_inbox_message_gone_host(
-        rt.greenmail_imap_host,
-        rt.greenmail_imap_port,
-        message_id=warmup_id,
-    )
-    mailflow_log_phase(f"{label}: rag warmup picked up (gone from INBOX, pipeline complete)")
-
-    poll_lightrag_indexed_positive(
-        project_name, correlation_key=warmup_corr, repo_root=REPO_ROOT
-    )
-    _wait_rag_drain_idle(project_name, label=label)
-    mailflow_log_phase(f"{label}: rag warmup indexed in vectordb")
 
 
 @contextlib.contextmanager
@@ -252,38 +139,10 @@ def mailflow_inject_and_wait(
             composite_context_key(spec.stub_tag, correlation_key),
         )
 
-    if spec.min_rerank_posts > 0:
-        _inject_rag_warmup(
-            project_name,
-            rt=rt,
-            wm_base=wm_base,
-            stub_tag=spec.stub_tag,
-            body_head=spec.body_head,
-            body_extra=spec.warmup_body_extra,
-            label=spec.label,
-        )
-        mailflow_log_phase(
-            f"{spec.label}: lightrag vectordb has indexed data (+{time.monotonic() - t0:.1f}s)"
-        )
-
+    # RAG-warmup убран: тесты больше НЕ зависят от тёплой vdb (rerank не ассертится в mailflow;
+    # покрытие корреляторов lightrag — в выделенном тесте test_lightrag_correlator_integrity).
+    # Индексация идёт async background, контур гейтится GreenMail-ответом, не drain'ом.
     reset_maildrop_debug_log(project_name, repo_root=REPO_ROOT)
-
-    if seed_id is not None and spec.min_rerank_posts == 0:
-        # Cold-reset сносит lightrag; цепочка prior-turn seed (summarize/trim) гоняет
-        # полный ingress→egress на каждый ход. Без прогретого vdb первый seed часто не
-        # успевает в TIMEOUT_POLL_SHORT на solo/cold (в batch vdb уже тёплый от соседей).
-        _inject_rag_warmup(
-            project_name,
-            rt=rt,
-            wm_base=wm_base,
-            stub_tag=spec.stub_tag,
-            body_head=spec.body_head,
-            body_extra=spec.warmup_body_extra,
-            label=spec.label,
-        )
-        mailflow_log_phase(
-            f"{spec.label}: lightrag ready for prior-turn seeds (+{time.monotonic() - t0:.1f}s)"
-        )
 
     if seed_id is not None:
         # summarize overflow: несколько старых ходов одного треда, каждый distill-бриф под
@@ -556,22 +415,19 @@ def assert_full_mailflow_pipeline(
     def _probe() -> list[str] | None:
         cs = wiremock_state_thread_root_call_sites(wm, correlation_key)
         chat = [c for c in cs if c not in _EMBED and c != _RERANK]
-        embed = [c for c in cs if c in _EMBED]
-        ok = (
-            len(chat) >= spec.min_chat_completion_posts
-            and len(embed) >= spec.min_embedding_posts
-            and "lightrag_index" in cs
-        )
+        # Развязка per-message assert от LightRAG-drain (главный -n4 флак rag pending == 0):
+        # gate ТОЛЬКО на chat-completion count (контурные LLM-вызовы), БЕЗ ожидания индексации
+        # (embed/lightrag_index сняты) и БЕЗ привязки к конкретному call-site enrich (он не
+        # универсален: enrich-flow зовёт enrich_task_plan, а response-table-flow — generate_rag_answer).
+        # GreenMail reply (шаг 1) уже доказал, что контур дошёл до egress → chat-вызовы завершены.
+        ok = len(chat) >= spec.min_chat_completion_posts
         return cs if ok else None
 
     call_sites = poll_until(
         _probe,
         timeout=TIMEOUT_POLL_SHORT,
         interval=2.0,
-        desc=(
-            f"call_sites: chat>={spec.min_chat_completion_posts} "
-            f"embed>={spec.min_embedding_posts} + lightrag_index"
-        ),
+        desc=f"call_sites: chat>={spec.min_chat_completion_posts}",
     )
     mailflow_log_phase(
         f"{spec.label}: lifecycle OK via state ({len(call_sites)} call-sites, +{time.monotonic() - t0:.1f}s)"
