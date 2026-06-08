@@ -3,6 +3,7 @@
 from email.message import EmailMessage
 
 from threlium.settings import ThreliumSettings
+from threlium.e2e_directives import extract_e2e_int_directive
 from threlium.fsm_emit import push_subagent_hop_budget
 from threlium.fsm_emit_semantic import (
     emit_to_enrich,
@@ -23,7 +24,16 @@ from threlium.types import (
 def main(
     msg: EmailMessage, stage: FsmStage, *, config: ThreliumSettings
 ) -> EmailMessage | None:
-    hb = push_subagent_hop_budget(HopBudgetLine.parse_from_email(msg), config)
+    raw_task = system_part_text(msg)
+    # E2E-ONLY: per-message override sub-бюджета (E2E_HOP_BUDGET_SUB:<int> в теле subagent-задачи) вместо
+    # global threlium.yaml + рестарт engine (обобщение E2E_MID:, docs/E2E.md §2.3). Только за флагом e2e;
+    # токен вырезается из задачи. В проде sub_override=None → лимит из settings.hop.budget_sub.
+    sub_override: int | None = None
+    if config.e2e.litellm_route_correlation:
+        sub_override, raw_task = extract_e2e_int_directive(raw_task, "HOP_BUDGET_SUB")
+    hb = push_subagent_hop_budget(
+        HopBudgetLine.parse_from_email(msg), config, sub_max_override=sub_override
+    )
     if hb is None:
         notice = render_prompt(PromptPath.SUBAGENT_INTENT_BUDGET_EXHAUSTED).strip()
         return emit_to_enrich(
@@ -33,7 +43,7 @@ def main(
             settings=config,
         )
     task = EnrichUserQueryText.require_value(
-        name="subagent task", raw=system_part_text(msg)
+        name="subagent task", raw=raw_task
     )
     return emit_to_enrich(
         msg,

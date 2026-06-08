@@ -89,9 +89,6 @@ from .toolkit import (
     E2E_FETCHMAIL_USER,
     E2E_GREENMAIL_REPLY_USER,
     E2E_REPLY_BODY_SNIPPET,
-    REPO_ROOT,
-    e2e_refresh_hop_budget_default,
-    e2e_refresh_hop_budget_sub,
     e2e_dense_threlium_ctx_body,
     e2e_greenmail_mailbox_address,
     e2e_thread_root_mid_for_message_id,
@@ -604,7 +601,9 @@ def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2ECompose
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     try:
-        e2e_refresh_hop_budget_sub(rt.project_name, budget_sub=4, repo_root=REPO_ROOT)
+        # sub-бюджет (=4) задаётся per-message директивой E2E_HOP_BUDGET_SUB:4 в subagent-task стабе
+        # (102_reasoning_subagent_first) — БЕЗ патча threlium.yaml + рестарта engine (был -n4-несовместим:
+        # рестарт общего engine ронял соседние контуры). Обобщение E2E_MID:, docs/E2E.md §2.3.
         _live_prepare_wiremock(rt, kind="subagent_budget_exhausted", correlation_key=correlation_key)
         smtp_h, smtp_p = rt.greenmail_smtp_host, rt.greenmail_smtp_port
         imap_h, imap_p = rt.greenmail_imap_host, rt.greenmail_imap_port
@@ -660,7 +659,6 @@ def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2ECompose
             == "1"
         ), "budget exhausted notice must reach L1 reasoning prompt (state saw_budget_exhausted_notice)"
     finally:
-        e2e_refresh_hop_budget_default(rt.project_name, repo_root=REPO_ROOT)
         assert_wiremock_zero_unmatched_requests(wm_base)
 
 
@@ -871,8 +869,6 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(e2e_runtime: E2EC
     correlation_key = e2e_thread_root_mid_for_message_id(user_mid)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     try:
-        # После budget-exhausted теста в threlium.yaml может остаться ``budget_sub: 4``.
-        e2e_refresh_hop_budget_default(rt.project_name, repo_root=REPO_ROOT)
         _live_prepare_wiremock(rt, kind="hitl_matrix", correlation_key=correlation_key)
         smtp_h, smtp_p = rt.greenmail_smtp_host, rt.greenmail_smtp_port
         imap_h, imap_p = rt.greenmail_imap_host, rt.greenmail_imap_port

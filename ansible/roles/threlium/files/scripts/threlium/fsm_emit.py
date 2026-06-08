@@ -76,11 +76,22 @@ def advance_hop_budget_for_simple_step(line: HopBudgetLine, settings: ThreliumSe
     return line.advance_simple_step(root_default=_default_root_hop_max(settings))
 
 
-def push_subagent_hop_budget(line: HopBudgetLine, settings: ThreliumSettings) -> HopBudgetLine | None:
-    """PUSH: декремент хвоста + append(sub_max). ``None`` если хвост после step < 1."""
+def push_subagent_hop_budget(
+    line: HopBudgetLine,
+    settings: ThreliumSettings,
+    *,
+    sub_max_override: int | None = None,
+) -> HopBudgetLine | None:
+    """PUSH: декремент хвоста + append(sub_max). ``None`` если хвост после step < 1.
+
+    ``sub_max_override`` (E2E-ONLY): если задан — лимит sub-фрейма берётся из него вместо
+    ``settings.hop.budget_sub`` (per-message e2e-директива, см. :mod:`threlium.e2e_directives`;
+    позволяет тесту задать бюджет в теле без правки global ``threlium.yaml`` + рестарта engine). В
+    проде всегда ``None`` (стадия читает директиву только за флагом e2e)."""
+    sub_max = sub_max_override if sub_max_override is not None else _default_sub_hop_max(settings)
     return line.push_subagent(
         root_default=_default_root_hop_max(settings),
-        sub_max=_default_sub_hop_max(settings),
+        sub_max=sub_max,
     )
 
 

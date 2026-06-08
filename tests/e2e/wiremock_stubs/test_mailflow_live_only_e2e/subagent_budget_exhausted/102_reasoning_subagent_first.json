@@ -50,7 +50,7 @@
                 "type": "function",
                 "function": {
                   "name": "subagent_intent",
-                  "arguments": "{\"reasoning\": \"e2e: delegating subtask to child agent\", \"task\": \"E2e deterministic nested task (SUBAGENT_TABLE.md: L0→L1→L2 delegate, HITL at L2, POP L2→L1→L0).\"}"
+                  "arguments": "{\"reasoning\": \"e2e: delegating subtask to child agent\", \"task\": \"E2e deterministic nested task (SUBAGENT_TABLE.md: L0\\u2192L1\\u2192L2 delegate, HITL at L2, POP L2\\u2192L1\\u2192L0). E2E_HOP_BUDGET_SUB:4\"}"
                 }
               }
             ]
