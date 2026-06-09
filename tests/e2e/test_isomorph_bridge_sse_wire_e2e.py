@@ -14,6 +14,8 @@
 """
 from __future__ import annotations
 
+import uuid
+
 import json
 from pathlib import Path
 from typing import Generator
@@ -27,7 +29,6 @@ from .toolkit.constants import TIMEOUT_POLL_LIVE_MAIL
 from .toolkit.isomorph_cline import (
     bridge_post_json_with_pushed_error,
     bridge_post_sse,
-    clean_isomorph_test_threads,
     e2e_explicit_root_corr,
     e2e_explicit_root_mid,
     e2e_root_prompt_token,
@@ -54,7 +55,6 @@ def _seed(rt: E2EComposeRuntime, *, stub_tag: str, stub_dir: Path, marker: str) 
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
     wait_bridge_health(rt, port=_ISO_PORT)
-    clean_isomorph_test_threads(rt, marker)
     upsert_wiremock_mapping_directory(wm_base, stub_dir, stub_tag=stub_tag)
     wiremock_state_seed_context(wm_base, composite_context_key(stub_tag, e2e_explicit_root_mid(marker)))
 
@@ -78,7 +78,7 @@ def _body(surface: IsomorphApiSurface, marker: str) -> dict[str, object]:
 
 # ============================ Anthropic ============================
 
-_A_MARKER = "isomorph-anthropic-sse-wire-e2e"
+_A_MARKER = f"isomorph-anthropic-sse-wire-e2e-{uuid.uuid4().hex[:12]}"
 # Переиспользуем L0-цепочку json-варианта (FSM-путь тот же). hasContext stub_tag ЗАШИТ в файлах стабов
 # (upsert его НЕ подставляет) → сидим тем же tag; изоляция держится на СВОЁМ thread-root (explicit MID).
 _A_STUB_TAG = "stub-isomorph-anthropic-json-e2e-01"
@@ -120,7 +120,7 @@ def test_isomorph_bridge_anthropic_sse_wire_shape(isomorph_sse_anthropic: E2ECom
 
 # ============================ OpenAI ============================
 
-_O_MARKER = "isomorph-openai-sse-wire-e2e"
+_O_MARKER = f"isomorph-openai-sse-wire-e2e-{uuid.uuid4().hex[:12]}"
 _O_STUB_TAG = "stub-isomorph-openai-json-e2e-01"  # зашитый tag json-стабов (см. _A_STUB_TAG)
 _O_STUB_DIR = _STUBS_ROOT / "test_isomorph_bridge_openai_json_e2e"
 
@@ -163,7 +163,7 @@ def test_isomorph_bridge_openai_sse_wire_shape(isomorph_sse_openai: E2EComposeRu
 
 # ============================ client disconnect (long-hold) ============================
 
-_D_MARKER = "isomorph-disconnect-e2e"
+_D_MARKER = f"isomorph-disconnect-e2e-{uuid.uuid4().hex[:12]}"
 _D_STUB_TAG = "stub-isomorph-anthropic-json-e2e-01"  # зашитый tag json-стабов (см. _A_STUB_TAG)
 _D_STUB_DIR = _STUBS_ROOT / "test_isomorph_bridge_anthropic_json_e2e"
 
@@ -200,7 +200,7 @@ def test_isomorph_bridge_client_disconnect_mid_hold(isomorph_disconnect: E2EComp
 
 # ============================ FSM error → error envelope ============================
 
-_E_MARKER = "isomorph-error-envelope-e2e"
+_E_MARKER = f"isomorph-error-envelope-e2e-{uuid.uuid4().hex[:12]}"
 _E_STUB_TAG = "stub-isomorph-openai-json-e2e-01"  # зашитый tag json-стабов (см. _A_STUB_TAG)
 _E_STUB_DIR = _STUBS_ROOT / "test_isomorph_bridge_openai_json_e2e"
 _PUSH_SECRET = "e2e-isomorph-push-secret"  # group_vars/e2e.yml bridges.isomorph.push_secret

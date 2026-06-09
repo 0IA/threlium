@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+import uuid
+
 import json
 from pathlib import Path
 from typing import Generator
@@ -25,7 +27,6 @@ from .toolkit.constants import TIMEOUT_POLL_LIVE_MAIL
 from .toolkit.isomorph_cline import (
     bridge_post_json,
     build_continuation_body,
-    clean_isomorph_test_threads,
     extract_reply_text,
     nm_count,
     nm_count_in_test_thread,
@@ -50,7 +51,7 @@ _SURFACE = IsomorphApiSurface.OPENAI_CHAT_COMPLETIONS
 _PATH = "/v1/chat/completions"
 _STUB_TAG = "stub-isomorph-openai-json-e2e-01"
 _STUB_DIR = Path(__file__).parent / "wiremock_stubs" / "test_isomorph_bridge_openai_json_e2e"
-_MARKER = "isomorph-openai-json-e2e"
+_MARKER = f"isomorph-openai-json-e2e-{uuid.uuid4().hex[:12]}"
 _REPLY_MARKER = "ok from llm-mock"
 #: Тело запроса целиком во власти теста (system+user сольются в один хвост → детерминированный thread-root).
 _BODY: dict[str, object] = {
@@ -78,7 +79,6 @@ def isomorph_json(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntime
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
     wait_bridge_health(rt, port=_ISO_PORT)  # мост мог ещё не подняться после сессионного cold-reset
-    clean_isomorph_test_threads(rt, _MARKER)
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
     wiremock_state_seed_context(wm_base, composite_context_key(_STUB_TAG, _thread_root()))
     try:

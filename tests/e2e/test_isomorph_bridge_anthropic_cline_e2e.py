@@ -17,6 +17,8 @@ OpenAI-зеркало — [test_isomorph_bridge_openai_cline_e2e.py](test_isomor
 """
 from __future__ import annotations
 
+import uuid
+
 from pathlib import Path
 from typing import Generator
 
@@ -27,7 +29,6 @@ from threlium.types import IsomorphApiSurface
 from .toolkit import E2EComposeRuntime, poll_until
 from .toolkit.constants import TIMEOUT_POLL_LIVE_MAIL
 from .toolkit.isomorph_cline import (
-    clean_isomorph_test_threads,
     cline_received,
     configure_cline,
     e2e_explicit_root_mid,
@@ -59,7 +60,7 @@ _CLINE_DATA = "/tmp/cline-anthropic-e2e"
 _CLINE_CWD = "/tmp/cline-anthropic-e2e-work"
 _CLINE_OUT = "/tmp/cline_anthropic_e2e_out.json"
 #: Уникальный токен промпта → дата-независимая scoped-чистка ТОЛЬКО тредов этого теста (см. фикстуру).
-_MARKER = "isomorph-anthropic-cline-e2e"
+_MARKER = f"isomorph-anthropic-cline-e2e-{uuid.uuid4().hex[:12]}"
 #: Промпт несёт ГОТОВЫЙ thread-root как `E2E_MID:<...>` (мост в e2e берёт его напрямую, без content-hash →
 #: нет зависимости от даты/реконструкции тела Cline). Маркер `[...]` оставлен для scoped-чистки/нотмач-скоупа.
 _PROMPT = f"reply pong {e2e_root_prompt_token(_MARKER)} [{_MARKER}]"
@@ -85,7 +86,6 @@ def isomorph_cline(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntim
     sut_exec(rt, f"pkill -f {_CLINE_DATA} 2>/dev/null || true")  # только свой cline (по data-dir): parallel-safe  # добить Cline от упавшего прогона (teardown мог не успеть)
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
     wait_bridge_health(rt, port=_ISO_PORT)  # мост мог ещё не подняться после сессионного cold-reset
-    clean_isomorph_test_threads(rt, _MARKER)
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
     wiremock_state_seed_context(wm_base, composite_context_key(_STUB_TAG, _thread_root()))
     configure_cline(

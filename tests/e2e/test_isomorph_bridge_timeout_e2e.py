@@ -8,6 +8,8 @@ idle без зависа.
 """
 from __future__ import annotations
 
+import uuid
+
 from pathlib import Path
 from typing import Generator
 
@@ -18,7 +20,6 @@ from threlium.types import IsomorphApiSurface
 from .toolkit import E2EComposeRuntime
 from .toolkit.isomorph_cline import (
     bridge_post_json,
-    clean_isomorph_test_threads,
     e2e_explicit_root_mid,
     e2e_root_prompt_token,
 )
@@ -33,7 +34,7 @@ from .wiremock_client import (
 _ISO_PORT = 8040
 _API_KEY = "e2e-isomorph-api-key"
 _MODEL = "claude-sonnet-4-6"
-_MARKER = "isomorph-timeout-e2e"
+_MARKER = f"isomorph-timeout-e2e-{uuid.uuid4().hex[:12]}"
 _STUB_TAG = "stub-isomorph-openai-json-e2e-01"  # зашитый tag json-стабов
 _STUB_DIR = Path(__file__).parent / "wiremock_stubs" / "test_isomorph_bridge_openai_json_e2e"
 _LOW_TIMEOUT = 2  # per-request таймаут моста для этого запроса (директива E2E_REQUEST_TIMEOUT_SEC)
@@ -44,7 +45,6 @@ def isomorph_timeout_scenario(e2e_runtime: E2EComposeRuntime) -> Generator[E2ECo
     rt = e2e_runtime
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
-    clean_isomorph_test_threads(rt, _MARKER)
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
     wiremock_state_seed_context(wm_base, composite_context_key(_STUB_TAG, e2e_explicit_root_mid(_MARKER)))
     try:
