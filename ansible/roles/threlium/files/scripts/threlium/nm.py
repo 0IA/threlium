@@ -363,11 +363,8 @@ def _queries_for_message_id(mid: NotmuchMessageIdInner) -> tuple[str, ...]:
 def _first_message_path_for_message_id_in_db(
     db: notmuch2.Database, mid: NotmuchMessageIdInner
 ) -> Path | None:
-    for q in _queries_for_message_id(mid):
-        paths = _message_paths_in_db(db, q, limit=1, sort_newest_first=False)
-        if paths:
-            return paths[0]
-    return None
+    msg = first_notmuch_message_for_inner_id(db, mid)  # db.find-first (без move_to_next-краша)
+    return Path(msg.path) if msg is not None else None
 
 
 @read_retry
@@ -405,7 +402,20 @@ def first_message_for_query(
 def first_notmuch_message_for_inner_id(
     db: notmuch2.Database, mid: NotmuchMessageIdInner
 ) -> notmuch2.Message | None:
-    """Первое сообщение в индексе по inner ``Message-ID``."""
+    """Первое сообщение в индексе по inner ``Message-ID``.
+
+    ``db.find(id)`` (одиночный lookup ``notmuch_database_find_message`` с error-каналом) — а НЕ
+    ленивый итератор ``db.messages(q)``: его ``__next__``/``move_to_next`` (CFFI ``notmuch_messages_
+    move_to_next``, void-возврат, без error-канала) под конкурентной записью кидает C++
+    ``Xapian::DatabaseModifiedError`` прямо из advance → escape мимо ``read_retry`` (Python-обёртки
+    нет) → ``std::terminate`` → SIGABRT. ``db.find`` на discard'е ревизии поднимает ПИТОНОВСКИЙ
+    ``XapianError`` → ``read_retry`` ловит и переоткрывает. Фоллбэк на query-формы — лишь при
+    ``LookupError`` (id со спецсимволами, где нужен ``as_notmuch_term``-quoting); для base62-MID
+    Threlium общий путь — ``db.find``."""
+    try:
+        return db.find(mid.value)
+    except LookupError:
+        pass
     for q in _queries_for_message_id(mid):
         msg = _first_message_for_query(db, q)
         if msg is not None:
@@ -432,24 +442,22 @@ def parent_message_for_in_reply_in_db(
 ) -> notmuch2.Message | None:
     """Родитель по ``In-Reply-To`` (present-wire) под уже открытым READ ``db``."""
     mid = NotmuchMessageIdInner.from_present_mid_header_wire(in_reply)
-    q_quoted = mid.as_notmuch_term()
-    q_raw = f"id:{mid.value}"
-    msg = _first_message_for_query(db, q_quoted)
-    if msg is not None:
-        return msg
-    return _first_message_for_query(db, q_raw)
+    return first_notmuch_message_for_inner_id(db, mid)  # db.find-first (без move_to_next-краша, см. там)
 
 
 def thread_id_for_header_message_id_in_db(
     db: notmuch2.Database, mid: NotmuchMessageIdInner
 ) -> NotmuchThreadScopeId | None:
-    """Thread id по inner ``Message-ID`` под уже открытым READ ``db``."""
-    for q in _queries_for_message_id(mid):
-        paths = _message_paths_in_db(db, q, limit=1, sort_newest_first=False)
-        if not paths:
-            continue
-        return _thread_id_for_resolved_path_in_db(db, paths[0].resolve())
-    return None
+    """Thread id по inner ``Message-ID`` под уже открытым READ ``db``.
+
+    Через ``first_notmuch_message_for_inner_id`` (``db.find``-first) + ``msg.threadid`` — БЕЗ ленивого
+    ``db.messages``-итератора (его ``move_to_next`` под конкурентной записью = C++ SIGABRT, см. там) и
+    без лишнего ``db.get(path)``-роундтрипа. ``msg.threadid`` — error-канал'd (Python-исключение →
+    ``read_retry``)."""
+    msg = first_notmuch_message_for_inner_id(db, mid)
+    if msg is None:
+        return None
+    return NotmuchThreadScopeId.from_notmuch_thread_attr(msg.threadid)
 
 
 @read_retry
