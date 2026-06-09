@@ -1788,22 +1788,14 @@ def prepare_wiremock_scenario(
     данные **не** трогает (пост-mortem). См. ``docs/E2E.md``.
     """
     ctx_key = composite_context_key(stub_tag, correlation_key)
-    
-    # Clean up SUT messages from previous runs of the same test scenario
-    try:
-        from tests.e2e.toolkit.cleanup import e2e_clean_sut_messages_for_test
-        from tests.e2e.toolkit.compose_lifecycle import discover_live_e2e_project_name
-        from tests.e2e.toolkit.runtime import discover_runtime
-        from tests.e2e.toolkit.workers import wait_for_sut_threlium_user_workers_idle
-        pn = discover_live_e2e_project_name()
-        if pn:
-            rt = discover_runtime(pn)
-            e2e_clean_sut_messages_for_test(
-                rt, stub_tag, correlation_key=correlation_key
-            )
-            wait_for_sut_threlium_user_workers_idle(pn, timeout=30.0)
-    except Exception as cleanup_exc:
-        log.warning("sut_message_cleanup_failed", stub_tag=stub_tag, error=repr(cleanup_exc))
+
+    # НЕ чистим SUT-сообщения прошлых прогонов per-test. ``correlation_key`` динамичен (``uuid4`` в
+    # mailflow ``raw_id``), поэтому новый прогон/соседний тест НЕ пересекается со старыми сообщениями —
+    # изоляция уже обеспечена уникальным коррелятором. Прежний ``e2e_clean_sut_messages_for_test`` делал
+    # полный ``notmuch search '*'`` + условный ``notmuch new`` (реиндекс) при ЖИВОМ движке → конкурентная
+    # запись инвалидирует read-снапшот → notmuch2-объекты движка дестроятся в GC на устаревшей ревизии →
+    # ``Xapian::DatabaseModifiedError`` в C++ ``__del__`` → ``std::terminate`` → SIGABRT (мимо read_retry).
+    # Реиндекс — операция СТАРТА СЕССИИ (``e2e_flush_sut_fsm_maildirs``). См. docs/E2E.md.
 
     with _wiremock_admin_api_exclusive(timeout=timeout):
         upsert_wiremock_mapping_directory(
