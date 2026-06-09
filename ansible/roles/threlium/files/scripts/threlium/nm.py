@@ -354,12 +354,6 @@ def first_message_path(query: str, *, sort_newest_first: bool = False) -> Path |
     return paths[0] if paths else None
 
 
-def _queries_for_message_id(mid: NotmuchMessageIdInner) -> tuple[str, ...]:
-    """Запросы notmuch по inner ``Message-ID`` (без ``<>``): сначала канонический термин."""
-    q = mid.as_notmuch_term()
-    return (q, f"id:{mid.value}")
-
-
 def _first_message_path_for_message_id_in_db(
     db: notmuch2.Database, mid: NotmuchMessageIdInner
 ) -> Path | None:
@@ -369,15 +363,9 @@ def _first_message_path_for_message_id_in_db(
 
 @read_retry
 def first_message_path_for_message_id(mid: NotmuchMessageIdInner) -> Path | None:
-    """Find a message by header Message-ID (tries both notmuch query forms)."""
+    """Find a message path by header Message-ID (db.find single lookup)."""
     with notmuch_database(write=False) as db:
         return _first_message_path_for_message_id_in_db(db, mid)
-
-
-def _first_message_for_query(db: notmuch2.Database, q: str) -> notmuch2.Message | None:
-    for msg in db.messages(q, sort=notmuch2.Database.SORT.UNSORTED):
-        return msg
-    return None
 
 
 def first_message_for_query(
@@ -402,25 +390,20 @@ def first_message_for_query(
 def first_notmuch_message_for_inner_id(
     db: notmuch2.Database, mid: NotmuchMessageIdInner
 ) -> notmuch2.Message | None:
-    """Первое сообщение в индексе по inner ``Message-ID``.
+    """Первое сообщение в индексе по inner ``Message-ID`` — ТОЛЬКО ``db.find(id)``.
 
-    ``db.find(id)`` (одиночный lookup ``notmuch_database_find_message`` с error-каналом) — а НЕ
-    ленивый итератор ``db.messages(q)``: его ``__next__``/``move_to_next`` (CFFI ``notmuch_messages_
-    move_to_next``, void-возврат, без error-канала) под конкурентной записью кидает C++
-    ``Xapian::DatabaseModifiedError`` прямо из advance → escape мимо ``read_retry`` (Python-обёртки
-    нет) → ``std::terminate`` → SIGABRT. ``db.find`` на discard'е ревизии поднимает ПИТОНОВСКИЙ
-    ``XapianError`` → ``read_retry`` ловит и переоткрывает. Фоллбэк на query-формы — лишь при
-    ``LookupError`` (id со спецсимволами, где нужен ``as_notmuch_term``-quoting); для base62-MID
-    Threlium общий путь — ``db.find``."""
+    ``db.find`` = ``notmuch_database_find_message``: одиночный lookup со статус-кодом (error-канал).
+    На discard'е ревизии под конкурентной записью поднимает ПИТОНОВСКИЙ ``XapianError`` → ``read_retry``
+    переоткрывает; ``LookupError`` = сообщения нет (штатно, напр. orphan IRT). БЕЗ фоллбэка на ленивый
+    ``db.messages(q)``-итератор: его ``move_to_next`` (CFFI void, нет error-канала) кидал C++
+    ``DatabaseModifiedError`` мимо ``read_retry`` → ``std::terminate`` → SIGABRT. Эмпирически notmuch
+    case-sensitive и ``db.find`` ≡ ``id:``-query (надмножество, точный матч спецсимволов без парсера) —
+    фоллбэк ничего не находил сверх ``db.find``, был редундантен и крашился (антипаттерн: прямой путь
+    обязан работать сам)."""
     try:
         return db.find(mid.value)
     except LookupError:
-        pass
-    for q in _queries_for_message_id(mid):
-        msg = _first_message_for_query(db, q)
-        if msg is not None:
-            return msg
-    return None
+        return None
 
 
 def notmuch_index_has_message_id(mid: NotmuchMessageIdInner) -> bool:
