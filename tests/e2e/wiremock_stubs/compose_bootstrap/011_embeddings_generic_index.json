@@ -1,0 +1,43 @@
+{
+  "priority": 1,
+  "metadata": {
+    "threlium_stub_tag": "lightrag-generic-index"
+  },
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/embeddings|/embeddings)$",
+    "headers": {
+      "X-Threlium-Call-Site": {
+        "equalTo": "lightrag_index"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matches": "(?s).*<[A-Za-z0-9]{40,}@localhost>.*"
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "transformers": [
+      "response-template"
+    ],
+    "body": "{{parseJson request.body 'r'}}{\"object\":\"list\",\"model\":\"openai/threlium_e2e_embed\",\"usage\":{\"prompt_tokens\":1,\"total_tokens\":1},\"data\":[{{#each r.input as |txt|}}{{#unless @first}},{{/unless}}{\"object\":\"embedding\",\"index\":{{@index}},\"embedding\":[{{#arrayJoin ',' (range 0 1535) as |d|}}{{#if @first}}0.03{{else}}0.0{{/if}}{{/arrayJoin}}]}{{/each}}]}"
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{regexExtract request.body '<[A-Za-z0-9]{40,}@localhost>' default='_nocorr'}}",
+        "list": {
+          "addLast": {
+            "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+          }
+        }
+      }
+    }
+  ]
+}

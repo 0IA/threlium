@@ -142,6 +142,22 @@ def e2e_clear_doc_status_and_restart_engine(
     """
     root = repo_root or REPO_ROOT
     lightrag_dir = shlex.quote(f"{E2E_REMOTE_THRELIUM_HOME}/lightrag")
+
+    def _engine_systemctl(action: str) -> list[str]:
+        return [
+            "bash",
+            "-lc",
+            f"runuser -u {E2E_THRELIUM_USER} -- env "
+            f"XDG_RUNTIME_DIR=/run/user/$(id -u {E2E_THRELIUM_USER}) "
+            f"systemctl --user {action} threlium-engine.service",
+        ]
+
+    # ПОРЯДОК: stop → wipe → start. Milvus Lite (milvus_lite.db) держит каталог открытым у живого
+    # движка; ``rm -rf`` при работающем движке оставляет half-state (collections/ переживает rm через
+    # открытые inode / встроенный Milvus пересоздаёт) → lightrag force-create → «File exists» → crash-
+    # loop bootstrap. Faiss это терпел (файлы пересоздаются), Milvus — нет. Останавливаем движок, чистим
+    # redis+файлы на освобождённом каталоге, затем стартуем на чистом сторе.
+    service_exec(project, "sut", _engine_systemctl("stop"), repo_root=root, timeout=30)
     service_exec(
         project,
         "sut",
@@ -150,19 +166,12 @@ def e2e_clear_doc_status_and_restart_engine(
             "-lc",
             f"redis-cli flushall >/dev/null 2>&1 || true; "
             f"rm -rf {lightrag_dir}/* 2>/dev/null || true; "
-            f"echo '[e2e] lightrag wiped (redis flushall + faiss files)'",
+            f"echo '[e2e] lightrag wiped (redis flushall + vector store, engine stopped)'",
         ],
         repo_root=root,
         timeout=15,
     )
-    restart_cmd = [
-        "bash",
-        "-lc",
-        f"runuser -u {E2E_THRELIUM_USER} -- env "
-        f"XDG_RUNTIME_DIR=/run/user/$(id -u {E2E_THRELIUM_USER}) "
-        "systemctl --user restart threlium-engine.service",
-    ]
-    service_exec(project, "sut", restart_cmd, repo_root=root, timeout=30)
+    service_exec(project, "sut", _engine_systemctl("start"), repo_root=root, timeout=30)
     e2e_wait_engine_active(project, repo_root=root, timeout=90.0)
 
 
