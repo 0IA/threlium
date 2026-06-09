@@ -324,6 +324,48 @@ reasoning; memory → memory-note в reasoning; hitl → артефакт resume
 без LLM (`cli_exec`/`enrich_fast`/`egress_router`/`archive`) в call-site списке не видны — их эффект ловим
 именно этим content-flag или ответным письмом, не notmuch-папкой.
 
+### 3.6.3. Seeded-marker флаг на ОБЩЕМ (bootstrap) стабе — per-test проверка без своей логики в стабе ⭐
+
+Когда проверку нельзя положить на СВОЙ стаб теста, потому что сматченный стаб **общий, кросс-тестовый**
+(bootstrap-«случай, который не разделить» — напр. `011_embeddings_generic_index`: drain КАЖДОГО теста шлёт
+`lightrag_index`; свой стаб у теста невозможен — `priority` в сценарных стабах запрещён, развести нечем) —
+используем **seeded-marker**: тест задаёт, ЧТО искать, общий стаб это исполняет.
+
+**Механика** (подтверждена кодом `RecordStateEventListener`/`StateHandlerbarHelper`):
+- Тест при старте сидит в СВОЙ thread-root контекст property `search_for` (через setup-стаб
+  `…/state/setup`, тело `{correlation_key, search_for}`).
+- Общий стаб одним статическим `recordState` **читает `search_for` ИЗ контекста запроса**, `contains` его в
+  теле и **sticky-пишет флаг в ТОТ ЖЕ контекст**:
+  ```
+  saw_match = {{#if (contains request.body (state context=<ключ> property='search_for' default='\0'))}}1
+              {{else}}{{state context=<ключ> property='saw_match' default='0'}}{{/if}}
+  ```
+- Тест читает `saw_match` (`…/state/property`): forbidden-present → `== "0"`; required-present → `== "1"`.
+
+**Изоляция сохраняется сама собой:** `recordState.context` рендерится ПОФАЙЛОВО на каждый запрос
+(`createContextName`), thread-root динамичен (uuid) → у каждого теста **свой контекст**. Стаб НЕ держит
+test-specific логику — что искать задаёт тест, сидя это в свой контекст; другие тесты `search_for` не сидят
+→ `default` не матчит → no-op. Так на ОДНОМ общем стабе узнаём для каждого теста, сработал ли он на ЕГО
+контенте (значение можно расширить до **списка** встреченных маркеров — `list.addLast`).
+
+**Контекст-ключ = заголовок `X-Threlium-Thread-Root` (канон §3.6.1), НЕ `regexExtract` тела.** Грабли:
+`{{regexExtract request.body '<[A-Za-z0-9]{40,}@localhost>'}}` берёт **первый** `<…@localhost>` = это
+**Message-ID чанка** (из MIME `Message-ID:`), а thread-root `correlation_key` лежит ниже в dense-контексте
+(не первым) → флаг уехал бы в per-message контексты, тест прочёл бы пусто. Заголовок
+`X-Threlium-Thread-Root` надёжно `== correlation_key` на ВСЕХ запросах (вкл. entity-embeddings без корра в
+теле). Пример: `test_lightrag_index_filter_e2e` (selective indexing) — сидит `search_for="To: ingress@localhost"`,
+drain рендерит индексируемый документ с `To: <stage>` в теле, пропущенный ingress не рендерится → `saw_match == "0"`.
+Валидировано -n0 и -n4 (параллельный drain, скрамбла нет).
+
+**Отладка Handlebars — прямой WireMock-скрипт, без 40с e2e-прогонов.** Регистрируем на ЖИВОМ e2e-WireMock
+(`/__admin/mappings`) диагностический стаб, чей ОТВЕТ (`response-template`) ЭХАЕТ выражения по-кусочно
+(`A=[{{regexExtract …}}] B=[{{state context=… property=…}}] …`) ИЛИ `recordState`+read-back-probe; POSTим
+контролируемые тела/заголовки, читаем рендер за секунды. Так изолируем баг Handlebars от проблем самого теста
+(именно так найдено: все подвыражения исправны, а `saw_match=''` — от неверного context-ключа, не от шаблона).
+`state`-helper доступен и в response-template (`StateTemplateHelperProviderExtension`), и в `recordState`
+(значения `list`/`state` идут через `renderTemplate` с полным набором helper'ов). Скрипт — одноразовый,
+cold-reset следующего прогона стирает диагностические стабы.
+
 ---
 
 ## 4. Каналы: коррелятор + транспорт

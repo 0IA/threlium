@@ -340,15 +340,28 @@ def wiremock_state_reset_formal_reason_phases(
 
 
 def wiremock_state_seed_context(
-    public_base: str, correlation_key: str, *, timeout: float = TIMEOUT_POLL_SHORT
+    public_base: str,
+    correlation_key: str,
+    *,
+    search_for: str | None = None,
+    timeout: float = TIMEOUT_POLL_SHORT,
 ) -> None:
     """POST на setup-стаб: тело ``{\"correlation_key\": ...}`` → ``recordState`` с тем же ``context``.
 
-    ``correlation_key`` должен быть составным (см. :func:`composite_context_key`).
+    ``correlation_key`` обычно составной (см. :func:`composite_context_key`); для seeded-marker
+    проверок на generic-стабах (§3.6.3) — ЧИСТЫЙ thread-root, совпадающий с body-flag-контекстом стаба.
+
+    ``search_for`` (опц.): строка-маркер, которую generic-стаб (напр. embeddings-index) будет искать
+    (``contains``) в теле своих вызовов и sticky-писать флаг ``saw_match`` В ТОТ ЖЕ per-test контекст
+    (стаб берёт «что искать» из контекста — никакой test-specific логики в стабе). Тест потом читает
+    ``saw_match`` (forbidden-present == "0" / present == "1"). См. docs/E2E.md §3.6.3.
     """
+    body: dict[str, str] = {"correlation_key": correlation_key}
+    if search_for is not None:
+        body["search_for"] = search_for
     with _wiremock_admin_api_exclusive(timeout=timeout):
         url = wiremock_e2e_state_setup_post_url(public_base)
-        r = _wm_session().post(url, json={"correlation_key": correlation_key}, timeout=timeout)
+        r = _wm_session().post(url, json=body, timeout=timeout)
         r.raise_for_status()
 
 
