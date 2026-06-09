@@ -466,6 +466,12 @@ class LightragSettings(BaseModel):
         description="MILVUS_DB_NAME; пусто → Milvus Lite (непустой db_name → серверный режим pymilvus, "
         "несовместим с локальным .db). Задавать только при реальном Milvus-сервере.",
     )
+    milvus_index_type: str = Field(
+        default="HNSW",
+        description="MILVUS_INDEX_TYPE для vector-индекса. HNSW (ANN, прод-масштаб) идёт по корректной "
+        "ветке lightrag build_index_params (add_index с metric_type); дефолтный AUTOINDEX на Milvus "
+        "Lite уходит в direct-API fallback и роняет 'create_index missing metric_type' (non-fatal шум).",
+    )
     embed_dim: str = Field(
         default="",
         description="Размерность вектора (строка для провайдера); пусто — авто из модели.",

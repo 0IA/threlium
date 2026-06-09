@@ -101,6 +101,12 @@ def _configure_milvus_lite(settings: ThreliumSettings, *, working_dir: str) -> N
     uri = settings.lightrag.milvus_uri.strip() or str(Path(working_dir) / "milvus_lite.db")
     os.environ["MILVUS_URI"] = uri
     os.environ["MILVUS_DB_NAME"] = settings.lightrag.milvus_db_name.strip()
+    # HNSW (а не дефолтный AUTOINDEX): на Milvus Lite AUTOINDEX уходит в direct-API fallback
+    # build_index_params, который не прокидывает metric_type → 'create_index missing required
+    # metric_type'. Конкретный тип ведёт lightrag по корректной add_index-ветке (milvus_impl).
+    index_type = settings.lightrag.milvus_index_type.strip()
+    if index_type:
+        os.environ["MILVUS_INDEX_TYPE"] = index_type
 
 
 def build_rag(settings: ThreliumSettings) -> LightRAG:
