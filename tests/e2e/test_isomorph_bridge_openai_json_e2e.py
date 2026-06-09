@@ -52,6 +52,9 @@ _PATH = "/v1/chat/completions"
 _STUB_TAG = "stub-isomorph-openai-json-e2e-01"
 _STUB_DIR = Path(__file__).parent / "wiremock_stubs" / "test_isomorph_bridge_openai_json_e2e"
 _MARKER = f"isomorph-openai-json-e2e-{uuid.uuid4().hex[:12]}"
+#: ОТДЕЛЬНЫЙ маркер multiturn-теста (свой uuid): happy_path и multiturn иначе делят content-addressed
+#: thread-root (тот же _BODY) → одинаковый Message-ID → коллизия bridge-pending. Свой маркер = свой тред.
+_MARKER_MT = f"isomorph-openai-json-mt-{uuid.uuid4().hex[:12]}"
 _REPLY_MARKER = "ok from llm-mock"
 #: Тело запроса целиком во власти теста (system+user сольются в один хвост → детерминированный thread-root).
 _BODY: dict[str, object] = {
@@ -114,26 +117,22 @@ def test_isomorph_bridge_openai_json_multiturn_continuity(isomorph_json: E2EComp
     декодит из него невидимый glue-snowflake → ``In-Reply-To`` = glue хода-1 → ОДИН тред. БЕЗ
     notmuch-голосования и БЕЗ in-work-409. Между ходами — только phase_reset (reasoning-защёлка хода-1)."""
     rt = isomorph_json
-    # happy-path делит thread-root с этим тестом (тот же _BODY) → оставляет reasoning-защёлку
-    # phase_tasks_ledger_done в ОБЩЕМ контексте WireMock. Сброс ДО хода-1, иначе ход-1 видит чужую
-    # защёлку → finalize-loop. (Состояние reasoning-стаба, ортогонально тред-идентичности.)
-    wiremock_state_reset_phase(
-        wiremock_public_base(rt.wiremock_host, rt.wiremock_port),
-        composite_context_key(_STUB_TAG, _thread_root()),
-    )
-    s1, r1 = bridge_post_json(rt, port=_ISO_PORT, path=_PATH, body=_BODY, api_key=_API_KEY, surface=_SURFACE)
+    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+    # Своё тело хода-1 (свой _MARKER_MT) → свой content-addressed thread-root, НЕ коллизирующий с happy_path.
+    # Сидим свой контекст (фикстура засидила happy_path-root, нам нужен свой); стабы templated по thread-root.
+    body1: dict[str, object] = {**_BODY, "messages": [{"role": "user", "content": f"ping mt [{_MARKER_MT}]"}]}
+    ctx1 = composite_context_key(_STUB_TAG, thread_root_from_body(_SURFACE, body1))
+    wiremock_state_seed_context(wm, ctx1)
+    s1, r1 = bridge_post_json(rt, port=_ISO_PORT, path=_PATH, body=body1, api_key=_API_KEY, surface=_SURFACE)
     assert s1 == 200, r1
     reply1 = extract_reply_text(_SURFACE, r1)
     assert _REPLY_MARKER in reply1, r1
 
-    # Сброс reasoning-защёлки между ходами (общий контекст треда): иначе ход-2 видит её от хода-1.
-    wiremock_state_reset_phase(
-        wiremock_public_base(rt.wiremock_host, rt.wiremock_port),
-        composite_context_key(_STUB_TAG, _thread_root()),
-    )
+    # Сброс reasoning-защёлки между ходами (свой контекст треда): иначе ход-2 видит её от хода-1.
+    wiremock_state_reset_phase(wm, ctx1)
     # Ход-2: reply1 несёт невидимый водяной знак glue хода-1 → мост декодит → IRT (без notmuch). Пост идёт
     # напрямую — без ожидания индексации glue и без 409-ретрая (механизмы сняты вместе с voting).
-    body2 = build_continuation_body(_SURFACE, _BODY, reply1, f"continue [{_MARKER}]")
+    body2 = build_continuation_body(_SURFACE, body1, reply1, f"continue [{_MARKER_MT}]")
     s2, r2 = bridge_post_json(rt, port=_ISO_PORT, path=_PATH, body=body2, api_key=_API_KEY, surface=_SURFACE)
     assert s2 == 200, r2
     assert _REPLY_MARKER in extract_reply_text(_SURFACE, r2), r2
@@ -141,12 +140,12 @@ def test_isomorph_bridge_openai_json_multiturn_continuity(isomorph_json: E2EComp
     # Дождаться индексации обоих ингрессов + glue перед notmuch-проверками (фоновый settle).
     poll_until(
         lambda: True if (
-            nm_count(rt, f"from:isomorph@localhost and {_MARKER}") == 2
-            and nm_count_in_test_thread(rt, _MARKER, "from:egress_isomorph@localhost") >= 1
+            nm_count(rt, f"from:isomorph@localhost and {_MARKER_MT}") == 2
+            and nm_count_in_test_thread(rt, _MARKER_MT, "from:egress_isomorph@localhost") >= 1
         ) else None,
         timeout=TIMEOUT_POLL_LIVE_MAIL, desc="both turns + glue indexed",
     )
     # Непрерывность: оба хода в ОДНОМ треде (иначе ход-2 ушёл бы в orphan → 2 треда), 2 разных ingress.
-    assert nm_test_thread_count(rt, _MARKER) == 1, "turn-2 orphaned → watermark continuity broke"
-    assert nm_count(rt, f"from:isomorph@localhost and {_MARKER}") == 2, "expected 2 distinct ingress turns"
-    assert nm_count_in_test_thread(rt, _MARKER, "from:egress_isomorph@localhost") >= 1, "no egress glue"
+    assert nm_test_thread_count(rt, _MARKER_MT) == 1, "turn-2 orphaned → watermark continuity broke"
+    assert nm_count(rt, f"from:isomorph@localhost and {_MARKER_MT}") == 2, "expected 2 distinct ingress turns"
+    assert nm_count_in_test_thread(rt, _MARKER_MT, "from:egress_isomorph@localhost") >= 1, "no egress glue"
