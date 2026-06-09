@@ -28,7 +28,6 @@ from .bridges.telegram import (
     e2e_telegram_thread_root_mid_for_message,
 )
 from .cleanup import (
-    e2e_clean_sut_messages_for_test,
     e2e_flush_greenmail_inboxes,
     e2e_flush_sut_fsm_maildirs,
 )

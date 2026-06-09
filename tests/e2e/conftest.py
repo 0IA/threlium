@@ -185,9 +185,9 @@ def _e2e_wiremock_journal_reset_once(
     Под IPC-``FileLock`` лидер: stop user pipeline → полный flush Maildir/notmuch/LightRAG
     и GreenMail → ``reset_request_journal`` + ``wiremock_state_reset_all_contexts`` +
     ``reset_non_bootstrap_wiremock_mappings`` → bootstrap stubs → start pipeline → idle →
-    повторный сброс журнала. Между тестами pipeline **не** перезапускается; per-test
-    очистка «своих» прошлых писем — :func:`~tests.e2e.toolkit.cleanup.e2e_clean_sut_messages_for_test`
-    из :func:`~tests.e2e.wiremock_client.prepare_wiremock_scenario` (см. ``docs/E2E.md`` §7).
+    повторный сброс журнала. Между тестами pipeline **не** перезапускается и per-test чистки
+    **нет**: корреляторы динамичны (uuid у mailflow/isomorph) → прогоны/соседи не пересекаются,
+    изоляция = коррелятор (``docs/E2E.md`` §3.6.1); накопление сбрасывает session-flush.
 
   Изоляция WireMock между тестами: ``state-matcher`` + ``composite_context_key``
     (уникальный ``correlation_key`` на запуск). В конце сессии pipeline **не** останавливается

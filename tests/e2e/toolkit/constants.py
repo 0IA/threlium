@@ -100,54 +100,6 @@ E2E_SUM_ORIG_HEAD_MARKER = "E2E-SUM-ORIG-HEAD-MARKER"
 E2E_SUM_ORIG_PAD_MARKER = "E2E-SUM-ORIG-PAD-MARKER"
 E2E_SUMMARIZE_LLM_NEEDLE = "context summarizer"
 
-_STUB_TAG_TO_PREFIXES: dict[str, list[str]] = {
-    "stub-mailflow-e2e-01": ["mf-ing-", "lrf-ing-"],
-    "stub-cli-discovery-chain-01": ["e2e-cli-disc-"],
-    "stub-cli-route-collision-01": ["e2e-cli-route-coll-"],
-    "stub-formal-reason-technical-gate-01": ["e2e-formal-reason-tech-gate-"],
-    "stub-formal-reason-inference-01": ["e2e-formal-reason-inference-"],
-    "stub-formal-reason-violation-01": ["e2e-formal-reason-viol-"],
-    "stub-formal-reason-query-01": ["e2e-formal-reason-query-"],
-    "stub-formal-reason-chain-01": ["e2e-formal-reason-chain-"],
-    "stub-formal-reason-gate-matrix-01": ["e2e-formal-reason-gate-matrix-"],
-    "stub-subagent-frame-iso-01": ["e2e-subagent-resp-iso-"],
-    "stub-subagent-ledger-iso-01": ["e2e-subagent-ledger-iso-"],
-    "stub-reasoning-litellm-ctx-trim-01": ["e2e-reasoning-trim-"],
-    "stub-memory-query-01": ["e2e-mem-query-"],
-    "stub-unified-context-roles-01": ["e2e-uctx-roles-seed-", "e2e-uctx-roles-turn2-"],
-    "stub-resp-fin-mode3-01": ["e2e-fin-mode3-"],
-    "stub-resp-observe-01": ["e2e-observe-"],
-    "stub-resp-edit-replace-01": ["e2e-edit-repl-"],
-    "stub-resp-edit-delete-01": ["e2e-edit-del-"],
-    "stub-resp-fin-mode4-01": ["e2e-fin-mode4-"],
-    "stub-resp-edit-invalid-01": ["e2e-edit-inv-"],
-    "stub-summarize-context-e2e-01": ["e2e-summarize-ctx-"],
-    "stub-response-buffer-e2e-01": ["e2e-respbuf-"],
-    "stub-reasoning-litellm-live-01": ["e2e-reasoning-"],
-    "stub-fsm-handler-failure-01": ["e2e-fsm-fail-a-", "e2e-fsm-fail-b-"],
-    "stub-task-ledger-chain-01": ["e2e-task-ledger-chain-"],
-    "stub-task-ledger-bypass-01": ["e2e-task-ledger-bypass-"],
-    "stub-task-ledger-empty-01": ["e2e-task-ledger-empty-"],
-    "stub-task-ledger-allcancel-01": ["e2e-task-ledger-allcancel-"],
-    "stub-task-ledger-upserterr-01": ["e2e-task-ledger-upserterr-"],
-    "stub-imap-checkpoint-resume-01": ["e2e-imap-cp-a-", "e2e-imap-cp-b-"],
-    "stub-greenmail-delivery-smoke-01": ["e2e-greenmail-"],
-    "stub-mailflow-live-two-turn-01": ["e2e-live-turn1-", "e2e-live-turn2-"],
-    "stub-mailflow-live-sat-shallow-01": ["e2e-sat-live-"],
-    "stub-mailflow-live-sat-budget-exhausted-01": ["e2e-sat-budget-"],
-    "stub-mailflow-live-mem-thread-01": ["e2e-mem-tm-"],
-    "stub-mailflow-live-global-mem-01": ["e2e-global-mem-"],
-    "stub-mailflow-live-reflect-cyc-01": ["e2e-reflect-cyc-"],
-    "stub-mailflow-live-hitl-mx-01": ["e2e-hitl-mx-"],
-    "stub-mailflow-live-cli-allow-01": ["e2e-cli-allow-"],
-    "stub-mailflow-live-hitl-mx-no-01": ["e2e-hitl-no-"],
-    "stub-telegram-wiremock-live-e2e-private": [],
-    "stub-telegram-wiremock-live-e2e-forum-topic": [],
-    "stub-telegram-wiremock-live-e2e-private-tail-307": [],
-    "stub-matrix-wiremock-live-e2e-01": ["!e2e_"],
-}
-
-_MATRIX_E2E_STUB_TAGS = frozenset({"stub-matrix-wiremock-live-e2e-01"})
 E2E_KNOWLEDGE_PROBE_FILENAME = "e2e_bootstrap_probe.md"
 _E2E_KNOWLEDGE_PROBE_CONTENT = (
     "# E2E Bootstrap Probe\n"

@@ -219,25 +219,6 @@ def wait_bridge_health(rt: E2EComposeRuntime, *, port: int, timeout: float = TIM
     poll_until(_ok, timeout=timeout, desc="isomorph bridge /health 200")
 
 
-def clean_isomorph_test_threads(rt: E2EComposeRuntime, marker: str) -> None:
-    """Удалить ТОЛЬКО треды ЭТОГО теста — по уникальному токену промпта (дата-независимо, все прошлые прогоны).
-
-    Изоляция по соглашению проекта: setup чистит лишь свои прошлые данные, не трогая ни другие
-    isomorph-тесты, ни отладочные треды. Резолвим thread-id'шники по маркеру (``thread:{...}``-подзапрос в
-    notmuch 0.38 ломается на пробелах внутри ``{}``, поэтому через ``--output=threads``), затем удаляем ВСЕ
-    файлы этих тредов (ingress + glue + egress-archive + фоновые reflect/memory/lightrag) и реиндексируем.
-    Teardown намеренно НЕ чистит — данные последнего прогона остаются для отладки до следующего запуска теста.
-    """
-    q = f"from:isomorph@localhost and {marker}"
-    sut_exec(
-        rt,
-        f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; "
-        f"for tid in $(notmuch search --output=threads {shlex.quote(q)} 2>/dev/null); do "
-        f'notmuch search --output=files "$tid" 2>/dev/null; done | xargs -r rm -f; '
-        f"notmuch new >/dev/null 2>&1 || true",
-    )
-
-
 def configure_cline(
     rt: E2EComposeRuntime, *, provider: str, api_key: str, model: str, base_url: str, data_dir: str, cwd: str
 ) -> None:
