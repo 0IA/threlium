@@ -8,11 +8,18 @@
 
 Lock-free: без asyncio ``_storage_lock`` — конкуренцию арбитрит CozoDB/RocksDB (Rust-ядро: читатели не блокируют
 писателей, снапшот-консистентные чтения). Python-клиент cozo **синхронный**, поэтому каждый запрос идёт через
-``asyncio.to_thread`` (НЕ блокирует rag-loop + thread-safe внутренний диспетчер cozo). Две stored-relation на
-``(workspace, namespace)``: ``nodes {id => data:Json}`` и ``edges {src, tgt => data:Json}``. Рёбра
-**неориентированные** (как ``nx.Graph``) → хранятся канонически (src=min, tgt=max), undirected-обход — через
-``(src = $id or tgt = $id)``. Свойства — Json-блоб (lightrag фильтрует граф ТОЛЬКО по id/структуре, не по
-свойствам → типизированные индекс-колонки не нужны).
+``asyncio.to_thread`` (НЕ блокирует rag-loop + thread-safe внутренний диспетчер cozo). Три stored-relation на
+``(workspace, namespace)``: ``nodes {id => data:Json}``, ``edges {src, tgt => data:Json}`` и
+``adj {node, neighbor}``. Рёбра **неориентированные** (как ``nx.Graph``) → ДАННЫЕ ребра хранятся канонически в
+``edges`` (src=min, tgt=max — одна строка на пару, для ``get_edge``). Свойства — Json-блоб (lightrag фильтрует
+граф ТОЛЬКО по id/структуре, не по свойствам → типизированные индекс-колонки не нужны).
+
+**Adjacency-индекс** ``adj``: каждое ребро (s,t) кладётся в ОБЕ стороны (s→t, t→s). Все обходы по соседям
+(``get_node_edges`` / ``node_degree`` / batch-варианты) идут по PK-префиксу ``node`` → O(degree). БЕЗ него
+обратный обход (``tgt = $id``) был полным сканом ``edges`` (tgt не в PK-префиксе) — измерено O(edges): 36 мс/оп
+при 20k рёбер против ~0.26 мс с индексом (138x на росте графа). ``edges`` остаётся истиной для данных ребра;
+``adj`` — производный индекс структуры, синхронно поддерживается на upsert/delete (мульти-блок в одном ``run()``
+= одна транзакция) и реконструируется из ``edges`` при создании (backfill).
 
 Идиомы Cozo (выверены в SUT): batch-операции одним запросом через ``input[..] <- $rows`` + semijoin (без N+1);
 degree через Datalog-``count``; удаление узла+инцидентных рёбер — атомарным мульти-блоком ``{..}{..}`` в одном
@@ -54,6 +61,7 @@ class CozoGraphStorage(BaseGraphStorage):
         suffix = re.sub(r"[^A-Za-z0-9_]", "_", f"{self.workspace}_{self.namespace}").strip("_") or "g"
         self._nodes = f"nodes_{suffix}"
         self._edges = f"edges_{suffix}"
+        self._adj = f"adj_{suffix}"  # {node, neighbor} both-directions index over edges (O(degree) traversal)
         self._db: Any = None
 
     async def initialize(self) -> None:
@@ -66,7 +74,18 @@ class CozoGraphStorage(BaseGraphStorage):
             self._db.run(f":create {self._nodes} {{id: String => data: Json}}")
         if self._edges not in existing:
             self._db.run(f":create {self._edges} {{src: String, tgt: String => data: Json}}")
-        logger.debug(f"[{self.workspace}] CozoDB graph ready: {self._nodes}/{self._edges} ({self._db_path})")
+        if self._adj not in existing:
+            self._db.run(f":create {self._adj} {{node: String, neighbor: String}}")
+            # backfill from existing edges (both directions) — one-time index build for a pre-existing graph
+            # (no-op on a fresh db; keeps adj consistent if edges predate the index).
+            self._db.run(
+                f"?[node, neighbor] := *{self._edges}{{src: node, tgt: neighbor}}\n"
+                f"?[node, neighbor] := *{self._edges}{{src: neighbor, tgt: node}}\n"
+                f":put {self._adj} {{node, neighbor}}"
+            )
+        logger.debug(
+            f"[{self.workspace}] CozoDB graph ready: {self._nodes}/{self._edges}/{self._adj} ({self._db_path})"
+        )
 
     async def finalize(self) -> None:
         self._db = None
@@ -98,10 +117,9 @@ class CozoGraphStorage(BaseGraphStorage):
         return rows[0]["data"] if rows else None
 
     async def node_degree(self, node_id: str) -> int:
+        # adj holds both directions → degree = count of neighbors, PK-prefix on node (O(degree), no scan).
         rows = await self._run(
-            f"nb[x] := *{self._edges}{{src: $id, tgt: x}}\n"
-            f"nb[x] := *{self._edges}{{src: x, tgt: $id}}\n"
-            f"?[count(x)] := nb[x]",
+            f"?[count(x)] := *{self._adj}{{node: $id, neighbor: x}}",
             {"id": node_id},
         )
         return int(rows[0]["count(x)"]) if rows else 0
@@ -113,12 +131,12 @@ class CozoGraphStorage(BaseGraphStorage):
     async def get_node_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
         if not await self.has_node(source_node_id):
             return None
+        # adj PK-prefix on node → O(degree); NetworkX-семантика: (source_node_id, neighbour).
         rows = await self._run(
-            f"?[src, tgt] := *{self._edges}{{src, tgt}}, (src = $id or tgt = $id)",
+            f"?[neighbor] := *{self._adj}{{node: $id, neighbor}}",
             {"id": source_node_id},
         )
-        # NetworkX-семантика: (source_node_id, neighbour)
-        return [(source_node_id, r["tgt"] if r["src"] == source_node_id else r["src"]) for r in rows]
+        return [(source_node_id, r["neighbor"]) for r in rows]
 
     # ---- batch read (1 round-trip через input[..] <- $rows + semijoin) ----
     async def get_nodes_batch(self, node_ids: list[str]) -> dict[str, dict]:
@@ -144,9 +162,7 @@ class CozoGraphStorage(BaseGraphStorage):
             return {}
         rows = await self._run(
             f"input[id] <- $ids\n"
-            f"inc[id, x] := input[id], *{self._edges}{{src: id, tgt: x}}\n"
-            f"inc[id, x] := input[id], *{self._edges}{{src: x, tgt: id}}\n"
-            f"?[id, count(x)] := inc[id, x]",
+            f"?[id, count(x)] := input[id], *{self._adj}{{node: id, neighbor: x}}",
             {"ids": [[i] for i in node_ids]},
         )
         degs = {i: 0 for i in node_ids}  # узлы без рёбер не вернутся → дефолт 0
@@ -191,14 +207,13 @@ class CozoGraphStorage(BaseGraphStorage):
             return {}
         rows = await self._run(
             f"input[id] <- $ids\n"
-            f"?[id, src, tgt] := input[id], *{self._edges}{{src, tgt}}, (src = id or tgt = id)",
+            f"?[id, neighbor] := input[id], *{self._adj}{{node: id, neighbor}}",
             {"ids": [[i] for i in node_ids]},
         )
         out: dict[str, list[tuple[str, str]]] = {i: [] for i in node_ids}
         for r in rows:
             nid = r["id"]
-            other = r["tgt"] if r["src"] == nid else r["src"]
-            out[nid].append((nid, other))
+            out[nid].append((nid, r["neighbor"]))
         return out
 
     # ---- write (lock-free MVCC; lightrag предварительно мёржит → :put = replace) ----
@@ -220,8 +235,10 @@ class CozoGraphStorage(BaseGraphStorage):
         self, source_node_id: str, target_node_id: str, edge_data: dict[str, str]
     ) -> None:
         s, t = _canon(source_node_id, target_node_id)
+        # one transaction: canonical edge data + both adj directions.
         await self._run(
-            f"?[src, tgt, data] <- [[$s, $t, $d]] :put {self._edges} {{src, tgt => data}}",
+            f"{{?[src, tgt, data] <- [[$s, $t, $d]] :put {self._edges} {{src, tgt => data}}}}\n"
+            f"{{?[node, neighbor] <- [[$s, $t], [$t, $s]] :put {self._adj} {{node, neighbor}}}}",
             {"s": s, "t": t, "d": dict(edge_data)},
         )
 
@@ -231,11 +248,16 @@ class CozoGraphStorage(BaseGraphStorage):
         if not edges:
             return
         rows = []
+        adj_rows = []
         for src, tgt, data in edges:
             s, t = _canon(src, tgt)
             rows.append([s, t, dict(data)])
+            adj_rows.append([s, t])
+            adj_rows.append([t, s])
         await self._run(
-            f"?[src, tgt, data] <- $rows :put {self._edges} {{src, tgt => data}}", {"rows": rows}
+            f"{{?[src, tgt, data] <- $rows :put {self._edges} {{src, tgt => data}}}}\n"
+            f"{{?[node, neighbor] <- $adj :put {self._adj} {{node, neighbor}}}}",
+            {"rows": rows, "adj": adj_rows},
         )
 
     # ---- delete (atomic multi-block: rm инцидентных рёбер + rm узла одним run()) ----
@@ -244,6 +266,10 @@ class CozoGraphStorage(BaseGraphStorage):
             f"{{\n"
             f"  ?[src, tgt] := *{self._edges}{{src, tgt}}, (src = $id or tgt = $id)\n"
             f"  :rm {self._edges} {{src, tgt}}\n"
+            f"}}\n"
+            f"{{\n"
+            f"  ?[node, neighbor] := *{self._adj}{{node, neighbor}}, (node = $id or neighbor = $id)\n"
+            f"  :rm {self._adj} {{node, neighbor}}\n"
             f"}}\n"
             f"{{\n"
             f"  ?[id] <- [[$id]]\n"
@@ -257,11 +283,20 @@ class CozoGraphStorage(BaseGraphStorage):
             await self.delete_node(n)
 
     async def remove_edges(self, edges: list[tuple[str, str]]) -> None:
-        pairs = [list(_canon(a, b)) for a, b in edges]
-        if pairs:
-            await self._run(
-                f"?[src, tgt] <- $rows :rm {self._edges} {{src, tgt}}", {"rows": pairs}
-            )
+        if not edges:
+            return
+        pairs = []
+        adj_pairs = []
+        for a, b in edges:
+            s, t = _canon(a, b)
+            pairs.append([s, t])
+            adj_pairs.append([s, t])
+            adj_pairs.append([t, s])
+        await self._run(
+            f"{{?[src, tgt] <- $rows :rm {self._edges} {{src, tgt}}}}\n"
+            f"{{?[node, neighbor] <- $adj :rm {self._adj} {{node, neighbor}}}}",
+            {"rows": pairs, "adj": adj_pairs},
+        )
 
     # ---- labels / bulk (lightrag WebUI; FSM почти не зовёт) ----
     async def get_all_labels(self) -> list[str]:
@@ -346,13 +381,14 @@ class CozoGraphStorage(BaseGraphStorage):
 
     async def drop(self) -> dict[str, str]:
         try:
-            for rel in (self._edges, self._nodes):
+            for rel in (self._adj, self._edges, self._nodes):
                 try:
                     await asyncio.to_thread(self._db.run, f"::remove {rel}")
                 except Exception:  # noqa: BLE001 — нет relation = уже чисто
                     pass
             self._db.run(f":create {self._nodes} {{id: String => data: Json}}")
             self._db.run(f":create {self._edges} {{src: String, tgt: String => data: Json}}")
+            self._db.run(f":create {self._adj} {{node: String, neighbor: String}}")
             return {"status": "success", "message": "graph dropped"}
         except Exception as e:  # noqa: BLE001
             logger.error(f"[{self.workspace}] CozoDB drop failed: {e}")
