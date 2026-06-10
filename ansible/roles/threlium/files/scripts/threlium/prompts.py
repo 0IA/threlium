@@ -28,7 +28,10 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
+from threlium.logutil import logger
 from threlium.types.prompt_path import PromptPath
+
+log = logger.bind(component="prompts")
 
 _PROMPTS_ROOT: Path | None = None
 _PROMPTS_ENV: Environment | None = None
@@ -98,6 +101,9 @@ def _prompts_env() -> Environment:
             autoescape=select_autoescape(default=False),
             undefined=StrictUndefined,
             keep_trailing_newline=True,
+            # Кэш скомпилированных шаблонов больше числа всех PromptPath-шаблонов (warm_prompt_templates
+            # компилит их ВСЕ на старте) — чтобы прогрев не вытеснял сам себя при росте набора.
+            cache_size=1024,
         )
         _kw: dict[str, object] = dict(_PROMPTS_ENV.policies["json.dumps_kwargs"])
         _kw["ensure_ascii"] = False
@@ -120,4 +126,29 @@ def render_prompt(template_name: PromptPath, /, **vars: object) -> str:
     return _prompts_env().get_template(str(template_name)).render(**vars)
 
 
-__all__ = ["PromptPath", "init_prompts_root", "render_prompt"]
+def warm_prompt_templates() -> int:
+    """Скомпилировать (распарсить .j2) ВСЕ шаблоны ``PromptPath`` в кэш Jinja-окружения один раз на старте.
+
+    Jinja Environment кэширует скомпилированные шаблоны (``env.cache``), поэтому компиляция де-факто
+    one-shot после первого использования; этот warm грузит их ВСЕ на старте, чтобы (1) синтаксическая
+    ошибка шаблона всплыла на boot, а не на первом письме горячего контура, и (2) не платить парс ``.j2``
+    в первом вызове каждого шаблона. РЕНДЕР (подстановка переменных) остаётся per-call — он неизбежен и
+    зависит от данных. ``init_prompts_root`` должен быть вызван заранее. Ошибки компиляции логируются
+    (warning), не роняют старт (шаблон скомпилируется лениво при первом рендере). Возвращает число
+    скомпилированных шаблонов.
+    """
+    env = _prompts_env()
+    compiled = 0
+    failed = 0
+    for path in PromptPath:
+        try:
+            env.get_template(str(path))
+            compiled += 1
+        except Exception as e:  # noqa: BLE001 — прогрев не должен валить старт; ленивый путь подстрахует
+            failed += 1
+            log.warning("warm_prompt_template_failed", template=path.name, error=repr(e))
+    log.info("warm_prompt_templates_done", compiled=compiled, failed=failed)
+    return compiled
+
+
+__all__ = ["PromptPath", "init_prompts_root", "render_prompt", "warm_prompt_templates"]

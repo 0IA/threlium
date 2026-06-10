@@ -10,8 +10,9 @@ import socketserver
 import threading
 import traceback
 
+from threlium.litellm_tool_spec import warm_tool_specs
 from threlium.logutil import setup_logging, shutdown_logging
-from threlium.prompts import init_prompts_root
+from threlium.prompts import init_prompts_root, warm_prompt_templates
 from threlium.settings import ThreliumSettings, load_settings
 from threlium.types import (
     EngineWireError,
@@ -72,6 +73,12 @@ def main() -> None:
     GLOBAL_CFG = load_settings()
     setup_logging(GLOBAL_CFG.log_level)
     init_prompts_root(GLOBAL_CFG.home)
+    # Прогрев на старте (один раз, требует init_prompts_root): (1) скомпилировать ВСЕ jinja-шаблоны в кэш
+    # окружения — синтаксис всплывает на boot, нет парса .j2 в первом вызове; (2) собрать+кэшировать
+    # jsonschema-валидаторы tool-spec — tool-call'ы не платят ~1мс check_schema на каждый запрос (см.
+    # prompts.warm_prompt_templates / litellm_tool_spec._cached_validator). Рендер остаётся per-call.
+    warm_prompt_templates()
+    warm_tool_specs(GLOBAL_CFG)
     notify_status(SystemdStatusBody.engine_home_configured())
     notify_status(SystemdStatusBody.engine_config_loaded())
     notify_status(SystemdStatusBody.engine_starting_lightrag_loop())
