@@ -12,7 +12,7 @@ from threlium.cli_fsm import (
 from threlium.cli_hitl_tool_bridge import parse_confirm_cli_hitl_assistant
 from threlium.fsm_emit import build_fsm_plain_to_stage
 from threlium.fsm_emit_semantic import emit_to_enrich_fast
-from threlium.ingress_hitl_resolve import find_cli_intent_maildir_path_from_in_reply_to_ancestors
+from threlium.ingress_hitl_resolve import find_cli_intent_snapshot_from_in_reply_to_ancestors
 from threlium.litellm_correlation_headers import fsm_correlation_snap
 from threlium.litellm_required_tool import (
     build_site_call,
@@ -22,7 +22,7 @@ from threlium.litellm_required_tool import (
 from threlium.litellm_tool_response import LiteLlmToolResponseError
 from threlium.litellm_tool_spec import load_tool_spec
 from threlium.logutil import clip_log_text, logger
-from threlium.mime_reform import system_part_text, system_part_text_from_path
+from threlium.mime_reform import system_part_text
 from threlium.nm import require_fsm_message_id
 from threlium.prompts import render_prompt
 from threlium.settings import ThreliumSettings
@@ -138,8 +138,8 @@ def main(
         return _emit_user_not_confirmed(msg, stage, config=config)
 
     _mid_w, inner = require_fsm_message_id(msg, "cli_resume")
-    intent_path = find_cli_intent_maildir_path_from_in_reply_to_ancestors(inner)
-    if intent_path is None:
+    intent_snap = find_cli_intent_snapshot_from_in_reply_to_ancestors(inner)
+    if intent_snap is None:
         note = EnrichCalleeHistoryText.parse(
             "Threlium cli_resume: could not find a CLI intent message along In-Reply-To ancestors "
             "(notmuch). Ensure the chain is indexed and a prior cli_intent step exists on this branch."
@@ -154,11 +154,11 @@ def main(
         )
 
     try:
-        intent_payload_text = system_part_text_from_path(intent_path).strip()
+        intent_payload_text = system_part_text(intent_snap.email_message).strip()
     except RuntimeError:
         # Письмо cli_intent по контракту несёт payload в <system>; отсутствие части —
         # деградировавшая цепочка после долгого HITL-разрыва. Сохраняем graceful-маршрут.
-        log.warning("cli_resume_intent_no_system", path=str(intent_path))
+        log.warning("cli_resume_intent_no_system", path=str(intent_snap.path))
         intent_payload_text = ""
     payload = parse_cli_intent_payload(intent_payload_text)
     if not payload:

@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import contextlib
 import enum
+import functools
 from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
+from email.message import EmailMessage
 from email.utils import getaddresses
 from pathlib import Path
 
@@ -62,6 +64,30 @@ class IrtAncestorSnapshot:
     header_references: RfcReferencesWire | None
     header_in_reply_to: RfcInReplyToWire | None
     header_subject: RfcSubjectWire | None
+
+    @functools.cached_property
+    def email_message(self) -> EmailMessage:
+        """Полное распарсенное письмо этого предка — lazy, мемоизируется НА снимке.
+
+        Снимок несёт лёгкие notmuch-заголовки (eager); тело MIME (``<task-init>`` /
+        ``<system>`` / ``<history>``-части) живёт ТОЛЬКО в полном RFC822-разборе файла —
+        это дорого (feedparser + structured-заголовки; py-spy: хотспот #1 GIL handler-
+        тредов под параллельностью). Один обработчик обходит цепочку МНОГО раз
+        (``collect_task_ops`` ×2, ``build_unified``, ``resolve_frame``, ``collect_ops`` …),
+        каждый раз ре-парся те же файлы. Здесь парсим РОВНО раз на снимок: идентичность
+        снимков стабильна в пределах стадии (кэш материализации цепочки —
+        :func:`stage_materialization_cache`), поэтому повторные обращения к
+        ``.email_message`` отдают готовый результат — единый механизм с lazy-парсом тел,
+        без второго keyspace. ``cached_property`` пишет в ``__dict__`` напрямую, минуя
+        frozen ``__setattr__``.
+
+        КОНТРАКТ: результат ОБЩИЙ в пределах стадии — НЕ мутировать (как и сам frozen-
+        снимок). Единственному мутатору (``build_unified_email_messages`` ``set_payload``)
+        брать собственную копию (``canonicalize_mime``) перед изменением.
+        """
+        from threlium.mail import email_message_from_path
+
+        return email_message_from_path(self.path)
 
     def subagent_marker(self) -> IrtSubagentMarker:
         """Маркер субагента на этом снимке (единая точка классификации для баланса).
@@ -204,16 +230,23 @@ def _materialize_irt_chain(
 # formal_reason_gate, enrich_fast…), каждый обход заново открывает notmuch и читает N предков × ~6
 # заголовков — это была горячая GIL-точка handler-тредов под параллельностью (py-spy). Цепочка иммутабельна
 # в пределах синхронной обработки стадии, поэтому материализуем РОВНО раз на ``start_inner``, остальное —
-# из кэша. Активируется :func:`irt_chain_materialization_cache` в ``fsm._run_stage``; вне scope (нет ctx) —
+# из кэша. Активируется :func:`stage_materialization_cache` в ``fsm._run_stage``; вне scope (нет ctx) —
 # поведение прежнее (каждый раз свежий обход).
+#
+# Тот же scope бесшовно покрывает и ЛЕНИВЫЙ разбор тел: :attr:`IrtAncestorSnapshot.email_message`
+# мемоизируется на самих снимках (идентичность снимков стабильна, пока жив этот кэш), поэтому отдельного
+# keyspace под распарсенные ``EmailMessage`` не нужно — единый механизм.
 _IRT_CHAIN_CACHE: ContextVar[dict[str, list[IrtAncestorSnapshot]] | None] = ContextVar(
     "_irt_chain_cache", default=None
 )
 
 
 @contextlib.contextmanager
-def irt_chain_materialization_cache() -> Iterator[None]:
-    """Scope кэша материализации IRT-цепочки на одну FSM-стадию (см. ``_IRT_CHAIN_CACHE``)."""
+def stage_materialization_cache() -> Iterator[None]:
+    """Единый scope per-stage материализации на одну FSM-стадию (см. ``_IRT_CHAIN_CACHE``).
+
+    Покрывает (а) кэш обхода IRT-цепочки и (б) lazy-мемо распарсенных тел писем на снимках
+    (:attr:`IrtAncestorSnapshot.email_message`) — один механизм, один жизненный цикл."""
     token = _IRT_CHAIN_CACHE.set({})
     try:
         yield
@@ -240,7 +273,7 @@ def iter_in_reply_to_ancestors_from_inner_id(
     """Лист → корень: иммутабельные ``IrtAncestorSnapshot``; дальше — только VO (``docs/TYPES.md`` «границы
     API», ``docs/THREAD_MODEL.md`` §3).
 
-    В активном :func:`irt_chain_materialization_cache`-scope (FSM-стадия) повторные вызовы с тем же
+    В активном :func:`stage_materialization_cache`-scope (FSM-стадия) повторные вызовы с тем же
     ``start_inner`` возвращают уже материализованную цепочку из кэша (снимки иммутабельны → переиспользование
     безопасно); вне scope — каждый раз свежий notmuch-обход."""
     cache = _IRT_CHAIN_CACHE.get()

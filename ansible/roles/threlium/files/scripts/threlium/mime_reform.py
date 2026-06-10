@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Container, Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from email.message import EmailMessage, Message
 from enum import StrEnum
-from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self, TypeAlias
 
 import msgspec
@@ -501,8 +501,6 @@ def email_without_system_parts(msg: EmailMessage) -> EmailMessage:
     """Копия ``multipart/mixed`` без leaf ``<system>``-частей (ingress history-only relay)."""
     if not message_has_system(msg):
         return msg
-    from copy import deepcopy
-
     if not msg.is_multipart():
         return msg
     kept: list[EmailMessage] = []
@@ -528,6 +526,36 @@ def email_without_system_parts(msg: EmailMessage) -> EmailMessage:
     return out
 
 
+def history_only_email(
+    src: EmailMessage,
+    *,
+    drop_cids: Container["EnrichContentId"] = frozenset(),
+) -> EmailMessage | None:
+    """Иммутабельная проекция ``src`` → НОВОЕ ``multipart/mixed`` письмо с конверт-заголовками и
+    его ``<history>``-частями, КРОМЕ ``drop_cids``.
+
+    ``src`` НЕ мутируется (части копируются ``deepcopy`` — без алиасинга на общий
+    :attr:`~threlium.irt_chain.IrtAncestorSnapshot.email_message`): порождаем новое письмо ровно с
+    нужными данными, а не «чистим копию неизвестно от чего». Несёт ровно то, что читают потребители
+    unified-контекста — рендер ``mail_context.j2`` (конверт From/Date/Subject + ``history_text``) и
+    токен-счётчик (:func:`iter_history_parts` + ``Message-ID``); user-message/system здесь не нужны.
+
+    Возвращает ``None``, если непустых ``<history>``-частей не осталось
+    (``message_has_history(out)`` == ``False``) — вызывающий пропускает «служебное» письмо.
+    """
+    kept = [(cid, part) for cid, part in iter_history_parts(src) if cid not in drop_cids]
+    if not kept:
+        return None
+    out = EmailMessage()
+    out.make_mixed()
+    _copy_envelope_headers(src, out)
+    for _cid, part in kept:
+        out.attach(deepcopy(part))
+    if not message_has_history(out):
+        return None
+    return out
+
+
 def system_part_text(msg: EmailMessage) -> str:
     """Тело единственной ``<system>``-части — носитель payload-команды между стадиями.
 
@@ -550,20 +578,6 @@ def system_part_text(msg: EmailMessage) -> str:
             f"FSM-инвариант: ожидалась ровно одна <system>-часть, найдено {len(parts)}."
         )
     return _leaf_part_text(parts[0][1])
-
-
-def system_part_text_from_path(path: Path | str) -> str:
-    """Тело единственной ``<system>``-части письма, прочитанного с диска (Maildir).
-
-    Граница «байты с диска → payload» по контракту ``docs/CONTEXT_CONTRACT.md`` §2:
-    ретроспективное чтение payload из FSM-писем (cli_resume intent, durable
-    ``tasks_upsert`` / ``response_*`` при IRT-обходе) идёт через ``<system>``-CID, а **не**
-    через :func:`extract_plain_body` (первый ``text/plain``). Fail-fast как у
-    :func:`system_part_text`: отсутствие / >1 ``<system>`` → ``RuntimeError``.
-    """
-    from threlium.mail import email_message_from_path
-
-    return system_part_text(email_message_from_path(path))
 
 
 def extract_part_by_content_id(msg: EmailMessage, content_id: EnrichPartId) -> str | None:

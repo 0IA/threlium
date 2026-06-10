@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from copy import deepcopy
 from email.message import EmailMessage
 
 from threlium.context_token_count import (
@@ -30,7 +31,6 @@ from threlium.formal_reason_gate import assert_formal_reason_relay_after_splice
 from threlium.fsm_emit import emit_transition_preserving_payload
 from threlium.fsm_emit_semantic import emit_to_enrich, managed_patch_simple_fsm_step
 from threlium.logutil import logger
-from threlium.mail import email_message_from_path
 from threlium.mime_reform import (
     EnrichContentId,
     iter_history_parts,
@@ -59,7 +59,7 @@ def _find_e_prev(start_inner: NotmuchMessageIdInner) -> EmailMessage | None:
     """
     for snap in iter_irt_ancestors_filtered(start_inner):
         if snap.is_addressed_to_fsm_stage(FsmStage.REASONING):
-            return email_message_from_path(snap.path)
+            return snap.email_message
     return None
 
 
@@ -77,6 +77,9 @@ def _collect_delta_parts(
         origin = FsmStage.try_from_mailbox(dm.get(_HDR.FROM.value))
         for cid, part in iter_fn(dm):
             if origin is not None and not part.get(_HDR.ORIGIN.value):
+                # ``dm`` — общий read-only ``snap.email_message``: штампуем origin на КОПИИ части,
+                # не мутируя общий разбор (инвариант иммутабельности; копия уйдёт в splice → output).
+                part = deepcopy(part)
                 part[_HDR.ORIGIN.value] = origin.rfc822_mailbox
             out.append((cid, part))
     return out

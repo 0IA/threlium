@@ -8,7 +8,7 @@ from pathlib import Path
 from structlog.contextvars import bind_contextvars, reset_contextvars
 
 from threlium.delivery import run_fdm
-from threlium.irt_chain import irt_chain_materialization_cache
+from threlium.irt_chain import stage_materialization_cache
 from threlium.logutil import logger
 from threlium.mail import email_message_from_bytes, serialize_rfc822_for_wire
 from threlium.settings import ThreliumSettings
@@ -101,7 +101,7 @@ def _run_stage(
         # внутри ``iter_in_reply_to_ancestors_from_inner_id`` материализует цепочку из notmuch РОВНО раз на
         # ``start_inner``, остальные обходы — из ambient-кэша scope (без правки сотен call-site'ов и без
         # глобального кэша со staleness между растущими сообщениями треда).
-        with irt_chain_materialization_cache():
+        with stage_materialization_cache():
             if not settings.e2e.litellm_route_correlation:
                 out_msg = handler(msg, stage_vo, config=settings)
             else:

@@ -7,7 +7,6 @@ from threlium.enrich_context import message_inner_from_email
 from threlium.irt_chain import IrtAncestorSnapshot
 from threlium.knowledge_fsm import parse_formal_reason_result_payload
 from threlium.logutil import logger
-from threlium.mail import email_message_from_path
 from threlium.mime_reform import (
     iter_system_parts,
     part_origin_stage,
@@ -112,7 +111,7 @@ def formal_reason_result_from_irt_delta(
     if snap is None:
         return None
     try:
-        hop_msg = email_message_from_path(snap.path)
+        hop_msg = snap.email_message
     except OSError as exc:
         log.warning(
             "formal_reason_irt_load_failed",

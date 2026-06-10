@@ -2,8 +2,7 @@
 from __future__ import annotations
 
 from threlium.irt_chain import IrtAncestorSnapshot
-from threlium.mail import email_message_from_path
-from threlium.mime_reform import message_has_system, system_part_text_from_path
+from threlium.mime_reform import message_has_system, system_part_text
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
 from threlium.types import FsmStage, NotmuchMessageIdInner
 
@@ -26,7 +25,7 @@ def _carries_op_payload(snap: IrtAncestorSnapshot) -> bool:
     ``<system>``): мутации буфера не было → это не ``AppendOp``/``EditOp``, а контекст для
     reasoning. collect_ops их пропускает (нотис виден reasoning'у через дельту enrich_fast).
     """
-    return message_has_system(email_message_from_path(snap.path))
+    return message_has_system(snap.email_message)
 
 
 def _is_append_stage(snap: IrtAncestorSnapshot) -> bool:
@@ -43,7 +42,7 @@ def _parse_edit_body(snap: IrtAncestorSnapshot) -> tuple[int, str | None]:
     Через msgspec (TYPES § CRDT boundary). Письмо уже прошло валидацию ``response_edit.main``,
     поэтому невалидный payload здесь — нарушение инварианта (``RuntimeError``), не graceful.
     """
-    raw = system_part_text_from_path(snap.path).strip()
+    raw = system_part_text(snap.email_message).strip()
     payload = parse_response_edit_stage_payload(raw)
     if payload is None:
         raise RuntimeError(
@@ -53,7 +52,7 @@ def _parse_edit_body(snap: IrtAncestorSnapshot) -> tuple[int, str | None]:
 
 
 def _read_append_content(snap: IrtAncestorSnapshot) -> str:
-    return system_part_text_from_path(snap.path).strip()
+    return system_part_text(snap.email_message).strip()
 
 
 def collect_ops(start_inner: NotmuchMessageIdInner) -> list[ResponseOp]:

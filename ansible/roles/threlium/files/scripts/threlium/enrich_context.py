@@ -17,6 +17,7 @@ from threlium.mime_reform import (
     EnrichContentId,
     EnrichPartId,
     extract_part_by_content_id,
+    history_only_email,
     iter_history_parts,
     message_has_history,
     require_enrich_user_query_text,
@@ -61,7 +62,7 @@ def resolve_frame_user_turn(
             continue
         if snap.is_sent_from_fsm_stage(FsmStage.INGRESS) or snap.is_sent_from_fsm_stage(FsmStage.SUBAGENT_INTENT):
             try:
-                m = email_message_from_path(snap.path)
+                m = snap.email_message
                 return require_enrich_user_query_text(m)
             except Exception:
                 continue
@@ -75,7 +76,7 @@ def resolve_frame_user_turn(
                 addr = addresses[0][1].lower()
                 if not addr.startswith("egress_"):
                     try:
-                        m = email_message_from_path(snap.path)
+                        m = snap.email_message
                         return enrich_user_query_from_bridge_system(m)
                     except Exception:
                         pass
@@ -102,7 +103,7 @@ def resolve_canonical_user_query(
         if not snap.is_addressed_to_fsm_stage(FsmStage.ENRICH):
             continue
         try:
-            m = email_message_from_path(snap.path)
+            m = snap.email_message
         except OSError:
             continue
         try:
@@ -206,7 +207,7 @@ def build_unified_email_messages(
     for snap in tail_snaps:
         if _summarized_tag in snap.tags:
             try:
-                m = email_message_from_path(snap.path)
+                m = snap.email_message
                 for cid, _part in iter_history_parts(m):
                     summarized_cids.add(cid)
             except OSError as exc:
@@ -225,30 +226,20 @@ def build_unified_email_messages(
             continue
         seen_mids.add(snap.message_id_inner.value)
         try:
-            m = email_message_from_path(snap.path)
+            src = snap.email_message
         except OSError as exc:
             log.warning("unified_load_path_skipped", path=str(snap.path), exc_msg=str(exc))
             continue
 
-        # Filter out history parts that are in summarized_cids
-        if m.is_multipart():
-            parts = m.get_payload()
-            if isinstance(parts, list):
-                new_parts = []
-                for part in parts:
-                    cid = EnrichContentId.from_mime_part(part)
-                    if cid is not None and cid.family is EnrichPartId.HISTORY and cid in summarized_cids:
-                        continue
-                    new_parts.append(part)
-                m.set_payload(new_parts)
-
-        # Содержательность — строго предикат message_has_history (≥1 непустая <history>),
-        # без get_body / «первый text/plain» (CONTEXT_CONTRACT §5).
-        if not message_has_history(m):
+        # ``snap.email_message`` — ОБЩИЙ read-only разбор (инвариант иммутабельности): summarized
+        # ``<history>``-части отбрасываем, порождая НОВОЕ письмо ровно с нужными частями
+        # (:func:`history_only_email`), а не мутируя общий объект. Содержательность —
+        # ``message_has_history`` внутри (≥1 непустая ``<history>``); ``None`` = служебное письмо
+        # (без get_body / «первый text/plain», CONTEXT_CONTRACT §5).
+        m = history_only_email(src, drop_cids=summarized_cids)
+        if m is None:
             continue
         cids = {cid for cid, _part in iter_history_parts(m)}
-        if not cids:
-            continue
         if cids <= seen_cids:
             continue
         seen_cids |= cids
@@ -283,7 +274,7 @@ def collect_unified_delta_msgs(leaf_inner: NotmuchMessageIdInner) -> list[EmailM
         if summarized in snap.tags:
             continue
         try:
-            m = email_message_from_path(snap.path)
+            m = snap.email_message
         except OSError as exc:
             log.warning(
                 "unified_delta_load_path_skipped", path=str(snap.path), exc_msg=str(exc)
