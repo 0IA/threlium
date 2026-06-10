@@ -237,21 +237,43 @@ def _e2e_wiremock_journal_reset_once(
             e2e_start_threlium_user_pipeline_services(rt)
             wait_for_sut_threlium_user_workers_idle(pn, timeout=120.0)
             reset_request_journal(wm)
-            # Bootstrap knowledge reindex — ОДИН раз за сессию здесь (лидер, до параллельных тестов), НЕ
-            # per-test: flushall lightrag + рестарт engine → bootstrap пере-эмбедит probe-корпус → embeddings
-            # (thread-root e2e-bootstrap) в свежем журнале + redis doc_status. Затем ВТОРОЙ рестарт engine БЕЗ
-            # flushall — упражняет идемпотентность (LightRAG dedup): второй старт не должен пере-эмбедить.
-            # Это сняло serial-skipif с test_knowledge_bootstrap_* (читают результат read-only под -n N).
-            e2e_bootstrap_reindex_and_wait(rt)
-            e2e_restart_threlium_engine_only(pn)
-            wait_for_sut_threlium_user_workers_idle(pn, timeout=120.0)
         except Exception as e:
+            # Раннее, НЕ деструктивное для движка (стек ещё не готов) — можно безопасно повторить на
+            # следующем тесте (marker НЕ ставим).
             log.warning(
                 "journal_reset_skipped",
                 error=repr(e),
                 detail="will retry after compose if needed",
             )
             return
+
+        # Bootstrap knowledge reindex — ОДИН раз за сессию здесь (лидер, до параллельных тестов), НЕ
+        # per-test: flushall lightrag + рестарт engine → bootstrap пере-эмбедит probe-корпус → embeddings
+        # (thread-root e2e-bootstrap) в свежем журнале + redis doc_status. Затем ВТОРОЙ рестарт engine БЕЗ
+        # flushall — упражняет идемпотентность (LightRAG dedup): второй старт не должен пере-эмбедить.
+        # Это сняло serial-skipif с test_knowledge_bootstrap_* (читают результат read-only под -n N).
+        #
+        # THRASH-GUARD (n4-coldreset-thrash): эта часть ДЕСТРУКТИВНА для ОБЩЕГО движка (stop→wipe lightrag→
+        # start + ВТОРОЙ рестарт) и ОБЯЗАНА выполниться РОВНО ОДИН раз за сессию. Если bootstrap-WAIT упадёт
+        # под -n4 (doc_status probe timeout / LLM 404), повтор на каждом следующем тесте пере-рестартует
+        # общий движок → ``rag_shutdown_cancelled_tasks`` отменяет in-flight RAG ВСЕХ параллельных контуров →
+        # каскад таймаутов (thrash-петля, корень -n4-флака). Поэтому marker ставится НЕЗАВИСИМО от исхода
+        # wait: деструктивный рестарт уже применён, повторять его нельзя. Это НЕ маскировка timeout — корневую
+        # причину (LLM 404 на bootstrap-embeddings) чиним отдельно; здесь лишь защита общего стека от
+        # повторного деструктивного рестарта.
+        try:
+            e2e_bootstrap_reindex_and_wait(rt)
+            e2e_restart_threlium_engine_only(pn)
+            wait_for_sut_threlium_user_workers_idle(pn, timeout=120.0)
+        except Exception as e:
+            log.warning(
+                "journal_reset_bootstrap_incomplete",
+                error=repr(e),
+                detail=(
+                    "destructive engine reset already applied; NOT re-running (thrash guard) — "
+                    "subsequent tests must not re-restart the shared engine"
+                ),
+            )
         try:
             marker.touch()
         except OSError:  # pragma: no cover
