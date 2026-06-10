@@ -26,13 +26,11 @@ from .toolkit import (
     E2E_BOOTSTRAP_THREAD_ROOT,
     E2E_KNOWLEDGE_PROBE_FILENAME,
     REPO_ROOT,
-    bootstrap_embedding_entries,
     service_exec,
 )
 from .wiremock_client import (
-    THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG,
-    journal_entries_for_stub_tag_with_header,
     wiremock_public_base,
+    wiremock_state_thread_root_property,
 )
 
 _KNOWLEDGE_PROMPTS = [
@@ -121,29 +119,37 @@ def test_knowledge_prompts_deployed(e2e_runtime: E2EComposeRuntime) -> None:
 
 
 def test_bootstrap_knowledge_called_wiremock(e2e_runtime: E2EComposeRuntime) -> None:
-    """B1: WireMock received embedding requests with X-Threlium-Thread-Root: e2e-bootstrap."""
-    # Read-only: bootstrap embeddings произведены в session cold-reset (conftest reindex).
-    wm_base = wiremock_public_base(e2e_runtime.wiremock_host, e2e_runtime.wiremock_port)
+    """B1: WireMock served the bootstrap embedding requests (thread-root e2e-bootstrap).
 
-    all_entries = journal_entries_for_stub_tag_with_header(
-        wm_base,
-        stub_tag=THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG,
-        header_name="X-Threlium-Thread-Root",
-        header_value=E2E_BOOTSTRAP_THREAD_ROOT,
+    State-assert (docs/E2E.md §3.6), NOT a journal scan. The session cold-reset bootstrap
+    reindex drives embeddings tagged ``X-Threlium-Thread-Root: e2e-bootstrap``; the generic
+    index embedding stub (011) records ``saw_match`` into the context keyed PURELY by that
+    thread-root on every serve, so the property's mere presence proves WireMock received a
+    bootstrap embedding. Unlike the cumulative request journal — a 2500-entry ring buffer that
+    evicts the session-start bootstrap requests long before this test runs late under ``-n2`` —
+    the state survives the whole session and is isolated by the unique ``e2e-bootstrap``
+    correlator (§2/§3.6), so this no longer depends on journal capacity/eviction.
+
+    The probe-default sentinel ``'error'`` (StateHandlerbarHelper.getProperty default) means the
+    property was NEVER written = the stub never served an ``e2e-bootstrap`` embedding (bootstrap
+    did not reach WireMock); any recorded value (``'0'``/``'1'``) proves it did.
+    """
+    wm_base = wiremock_public_base(e2e_runtime.wiremock_host, e2e_runtime.wiremock_port)
+    saw_match = wiremock_state_thread_root_property(
+        wm_base, E2E_BOOTSTRAP_THREAD_ROOT, "saw_match"
     )
     log.info(
-        "bootstrap_embedding_direct_check",
-        total_all_header_matched=len(all_entries),
+        "bootstrap_embedding_state_check",
+        thread_root=E2E_BOOTSTRAP_THREAD_ROOT,
+        saw_match=saw_match,
     )
-
-    entries = bootstrap_embedding_entries(wm_base)
-    assert entries, (
-        f"No embedding requests with X-Threlium-Thread-Root={E2E_BOOTSTRAP_THREAD_ROOT!r} "
-        f"found in WireMock journal (stub_tag={THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG!r}, "
-        f"url_contains=/embeddings). "
-        f"All entries matching header (any url): {len(all_entries)}."
+    assert saw_match != "error", (
+        f"No bootstrap embedding reached WireMock: the generic index stub never recorded "
+        f"saw_match under the e2e-bootstrap thread-root context (probe-default {saw_match!r}). "
+        f"The session cold-reset bootstrap reindex did not drive embeddings with "
+        f"X-Threlium-Thread-Root={E2E_BOOTSTRAP_THREAD_ROOT!r} through WireMock."
     )
-    log.info("bootstrap_knowledge_wiremock_verified", count=len(entries))
+    log.info("bootstrap_knowledge_wiremock_verified", saw_match=saw_match)
 
 
 def test_bootstrap_idempotent_on_restart(e2e_runtime: E2EComposeRuntime) -> None:
