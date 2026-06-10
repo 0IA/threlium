@@ -68,17 +68,75 @@ def _rag_loop_shutdown_timeout_sec(settings: ThreliumSettings | None) -> float:
     return float(settings.lightrag.rag_loop_shutdown_timeout_sec)
 
 
-async def _shutdown_rag_loop() -> None:
-    """Отменить все задачи loop (кроме текущей), затем flush storages."""
+async def _graceful_shutdown_worker_pool(name: str, obj: object, timeout: float) -> None:
+    """Best-effort штатный shutdown lightrag priority-queue пула (если у обёртки есть ``.shutdown``).
+
+    lightrag оборачивает embedding/rerank-функции ``priority_limit_async_func_call`` — у обёртки есть
+    ``.shutdown(graceful=...)`` (lightrag/utils.py), который ВЫСТАВЛЯЕТ ``shutdown_event``. Это ОБЯЗАТЕЛЬНО
+    перед blanket-cancel: воркер ловит ``CancelledError`` ВО ВРЕМЯ ``func()`` (utils.py: внутренний
+    ``except asyncio.CancelledError``) и продолжает цикл ``while not shutdown_event.is_set()`` — без
+    выставленного события активный воркер проглатывает cancel и крутится вечно → ``gather`` ниже виснет до
+    таймаута (корень 30s-hang). lightrag сам ``.shutdown()`` нигде не зовёт (даже в ``finalize_storages``).
+    ``graceful=False`` — без drain очереди (процесс всё равно выходит на рестарте), только set-event+cancel.
+    """
+    fn = getattr(obj, "shutdown", None)
+    if not callable(fn):
+        return
+    try:
+        await asyncio.wait_for(fn(graceful=False), timeout=timeout)
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        log.warning("rag_shutdown_worker_pool_incomplete", pool=name, error=repr(e))
+
+
+async def _shutdown_rag_loop(*, deadline_sec: float) -> None:
+    """Graceful-выход lightrag-воркеров → bounded cancel/gather → flush storages, всё в рамках дедлайна.
+
+    Дедлайн гарантирует возврат РАНЬШЕ внешнего ``fut.result`` в :func:`stop_rag_loop_thread` (никакого
+    force-close петли с осиротевшей in-flight RAG → нет «Event loop is closed»/«no running event loop»).
+    """
     me = asyncio.current_task()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + deadline_sec
+
+    def _remaining(cap: float) -> float:
+        return max(0.5, min(cap, deadline - loop.time()))
+
+    # 1) Выставить shutdown_event на достижимых worker-пулах, чтобы воркеры ЧИСТО вышли (см. helper).
+    rag = _daemon_rag
+    if rag is not None:
+        emb = getattr(rag, "embedding_func", None)
+        pools: list[tuple[str, object | None]] = [
+            ("embedding", getattr(emb, "func", None) if emb is not None else None),
+            ("rerank", getattr(rag, "rerank_model_func", None)),
+            ("llm", getattr(rag, "llm_model_func", None)),
+        ]
+        for name, obj in pools:
+            if obj is not None:
+                await _graceful_shutdown_worker_pool(name, obj, _remaining(8.0))
+
+    # 2) Отменить остаток задач (теперь, с выставленным shutdown_event, воркеры действительно завершатся);
+    #    bounded gather — backstop на случай задачи, не реагирующей на cancel, чтобы shutdown не завис.
     work = [t for t in asyncio.all_tasks() if t is not me and not t.done()]
     for t in work:
         t.cancel()
     if work:
-        await asyncio.gather(*work, return_exceptions=True)
-        log.info("rag_shutdown_cancelled_tasks", count=len(work))
-    if _daemon_rag is not None:
-        await _daemon_rag.finalize_storages()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*work, return_exceptions=True), timeout=_remaining(10.0)
+            )
+            log.info("rag_shutdown_cancelled_tasks", count=len(work))
+        except asyncio.TimeoutError:
+            pending = sum(1 for t in work if not t.done())
+            log.warning("rag_shutdown_gather_timeout", pending=pending, total=len(work))
+
+    # 3) Flush storages (durability; cozo/lancedb finalize — no-op, redis закрывает соединения).
+    if rag is not None:
+        try:
+            await asyncio.wait_for(rag.finalize_storages(), timeout=_remaining(10.0))
+        except asyncio.TimeoutError:
+            log.warning("rag_shutdown_finalize_timeout")
 
 
 def daemon_lightrag() -> LightRAG | None:
@@ -294,8 +352,13 @@ def stop_rag_loop_thread(*, settings: ThreliumSettings | None = None) -> None:
     shutdown_timeout = _rag_loop_shutdown_timeout_sec(settings)
 
     try:
-        fut = asyncio.run_coroutine_threadsafe(_shutdown_rag_loop(), loop)
-        fut.result(timeout=shutdown_timeout)
+        # _shutdown_rag_loop само ограничено внутренним дедлайном (graceful worker-shutdown + bounded
+        # gather + finalize); внешний fut.result со слабиной — он НЕ должен сработать первым (force-stop
+        # петли с осиротевшей in-flight RAG = «Event loop is closed»). Внутренний дедлайн < внешний.
+        fut = asyncio.run_coroutine_threadsafe(
+            _shutdown_rag_loop(deadline_sec=shutdown_timeout), loop
+        )
+        fut.result(timeout=shutdown_timeout + 5.0)
     except Exception as e:
         log.error("shutdown_rag_loop_failed", error=repr(e))
     finally:
