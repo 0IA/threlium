@@ -11,7 +11,7 @@ import threading
 import traceback
 
 from threlium.litellm_tool_spec import warm_tool_specs
-from threlium.logutil import setup_logging, shutdown_logging
+from threlium.logutil import logger, setup_logging, shutdown_logging
 from threlium.prompts import init_prompts_root, warm_prompt_templates
 from threlium.settings import ThreliumSettings, load_settings
 from threlium.types import (
@@ -72,6 +72,16 @@ def main() -> None:
     global GLOBAL_CFG
     GLOBAL_CFG = load_settings()
     setup_logging(GLOBAL_CFG.log_level)
+    # Единый дамп ФАКТИЧЕСКОГО (собранного: yaml+env+defaults) конфига на старте — чтобы при отладке
+    # не гадать «yaml говорит X, env Y, default Z»: видно итоговые значения, которыми реально работает
+    # движок. lightrag/e2e — без секретов (батчи, query-режим, сторы, флаги); litellm НЕ дампим (ключи).
+    logger.bind(stage="engine").info(
+        "engine_effective_config",
+        log_level=GLOBAL_CFG.log_level,
+        home=str(GLOBAL_CFG.home),
+        lightrag=GLOBAL_CFG.lightrag.model_dump(mode="json"),
+        e2e=GLOBAL_CFG.e2e.model_dump(mode="json"),
+    )
     init_prompts_root(GLOBAL_CFG.home)
     # Прогрев на старте (один раз, требует init_prompts_root): (1) скомпилировать ВСЕ jinja-шаблоны в кэш
     # окружения — синтаксис всплывает на boot, нет парса .j2 в первом вызове; (2) собрать+кэшировать
