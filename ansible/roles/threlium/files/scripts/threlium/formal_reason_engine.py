@@ -8,6 +8,7 @@ from rdflib.namespace import RDF, SH
 from pyshacl import validate
 from pyshacl.errors import ConstraintLoadError, RuleLoadError, ShapeLoadError
 
+from threlium.logutil import logger
 from threlium.settings import ThreliumSettings
 from threlium.states.rdf_graphs import (
     combined_graph,
@@ -70,6 +71,7 @@ def run_formal_reason_engine(
         shapes_graph = parsed.shapes
         ont_graph = parsed.ontology
     except Exception as e:
+        logger.warning("formal_reason_parse_failed", exc_info=e)
         error_kind = FormalReasonErrorKind.PARSE
         fatal_message = str(e)
 
@@ -116,10 +118,12 @@ def run_formal_reason_engine(
                 raw_report[: config.knowledge.formal_report_max_chars]
             ).value
         except (ConstraintLoadError, RuleLoadError, ShapeLoadError) as e:
+            logger.warning("formal_reason_shape_load_failed", exc_info=e)
             error_kind = FormalReasonErrorKind.SHAPE
             fatal_message = str(e)
             conforms = False
         except Exception as e:
+            logger.warning("formal_reason_validate_failed", exc_info=e)
             error_kind = FormalReasonErrorKind.RUNTIME
             fatal_message = str(e)
             conforms = False
@@ -130,6 +134,7 @@ def run_formal_reason_engine(
                     baseline, check_graph, max_chars=derived_cap
                 )
             except Exception as e:
+                logger.warning("formal_reason_derived_delta_failed", exc_info=e)
                 derived_error = str(e)
 
         if error_kind is FormalReasonErrorKind.NONE and payload.query:
@@ -138,6 +143,7 @@ def run_formal_reason_engine(
                     check_graph, payload.query, max_chars=query_cap
                 )
             except Exception as e:
+                logger.warning("formal_reason_query_failed", exc_info=e)
                 query_error = str(e)
 
     return FormalReasonEngineResult(

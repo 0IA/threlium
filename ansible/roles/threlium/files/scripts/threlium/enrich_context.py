@@ -64,7 +64,8 @@ def resolve_frame_user_turn(
             try:
                 m = snap.email_message
                 return require_enrich_user_query_text(m)
-            except Exception:
+            except Exception as exc:
+                log.warning("frame_user_turn_snap_skipped", message_id=snap.message_id_inner.value, exc_info=exc)
                 continue
 
     # 2. L0 fallback: tag:route + bridge From (skip archive-glue From: egress_*) -> <system> bridge
@@ -78,8 +79,8 @@ def resolve_frame_user_turn(
                     try:
                         m = snap.email_message
                         return enrich_user_query_from_bridge_system(m)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log.warning("frame_bridge_system_snap_skipped", message_id=snap.message_id_inner.value, exc_info=exc)
 
     # 3. e_prev fallback: <user-message> - only if e_prev is provided
     if e_prev is not None:
@@ -104,11 +105,13 @@ def resolve_canonical_user_query(
             continue
         try:
             m = snap.email_message
-        except OSError:
+        except OSError as exc:
+            log.warning("canonical_query_load_skipped", path=str(snap.path), exc_info=exc)
             continue
         try:
             return require_enrich_user_query_text(m)
-        except RuntimeError:
+        except RuntimeError as exc:
+            log.debug("canonical_query_not_in_snap", path=str(snap.path), exc_info=exc)
             continue
     if e_prev is not None:
         raw = extract_part_by_content_id(e_prev, EnrichPartId.USER_MESSAGE)
@@ -127,7 +130,8 @@ def _sort_email_messages_oldest_first(msgs: list[EmailMessage]) -> list[EmailMes
         try:
             dt = parsedate_to_datetime(d)
             return float(dt.timestamp()) if dt is not None else 0.0
-        except (TypeError, ValueError, OSError):
+        except (TypeError, ValueError, OSError) as exc:
+            log.warning("email_date_parse_failed", date=repr(d), exc_info=exc)
             return 0.0
 
     return sorted(msgs, key=_ts)

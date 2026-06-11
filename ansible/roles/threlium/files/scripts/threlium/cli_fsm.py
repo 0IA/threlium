@@ -14,6 +14,7 @@ import shlex
 
 import msgspec
 
+from threlium.logutil import logger
 from threlium.types import (
     CliExecDecision,
     CliIntentDecision,
@@ -41,7 +42,8 @@ def parse_cli_intent_payload(text: str) -> CliIntentPayload | None:
         return None
     try:
         env = msgspec.json.decode(raw.encode("utf-8"), type=CliIntentEnvelope)
-    except (msgspec.DecodeError, msgspec.ValidationError):
+    except (msgspec.DecodeError, msgspec.ValidationError) as exc:
+        logger.debug("cli_intent_payload_invalid", exc_info=exc)
         return None
     cli = env.cli
     if not cli.argv:

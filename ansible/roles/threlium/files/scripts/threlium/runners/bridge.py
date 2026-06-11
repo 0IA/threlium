@@ -25,9 +25,9 @@ def main() -> None:
 
         try:
             ch = BridgeIngressChannel(channel)
-        except ValueError:
+        except ValueError as exc:
             known = ", ".join(m.value for m in BridgeIngressChannel)
-            log.error("unknown_channel", channel=channel, known=known)
+            log.error("unknown_channel", channel=channel, known=known, exc_info=exc)
             sys.exit(1)
 
         run_bridge = BRIDGE_RUNNERS[ch]

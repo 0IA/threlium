@@ -70,7 +70,8 @@ def _parse_seq_cell(raw: object) -> int:
         return 0
     try:
         return max(0, int(str(raw).strip()))
-    except ValueError:
+    except ValueError as exc:
+        log.warning("seq_cell_parse_failed", raw=repr(raw), exc_info=exc)
         return 0
 
 

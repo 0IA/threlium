@@ -14,6 +14,8 @@ from __future__ import annotations
 import math
 from typing import Self
 
+from threlium.logutil import logger
+
 from ._core import _OptionalStripEmpty
 
 # Дефолт при отсутствии/непарсимости заголовка: нейтральный вес, чтобы часть не
@@ -43,7 +45,8 @@ class ThreliumContentScoreWire(_OptionalStripEmpty):
             return _FALLBACK_SCORE
         try:
             v = float(raw)
-        except ValueError:
+        except ValueError as exc:
+            logger.warning("content_score_unparsable", raw=raw, exc_info=exc)
             return _FALLBACK_SCORE
         if not math.isfinite(v) or v < 0.0:
             return _FALLBACK_SCORE

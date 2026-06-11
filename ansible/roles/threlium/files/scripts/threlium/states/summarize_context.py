@@ -59,7 +59,8 @@ def _parse_payload(
         payload = msgspec.json.decode(
             text.strip().encode("utf-8"), type=SummarizeContextStagePayload
         )
-    except (msgspec.DecodeError, msgspec.ValidationError):
+    except (msgspec.DecodeError, msgspec.ValidationError) as exc:
+        log.warning("summarize_context_payload_invalid", exc_info=exc)
         return None
     units = list(payload.summarize.units)
     if not units:

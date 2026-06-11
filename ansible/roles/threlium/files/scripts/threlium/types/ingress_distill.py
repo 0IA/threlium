@@ -7,6 +7,7 @@ from typing import Self
 
 import msgspec
 
+from threlium.logutil import logger
 from threlium.mail_header_names import MailHeaderName
 from threlium.types._core import _OptionalStripEmpty
 from threlium.types.bridge_ingress_channel import BridgeIngressChannel
@@ -195,8 +196,8 @@ def bridge_channel_from_email(msg: EmailMessage) -> BridgeIngressChannel:
             slug = str(ing.channel).strip().lower()
             try:
                 return BridgeIngressChannel(slug)
-            except ValueError:
-                pass
+            except ValueError as exc:
+                logger.warning("bridge_channel_unknown_slug", slug=slug, exc_info=exc)
     return BridgeIngressChannel.EMAIL
 
 

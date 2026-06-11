@@ -446,8 +446,8 @@ class CozoGraphStorage(BaseGraphStorage):
             for rel in (self._adj, self._edges, self._nodes):
                 try:
                     await asyncio.to_thread(self._db.run, f"::remove {rel}")
-                except Exception:  # noqa: BLE001 — нет relation = уже чисто
-                    pass
+                except Exception as exc:  # noqa: BLE001 — нет relation = уже чисто
+                    log.debug("cozo_drop_relation_absent", workspace=self.workspace, relation=rel, exc_info=exc)
             self._db.run(f":create {self._nodes} {{id: String => data: Json}}")
             self._db.run(f":create {self._edges} {{src: String, tgt: String => data: Json}}")
             self._db.run(f":create {self._adj} {{node: String, neighbor: String}}")

@@ -10,6 +10,7 @@ from threlium.enginewire import (
     EngineWireRequest,
     WorkStatusBody,
 )
+from threlium.logutil import logger
 from threlium.runners.engine_submit.client import resolve_engine_socket_path, submit_to_engine
 from threlium.systemd_notify import ensure_systemd_user_env, notify_status
 
@@ -26,12 +27,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         req = EngineWireRequest.from_work_instance(instance)
     except ValueError as e:
+        logger.error("submit_invalid_work_instance", instance=instance, exc_info=e)
         print(f"engine_submit: {e}", file=sys.stderr)
         return 1
 
     try:
         sock_path = resolve_engine_socket_path(os.environ.get("THRELIUM_HOME"))
     except ValueError as e:
+        logger.error("submit_resolve_socket_failed", exc_info=e)
         print(f"engine_submit: {e}", file=sys.stderr)
         return 1
 
@@ -39,7 +42,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         wire = submit_to_engine(sock_path, req)
-    except OSError:
+    except OSError as exc:
+        logger.error("submit_engine_connect_failed", instance=instance, sock_path=str(sock_path), exc_info=exc)
         notify_status(WorkStatusBody.work_failed_socket(work_instance=instance))
         print(
             f"engine_submit: cannot connect to engine at {sock_path} "
@@ -48,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     except ValueError as e:
+        logger.error("submit_engine_protocol_failed", instance=instance, exc_info=e)
         notify_status(WorkStatusBody.work_failed_socket(work_instance=instance))
         print(f"engine_submit: {e}", file=sys.stderr)
         return 1

@@ -20,6 +20,7 @@ from typing import Final
 from snowflake import SnowflakeGenerator
 
 from threlium.invisible_task_mid import decode_mid_safe, encode_mid_safe
+from threlium.logutil import logger
 from threlium.types import IsomorphSnowflakeId, RfcMessageIdWire
 
 #: Кастомный epoch (2024-01-01T00:00:00Z, ms): старшие (временные) биты малы → короткий int/знак на годы.
@@ -65,7 +66,8 @@ def mid_to_snowflake(mid: RfcMessageIdWire) -> int | None:
         return None
     try:
         native = RfcMessageIdWire.native_from_canonical_str(raw, IsomorphSnowflakeId)
-    except Exception:  # noqa: BLE001 — чужой/контент-MID (другой VO) → не snowflake
+    except Exception as exc:  # noqa: BLE001 — чужой/контент-MID (другой VO) → не snowflake
+        logger.debug("mid_not_snowflake", raw=raw, exc_info=exc)
         return None
     return native.snowflake
 

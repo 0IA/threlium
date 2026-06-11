@@ -29,7 +29,8 @@ def parse_response_edit_stage_payload(raw: str) -> ResponseEditStagePayload | No
     """``<system>`` JSON → :class:`ResponseEditStagePayload`; невалидный payload → ``None``."""
     try:
         return msgspec.json.decode(raw.encode("utf-8"), type=ResponseEditStagePayload)
-    except (msgspec.DecodeError, msgspec.ValidationError):
+    except (msgspec.DecodeError, msgspec.ValidationError) as exc:
+        log.warning("response_edit_payload_invalid", exc_info=exc)
         return None
 
 

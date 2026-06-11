@@ -74,7 +74,8 @@ def formal_reason_result_from_formal_reason_email(
     mid = _message_id_wire(msg)
     try:
         body = system_part_text(msg).strip()
-    except RuntimeError:
+    except RuntimeError as exc:
+        log.debug("formal_reason_result_no_system_part", message_id=mid, exc_info=exc)
         return None
     if not body:
         return None

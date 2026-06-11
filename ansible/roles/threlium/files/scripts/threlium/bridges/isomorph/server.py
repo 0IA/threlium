@@ -79,6 +79,7 @@ async def inference_handler(request: Request, surface: IsomorphApiSurface) -> Re
         if not isinstance(body, dict):
             raise ValueError("body must be a JSON object")
     except (msgspec.DecodeError, ValueError) as e:
+        log.warning("bad_request_body", surface=surface.value, exc_info=e)
         return _surface_error(surface, f"bad request body: {e}", err_type="invalid_request_error", status=400)
 
     stream = bool(body.get("stream", surface is IsomorphApiSurface.OPENAI_CHAT_COMPLETIONS))
@@ -87,6 +88,7 @@ async def inference_handler(request: Request, surface: IsomorphApiSurface) -> Re
     try:
         parsed = parse_history(surface, body)
     except ValueError as e:
+        log.warning("bad_messages", surface=surface.value, exc_info=e)
         return _surface_error(surface, f"bad messages: {e}", err_type="invalid_request_error", status=400)
 
     # In-Reply-To: декодируется из водяного знака last-assistant в parse_history (БЕЗ notmuch/голосования).
@@ -195,10 +197,12 @@ async def _event_stream(
                 return
             try:
                 await asyncio.wait_for(asyncio.shield(fut), timeout=min(iso.keepalive_sec, remaining))
-            except asyncio.TimeoutError:
+            except asyncio.TimeoutError as exc:
+                log.debug("sse_keepalive_tick", mid=corr, exc_info=exc)
                 yield emit(_keepalive_frame(surface))
                 continue
-            except asyncio.CancelledError:
+            except asyncio.CancelledError as exc:
+                log.debug("sse_stream_cancelled", mid=corr, exc_info=exc)
                 state.registry.discard(corr, fut)
                 return
 
@@ -222,10 +226,12 @@ async def _await_json(
     request_timeout = timeout_override if timeout_override is not None else iso.request_timeout_sec
     try:
         payload = await asyncio.wait_for(asyncio.shield(fut), timeout=request_timeout)
-    except asyncio.TimeoutError:
+    except asyncio.TimeoutError as exc:
+        log.warning("await_json_upstream_timeout", mid=corr, surface=surface.value, exc_info=exc)
         state.registry.discard(corr, fut)
         return _surface_error(surface, "upstream timeout", err_type="api_error", status=504)
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as exc:
+        log.debug("await_json_cancelled", mid=corr, exc_info=exc)
         state.registry.discard(corr, fut)
         return _surface_error(surface, "cancelled", err_type="api_error", status=499)
     finally:

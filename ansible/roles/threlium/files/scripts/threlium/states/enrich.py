@@ -188,7 +188,8 @@ def _parse_subtask_defs(
     for text_raw in raw_subtasks:
         try:
             text = TaskSubtaskText.require(name=name, raw=text_raw)
-        except ValueError:
+        except ValueError as exc:
+            log.warning("subtask_text_invalid", name=name, exc_info=exc)
             continue
         cid = TaskSubtaskContentId.from_text(text)
         if cid.value in seen or cid.value in exclude_ids:

@@ -6,6 +6,8 @@ from typing import Literal
 
 import msgspec
 
+from threlium.logutil import logger
+
 from .bridges import MatrixOutboundPlainBodyWire
 from .identity import MatrixRoomEventId
 
@@ -88,7 +90,8 @@ def reply_parent_event_id_from_message_source(
         return None
     try:
         parsed = msgspec.convert(source, type=MatrixInboundRoomMessageSource)
-    except msgspec.ValidationError:
+    except msgspec.ValidationError as exc:
+        logger.warning("matrix_reply_parent_invalid", exc_info=exc)
         return None
     rel = parsed.content.m_relates_to if parsed.content is not None else None
     if rel is None or rel.m_in_reply_to is None:

@@ -9,6 +9,7 @@ from email.utils import getaddresses
 from enum import StrEnum
 from typing import Self
 
+from threlium.logutil import logger
 from threlium.mail_header_names import MailHeaderName
 
 _HDR = MailHeaderName
@@ -92,7 +93,8 @@ class FsmStage(StrEnum):
             return None
         try:
             return cls.from_mailbox(raw)
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("fsm_stage_mailbox_unknown", raw=raw, exc_info=exc)
             return None
 
     @classmethod
@@ -141,7 +143,8 @@ class FsmStage(StrEnum):
             return None
         try:
             return cls.parse(local)
-        except ValueError:
+        except ValueError as exc:
+            logger.debug("fsm_stage_localpart_unknown", local=local, exc_info=exc)
             return None
 
     @classmethod

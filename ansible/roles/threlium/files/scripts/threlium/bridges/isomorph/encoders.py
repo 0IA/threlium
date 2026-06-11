@@ -17,6 +17,8 @@ from collections.abc import Iterator
 
 import msgspec
 
+from threlium.logutil import logger
+
 from . import anthropic_wire, openai_wire
 from .push_types import IsomorphBridgePushPayload
 from .sse import SseFrame
@@ -147,7 +149,8 @@ def encode_anthropic_json(payload: IsomorphBridgePushPayload) -> str:
     for tb in payload.tool_blocks:
         try:
             inp = json.loads(tb.arguments) if tb.arguments else {}
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
+            logger.warning("anthropic_tool_args_decode_failed", tool_name=tb.name, exc_info=exc)
             inp = {}
         blocks.append(anthropic_wire.AnthropicToolUseBlock(
             id=tb.id or _toolu_id(), name=tb.name, input=inp))

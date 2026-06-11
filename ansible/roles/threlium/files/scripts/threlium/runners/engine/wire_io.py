@@ -6,6 +6,7 @@ from typing import IO
 import msgspec
 
 from threlium.enginewire import EngineWireError, EngineWireOk, EngineWireRequest
+from threlium.logutil import logger
 
 
 def encode_wire_line(obj: msgspec.Struct) -> bytes:
@@ -41,8 +42,8 @@ def decode_engine_wire_response(line: bytes) -> EngineWireOk | EngineWireError:
         raise ValueError("empty engine response line")
     try:
         return msgspec.json.decode(line, type=EngineWireOk)
-    except (msgspec.DecodeError, msgspec.ValidationError):
-        pass
+    except (msgspec.DecodeError, msgspec.ValidationError) as exc:
+        logger.debug("engine_response_not_ok_trying_error", exc_info=exc)
     try:
         return msgspec.json.decode(line, type=EngineWireError)
     except (msgspec.DecodeError, msgspec.ValidationError) as e:

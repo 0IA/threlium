@@ -59,6 +59,7 @@ class _EngineRequestHandler(socketserver.StreamRequestHandler):
             process_thread_message(stage_vo, tid, GLOBAL_CFG)
             self.wfile.write(encode_wire_line(EngineWireOk(status="ok")))
         except Exception as e:
+            logger.bind(stage="engine").error("engine_request_failed", exc_info=e)
             err = EngineWireError(
                 status="error",
                 message=str(e),
@@ -130,8 +131,8 @@ def main() -> None:
         def _run_shutdown() -> None:
             try:
                 server.shutdown()
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.bind(stage="engine").error("engine_shutdown_failed", exc_info=exc)
 
         threading.Thread(
             target=_run_shutdown,

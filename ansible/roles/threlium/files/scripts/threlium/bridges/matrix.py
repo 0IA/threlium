@@ -185,7 +185,8 @@ def _room_message_plain_body(ev: RoomMessage) -> str:
     if isinstance(content, dict):
         try:
             parsed = msgspec.convert(content, type=MatrixInboundRoomMessageSourceContent)
-        except msgspec.ValidationError:
+        except msgspec.ValidationError as exc:
+            log.warning("matrix_room_content_parse_failed", exc_info=exc)
             parsed = None
         if parsed is not None and parsed.body:
             return parsed.body

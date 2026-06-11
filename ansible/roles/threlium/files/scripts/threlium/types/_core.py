@@ -149,7 +149,8 @@ class _OptionalStripEmpty(msgspec.Struct, frozen=True, kw_only=True):
         """``notmuch2.Message.header`` + present-or-None (``LookupError`` как отсутствие заголовка)."""
         try:
             raw = msg.header(header_name)
-        except LookupError:
+        except LookupError as exc:
+            log.debug("nm_header_absent", header=header_name, exc_info=exc)
             return None
         return cls.parse_present_optional(str(raw))
 
@@ -214,7 +215,8 @@ class _OptionalStripLowerEmpty(msgspec.Struct, frozen=True, kw_only=True):
 
         try:
             raw = msg.header(header_name)
-        except LookupError:
+        except LookupError as exc:
+            log.debug("nm_header_absent", header=header_name, exc_info=exc)
             return None
         return cls.parse_present_optional(str(raw))
 

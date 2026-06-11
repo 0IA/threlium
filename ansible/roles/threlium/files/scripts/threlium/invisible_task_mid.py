@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Final
 
+from threlium.logutil import logger
+
 # 16 символов для base-16: без управления направлением текста и без ширины/переносов.
 SAFE_INVISIBLE_ALPHABET: Final[tuple[str, ...]] = (
     "\u200b",  # Zero Width Space
@@ -70,7 +72,8 @@ def decode_mid_safe(text: str) -> int | None:
         digits.append(f"{idx:x}")
     try:
         return int("".join(digits), 16)
-    except ValueError:
+    except ValueError as exc:
+        logger.warning("invisible_mid_decode_failed", exc_info=exc)
         return None
 
 

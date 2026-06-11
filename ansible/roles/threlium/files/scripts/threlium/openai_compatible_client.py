@@ -25,6 +25,7 @@ from tenacity import (
 )
 
 from threlium import llm_wire
+from threlium.logutil import logger
 
 _RETRYABLE_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})
 # Транспортные ключи payload (не уходят в JSON-тело запроса).
@@ -40,8 +41,9 @@ try:  # CA-бандл httpx по умолчанию берёт из certifi — 
     import certifi
 
     _SSL_CONTEXT: ssl.SSLContext = ssl.create_default_context(cafile=certifi.where())
-except Exception:  # pragma: no cover - на проде certifi есть (зависимость httpx)
+except Exception as exc:  # pragma: no cover - на проде certifi есть (зависимость httpx)
     _SSL_CONTEXT = ssl.create_default_context()
+    logger.warning("ssl_context_certifi_fallback", exc_info=exc)
 
 _JSON_ENCODER = msgspec.json.Encoder()
 

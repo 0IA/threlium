@@ -5,6 +5,8 @@ import hmac
 
 import msgspec
 
+from threlium.logutil import logger
+
 from .pending import IsomorphPendingRegistry
 from .push_types import IsomorphBridgePushPayload
 
@@ -36,6 +38,7 @@ def handle_push(
     try:
         payload = msgspec.json.decode(body, type=IsomorphBridgePushPayload)
     except (msgspec.DecodeError, msgspec.ValidationError) as e:
+        logger.warning("push_bad_payload", client_host=client_host, exc_info=e)
         return PushResult(status=400, detail=f"push: bad payload: {e}")
 
     delivered = registry.resolve(payload)

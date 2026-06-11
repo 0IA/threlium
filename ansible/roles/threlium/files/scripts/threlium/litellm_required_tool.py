@@ -24,6 +24,7 @@ from threlium.litellm_tool_completion import (
     completion_required_tool_sync,
 )
 from threlium.litellm_tool_response import require_tool_calls_response
+from threlium.logutil import logger
 from threlium.settings import LlmEndpoint, ThreliumSettings, resolve_llm_endpoint
 from threlium.types import (
     LiteLlmAcompletionKwargs,
@@ -61,6 +62,10 @@ def invoke_with_bridge_retries(
             last_error = exc
             if i + 1 < max_attempts and on_retry is not None:
                 on_retry(i + 1, exc)
+            else:
+                logger.warning(
+                    "bridge_retry_attempt_failed", attempt=i + 1, max_attempts=max_attempts, exc_info=exc
+                )
     assert last_error is not None
     if on_exhausted is not None:
         return on_exhausted(last_error)
@@ -86,6 +91,10 @@ async def ainvoke_with_bridge_retries(
             last_error = exc
             if i + 1 < max_attempts and on_retry is not None:
                 on_retry(i + 1, exc)
+            else:
+                logger.warning(
+                    "bridge_retry_attempt_failed", attempt=i + 1, max_attempts=max_attempts, exc_info=exc
+                )
     assert last_error is not None
     if on_exhausted is not None:
         return on_exhausted(last_error)

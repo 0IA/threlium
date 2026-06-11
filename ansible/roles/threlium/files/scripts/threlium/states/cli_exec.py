@@ -26,7 +26,8 @@ def _subprocess_env_for_systemd_user() -> dict[str, str]:
         return env
     try:
         uid = os.getuid()
-    except AttributeError:
+    except AttributeError as exc:
+        log.warning("getuid_unavailable", exc_info=exc)
         return env
     runtime = f"/run/user/{uid}"
     if os.path.isdir(runtime):
