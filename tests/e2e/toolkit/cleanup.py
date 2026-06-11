@@ -87,6 +87,13 @@ if [ -d "$TH/stages" ]; then
 fi
 # LightRAG accumulates data across runs (173MB+); entity extraction slows to 60s+ per document.
 rm -rf "$TH/lightrag" 2>/dev/null || true
+# Проверка, что стор ДЕЙСТВИТЕЛЬНО снят (cold-reset идёт перед тестами и обязан отдать чистый стор):
+# если каталог пережил rm — обычно живой engine-процесс держит FD (см. process-death wait в
+# e2e_stop_threlium_user_pipeline_bash). НЕ глотаем молча — иначе lancedb стартует на огрызке стора
+# (манифест → удалённый data-файл) и порча тянется в прогон.
+if [ -e "$TH/lightrag" ]; then
+  echo "[e2e] WARN lightrag survived rm (engine FDs held?): $(ls -A "$TH/lightrag" 2>/dev/null | tr '\\n' ' ')" >&2
+fi
 # notmuch Xapian index — stale thread IDs interfere with isolation; recreated by `notmuch new`.
 rm -rf "$TH/stages/.notmuch" 2>/dev/null || true
 # LightRAG KV/doc-status теперь в Redis (localhost) — чистим вместе с файловым lightrag-каталогом,

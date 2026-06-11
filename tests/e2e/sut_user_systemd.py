@@ -89,6 +89,20 @@ done
 # Зависший/failed engine (напр. прерванный job): сбросить состояние, чтобы последующий
 # start не упёрся в "Job canceled"/failed.
 runuser -u {u} -- systemctl --user reset-failed threlium-engine.service 2>/dev/null || true
+# КРИТИЧНО (cold-reset идёт ПЕРЕД тестами и ОБЯЗАН отдать чистый стор): дождаться смерти самого
+# ПРОЦЕССА engine, а не только systemd ``inactive``. После SIGABRT/segfault (напр. notmuch
+# concurrent-write C++ DatabaseModifiedError, или баг индексатора) systemd репортит ``failed``/
+# ``inactive`` РАНЬШЕ, чем ядро дожнёт процесс и закроет его открытые FD на ``lightrag/``. Если
+# вызывающий сделает ``rm -rf lightrag`` пока живой процесс держит эти FD — каталог разлинкуется,
+# но процесс продолжит писать в осиротевшие inode → lancedb-манифест укажет на удалённый data-файл
+# (``LanceError(IO): Not found ...data/*.lance``) и эта порча ПЕРЕЖИВЁТ wipe в следующий прогон.
+# Эскалируем до SIGKILL по cgroup юнита и ждём, пока процесса не станет.
+for i in $(seq 1 30); do
+  pids=$(runuser -u {u} -- pgrep -u "$uid" -f 'python -m threlium.runners.engine$' 2>/dev/null || true)
+  [ -z "$pids" ] && break
+  runuser -u {u} -- systemctl --user kill -s SIGKILL threlium-engine.service 2>/dev/null || true
+  sleep 0.5
+done
 for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-work@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
   runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
   runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
