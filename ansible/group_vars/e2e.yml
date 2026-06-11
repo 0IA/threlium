@@ -164,8 +164,12 @@ threlium_knowledge:
 threlium_cli:
   privileged_hitl_enabled: true
 
-# lightrag: только overrides для e2e (insert_batch=1, query_api без llm)
+# lightrag: только overrides для e2e (query_api без llm). insert_batch=16 (как prod): drain батчит
+# индексацию (≈12× throughput, backlog не растёт неограниченно под -nN). batch=1 был leftover эпохи
+# per-header-thread-root корреляции (один ainsert = один док = один thread-root); после миграции на
+# body-corr (Message-ID в теле чанка, commit 0147534) корреляция per-doc, батч безопасен. Хранилища
+# MVCC (LanceDB+Cozo) конкурентный батч-upsert держат.
 threlium_lightrag:
-  insert_batch: 1
+  insert_batch: 16
   query_api: "aquery"
   query_mode: "mix"
