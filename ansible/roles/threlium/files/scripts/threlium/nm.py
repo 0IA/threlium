@@ -30,10 +30,14 @@
 """
 from __future__ import annotations
 
+import concurrent.futures
 import configparser
-import itertools
 import logging
+import multiprocessing
 import os
+import threading
+import time
+from concurrent.futures.process import BrokenProcessPool
 from email.message import EmailMessage
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -114,8 +118,6 @@ from threlium.types import (
     RfcMessageIdWire,
 )
 
-_SORT_NEWEST = notmuch2.Database.SORT.NEWEST_FIRST
-
 
 def require_inner_message_id_from_notmuch_message(msg: notmuch2.Message) -> NotmuchMessageIdInner:
     """Inner ``Message-ID`` из индекса libnotmuch; без парсящегося id — ``RuntimeError``.
@@ -168,22 +170,6 @@ def _require_message_id_with_db(db: notmuch2.Database, file_path: Path) -> Notmu
     msg = db.get(str(file_path.resolve()))
     return require_inner_message_id_from_notmuch_message(msg)
 
-
-def _message_paths_in_db(
-    db: notmuch2.Database,
-    query: str,
-    *,
-    limit: int | None,
-    sort_newest_first: bool,
-) -> list[Path]:
-    sort = _SORT_NEWEST if sort_newest_first else notmuch2.Database.SORT.UNSORTED
-    it: Iterable = db.messages(query, sort=sort)
-    if limit is not None:
-        it = itertools.islice(it, max(0, limit))
-    out: list[Path] = []
-    for msg in it:
-        out.append(Path(msg.path))
-    return out
 
 
 def header_field_optional(msg: notmuch2.Message, name: MailHeaderName) -> str | None:
@@ -271,6 +257,149 @@ read_retry = retry(
 )
 
 
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# Изолированный multi-result reader (forkserver-воркер) — ЕДИНОЕ API для всех ``db.messages(query)``.
+#
+# ПРИЧИНА (исходники notmuch2 0.38.3, ``/usr/lib/python3/dist-packages/notmuch2/``; полная цитата — в
+# ``threlium/nm_reader_worker.py``): обход ленивого итератора ``db.messages`` (``_base.py``
+# ``NotmuchIter.__next__``) дёргает ``notmuch_messages_{valid,get,move_to_next,destroy}`` — bool/ptr/
+# **void**/void БЕЗ error-канала (cdef ``_build.py`` ~218-226). При устаревании Xapian-снимка под
+# конкурентным commit'ом эти функции бросают C++ ``Xapian::DatabaseModifiedError``, который через
+# void-CFFI-границу НЕ становится Python-ошибкой → ``std::terminate`` → SIGABRT ВСЕГО движка (поймать
+# нельзя; ``read_retry`` бессилен). Контраст: ``open``/``find``/``count`` (``_database.py``) и
+# ``Message.header``/``path`` (``_message.py``) — status/NULL-checked → Python-исключение → ``read_retry``;
+# поэтому ``db.find(id)`` безопасен, на нём строится родитель.
+#
+# РЕШЕНИЕ: обход — в forkserver-ВОРКЕРЕ. SIGABRT убивает воркер, движок жив; родитель ловит
+# ``BrokenProcessPool`` и ретраит на свежем снимке. Воркер → ``list[str]`` (message-id/path), VO-граница
+# у родителя; per-message данные — ``db.find(id)`` (без итератора). ``forkserver`` (НЕ ``fork``): воркеры
+# форкаются из ЧИСТОГО single-threaded server'а, поднятого рано в engine main, а НЕ из многопоточного
+# движка → нет fork-в-многопоточном (залоченные чужими тредами мьютексы) deadlock'а (модель памяти
+# libnotmuch — ``__init__.py`` / ``_base.py NotmuchObject``). ``warm_nm_reader()`` ОБЯЗАН вызываться в
+# engine main ДО старта rag-loop/handler-тредов.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+_NM_READER_MAX_WORKERS = 4  # параллельные читатели (notmuch many-readers); >1 чтобы не сериализовать
+_NM_READER_CTX: "multiprocessing.context.BaseContext | None" = None
+_NM_READER_POOL: "concurrent.futures.ProcessPoolExecutor | None" = None
+_NM_READER_LOCK = threading.Lock()
+
+
+def _new_nm_reader_pool() -> "concurrent.futures.ProcessPoolExecutor":
+    assert _NM_READER_CTX is not None
+    return concurrent.futures.ProcessPoolExecutor(
+        max_workers=_NM_READER_MAX_WORKERS, mp_context=_NM_READER_CTX
+    )
+
+
+def warm_nm_reader() -> None:
+    """Поднять forkserver-server РАНО (engine main, до старта тредов; см. блок выше). Идемпотентно.
+
+    Прогревочный submit форсирует старт server'а + первого воркера, пока процесс ОДНОПОТОЧНЫЙ —
+    тогда server форкается из чистого main, а воркеры из server'а (safe). Без этого первый реальный
+    запрос поднял бы server уже из многопоточного движка (fork-в-многопоточном hazard)."""
+    global _NM_READER_CTX, _NM_READER_POOL
+    with _NM_READER_LOCK:
+        if _NM_READER_POOL is not None:
+            return
+        ctx = multiprocessing.get_context("forkserver")
+        ctx.set_forkserver_preload(["notmuch2", "threlium.nm_reader_worker"])
+        _NM_READER_CTX = ctx
+        _NM_READER_POOL = _new_nm_reader_pool()
+        pool = _NM_READER_POOL
+    from threlium import nm_reader_worker  # noqa: PLC0415 — lazy: минимальный модуль (только notmuch2)
+    try:
+        db_path = str(database_dir_from_config())
+        pool.submit(
+            nm_reader_worker.fetch_message_field,
+            db_path, "id:__nm_reader_warm_probe__", sort="unsorted", limit=1,
+        ).result(timeout=30)
+        log.info("nm_reader_warm_ok", max_workers=_NM_READER_MAX_WORKERS)
+    except Exception as exc:  # прогрев best-effort; реальный запрос поднимет server лениво при нужде
+        log.warning("nm_reader_warm_probe_failed", error=repr(exc))
+
+
+def _recreate_nm_reader_pool(broken: "concurrent.futures.ProcessPoolExecutor") -> None:
+    """Пересоздать пул ПОСЛЕ ``BrokenProcessPool`` (воркер умер от SIGABRT). Только первый поток,
+    увидевший именно ЭТОТ сломанный пул, пересоздаёт (без thundering-herd). forkserver-server жив —
+    новые воркеры форкаются из него (не из движка)."""
+    global _NM_READER_POOL
+    with _NM_READER_LOCK:
+        if _NM_READER_POOL is broken or _NM_READER_POOL is None:
+            _NM_READER_POOL = _new_nm_reader_pool()
+            if broken is not None:
+                broken.shutdown(wait=False)
+
+
+def _run_nm_reader_field(query: str, sort: str, limit: int | None, field: str) -> list[str]:
+    """Выполнить multi-result чтение в воркере с ретраем на ``BrokenProcessPool`` (SIGABRT воркера)
+    и на concurrent-revision-discard (cffi-NULL / Xapian, пробро­шенный из воркера)."""
+    from threlium import nm_reader_worker  # noqa: PLC0415
+    if _NM_READER_POOL is None:
+        warm_nm_reader()  # ленивый fallback (в норме warm в engine main); может форкнуть из тредов — best-effort
+    db_path = str(database_dir_from_config())
+    last_exc: BaseException | None = None
+    for attempt in range(_RETRY_MAX_ATTEMPTS):
+        pool = _NM_READER_POOL
+        if pool is None:
+            raise RuntimeError("nm_reader pool unavailable")
+        try:
+            fut = pool.submit(
+                nm_reader_worker.fetch_message_field,
+                db_path, query, sort=sort, limit=limit, field=field,
+            )
+            return fut.result()
+        except BrokenProcessPool as exc:
+            last_exc = exc
+            log.warning(
+                "nm_reader_worker_died_retry",
+                attempt=attempt + 1, query=query, field=field, err="BrokenProcessPool",
+            )
+            _recreate_nm_reader_pool(pool)
+        except (notmuch2.XapianError, notmuch2.NullPointerError, RuntimeError) as exc:
+            if not is_concurrent_revision_discard(exc):
+                raise
+            last_exc = exc
+            log.warning(
+                "nm_reader_discard_retry",
+                attempt=attempt + 1, query=query, field=field, err=type(exc).__name__,
+            )
+        time.sleep(min(2.0, 0.1 * (2 ** attempt)))
+    raise RuntimeError(
+        f"nm_reader failed after {_RETRY_MAX_ATTEMPTS} attempts (query={query!r}, field={field})"
+    ) from last_exc
+
+
+def notmuch_query_message_ids(
+    query: str, *, sort_newest_first: bool = False, sort_oldest_first: bool = False,
+    limit: int | None = None,
+) -> list[NotmuchMessageIdInner]:
+    """**ЕДИНОЕ API multi-result чтения notmuch:** ``query`` → ``list[NotmuchMessageIdInner]``.
+
+    Заменяет все ``for msg in db.messages(query)`` (краш-источник). Обход изолирован в forkserver-
+    воркере (crash-safe), наружу — id-строки → VO здесь. Per-message данные (path/заголовки) —
+    ``db.find(id)`` у вызывающего (status-checked). Порядок: newest/oldest/unsorted."""
+    sort = "newest" if sort_newest_first else ("oldest" if sort_oldest_first else "unsorted")
+    raw = _run_nm_reader_field(query, sort, limit, "messageid")
+    out: list[NotmuchMessageIdInner] = []
+    for s in raw:
+        inner = NotmuchMessageIdInner.from_optional_raw(s)
+        if inner is not None:
+            out.append(inner)
+    return out
+
+
+def notmuch_query_message_paths(
+    query: str, *, sort_newest_first: bool = False, limit: int | None = None,
+) -> list[Path]:
+    """Multi-result чтение → ``list[Path]`` (тот же изолированный воркер; field=path).
+
+    Для мест, которым нужны только пути (без ``db.find``). Возвращает пути как есть из индекса."""
+    sort = "newest" if sort_newest_first else "unsorted"
+    raw = _run_nm_reader_field(query, sort, limit, "path")
+    return [Path(s) for s in raw]
+
+
 @read_retry
 def inner_message_id_for_path(file_path: Path) -> NotmuchMessageIdInner:
     """Зафиксировать inner ``Message-ID`` по path в индексе (граница FSM после find).
@@ -349,24 +478,23 @@ def settle_recovery_for_stage(stage: str) -> None:
         NotmuchQueryField.FOLDER.term(f"{stage}/Maildir", quoted=True),
         NotmuchTag.UNREAD.as_tag_query_term(),
     )
+    # Пути собираем изолированным reader'ом (не ленивый db.messages-итератор → C++ move_to_next
+    # terminate), затем settle поштучно под WRITE db.atomic (db.get — single lookup, без итератора).
+    cur_paths = [p for p in notmuch_query_message_paths(q) if p.parent.name == "cur"]
+    if not cur_paths:
+        return
     with notmuch_database(write=True) as db:
-        cur_paths = [
-            Path(msg.path)
-            for msg in db.messages(q)
-            if Path(msg.path).parent.name == "cur"
-        ]
         with db.atomic():
             for fp in cur_paths:
                 msg = db.get(str(fp.resolve()))
                 msg.tags.from_maildir_flags()
 
 
-@read_retry
 def message_paths(query: str, *, limit: int | None = None, sort_newest_first: bool = False) -> list[Path]:
-    with notmuch_database(write=False) as db:
-        return _message_paths_in_db(
-            db, query, limit=limit, sort_newest_first=sort_newest_first
-        )
+    """Пути сообщений по ``query`` — через изолированный forkserver-reader (см. ``notmuch_query_message_
+    paths`` / ``nm_reader_worker``), а НЕ ленивый ``db.messages``-итератор (C++ ``move_to_next`` terminate).
+    Retry на discard/SIGABRT — внутри воркер-runner'а (отдельный ``@read_retry`` не нужен)."""
+    return notmuch_query_message_paths(query, sort_newest_first=sort_newest_first, limit=limit)
 
 
 def first_message_path(query: str, *, sort_newest_first: bool = False) -> Path | None:
@@ -400,11 +528,17 @@ def first_message_for_query(
 
     По умолчанию ``newest_first=True``: при нескольких совпадениях — самое новое по дате
     (детерминированный выбор, напр. для ``find_existing_egress_archive`` при дублях IRT).
+
+    Multi-result отбор (first) — изолированным reader'ом (``notmuch_query_message_ids``), а НЕ ленивым
+    ``db.messages``-итератором (C++ ``move_to_next`` terminate); затем ``db.find(id)`` (single lookup,
+    status-checked) под переданным ``db``.
     """
-    sort = _SORT_NEWEST if newest_first else notmuch2.Database.SORT.OLDEST_FIRST
-    for msg in db.messages(query, sort=sort):
-        return msg
-    return None
+    ids = notmuch_query_message_ids(
+        query, sort_newest_first=newest_first, sort_oldest_first=not newest_first, limit=1
+    )
+    if not ids:
+        return None
+    return first_notmuch_message_for_inner_id(db, ids[0])
 
 
 def first_notmuch_message_for_inner_id(

@@ -92,6 +92,12 @@ def main() -> None:
     warm_tool_specs(GLOBAL_CFG)
     notify_status(SystemdStatusBody.engine_home_configured())
     notify_status(SystemdStatusBody.engine_config_loaded())
+    # Поднять forkserver-server изолированного notmuch-reader'а ЗДЕСЬ — процесс ещё ОДНОПОТОЧНЫЙ (до
+    # start_rag_loop_thread / socket-сервера): server форкается из чистого main, воркеры из server'а, а
+    # не из многопоточного движка (fork-в-многопоточном = deadlock на чужих залоченных мьютексах). См.
+    # threlium.nm.warm_nm_reader / nm_reader_worker (причина: void-CFFI move_to_next → C++ terminate).
+    from threlium.nm import warm_nm_reader  # noqa: PLC0415
+    warm_nm_reader()
     notify_status(SystemdStatusBody.engine_starting_lightrag_loop())
     start_rag_loop_thread(GLOBAL_CFG)
 

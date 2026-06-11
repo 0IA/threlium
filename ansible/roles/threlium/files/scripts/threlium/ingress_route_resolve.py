@@ -246,8 +246,13 @@ def resolve_route_from_thread_oldest_route_tag_under_db(
         tid.as_notmuch_thread_term(),
         NotmuchTag.ROUTE.as_tag_query_term(),
     )
-    sort = notmuch2.Database.SORT.OLDEST_FIRST
-    for nm_msg in db.messages(q, sort=sort):
+    # Multi-result отбор oldest-first — изолированным reader'ом (не ленивый db.messages-итератор:
+    # C++ move_to_next terminate под конкурентным commit, см. nm.notmuch_query_message_ids); затем
+    # db.find(id) под переданным READ db (single lookup, status-checked).
+    for mid in nm.notmuch_query_message_ids(str(q), sort_oldest_first=True):
+        nm_msg = nm.first_notmuch_message_for_inner_id(db, mid)
+        if nm_msg is None:
+            continue
         resolved = _try_resolve_from_notmuch_message(nm_msg)
         if resolved is not None:
             return resolved

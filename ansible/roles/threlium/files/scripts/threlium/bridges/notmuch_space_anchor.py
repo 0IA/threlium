@@ -19,8 +19,6 @@ from threlium.types import (
     ThreliumSpaceB62Wire,
 )
 
-_SORT_NEWEST = notmuch2.Database.SORT.NEWEST_FIRST
-
 #: Потолок ожидания archive-glue предыдущего хода пространства (deadline pending-элемента в цикле моста).
 #: Покрывает самый долгий контур (reasoning ~120c + egress/archive); при превышении сообщение ingest'ится
 #: best-effort (ход считается зависшим), чтобы pending не копился вечно. Per-space — соседние не ждут.
@@ -30,10 +28,14 @@ SPACE_SETTLE_TIMEOUT_SEC = 240.0
 def _newest_message_mid_in_thread(
     db: notmuch2.Database, tid: NotmuchThreadScopeId,
 ) -> NotmuchMessageIdInner:
-    """Message-ID самого нового сообщения в треде (любой тег / From)."""
+    """Message-ID самого нового сообщения в треде (любой тег / From).
+
+    Через изолированный reader (не ленивый db.messages-итератор: C++ move_to_next terminate); воркер
+    возвращает сам message-id (VO) — db.find не нужен."""
     q = tid.as_notmuch_thread_term()
-    for nm_msg in db.messages(q, sort=_SORT_NEWEST):
-        return nm.require_inner_message_id_from_notmuch_message(nm_msg)
+    mids = nm.notmuch_query_message_ids(str(q), sort_newest_first=True, limit=1)
+    if mids:
+        return mids[0]
     raise RuntimeError(
         f"пустой тред при ненулевом якоре (thread={tid.value!r})"
     )
@@ -66,14 +68,13 @@ def space_thread_settled(
         bridge.as_from_query_term(),
         space_wire.as_notmuch_index_term(),
     )
-    anchor: notmuch2.Message | None = None
-    for nm_msg in db.messages(q, sort=_SORT_NEWEST):
-        anchor = nm_msg
-        break
-    if anchor is None:
+    # newest anchor — изолированным reader'ом (не ленивый db.messages: C++ move_to_next terminate);
+    # воркер отдаёт сам message-id (VO), db.find не нужен.
+    anchor_mids = nm.notmuch_query_message_ids(str(q), sort_newest_first=True, limit=1)
+    if not anchor_mids:
         return True
 
-    anchor_mid = nm.require_inner_message_id_from_notmuch_message(anchor)
+    anchor_mid = anchor_mids[0]
     tid = nm.thread_id_for_header_message_id_in_db(db, anchor_mid)
     if tid is None:
         return True
@@ -125,14 +126,13 @@ def resolve_bridge_tail_mid_for_space(
         bridge.as_from_query_term(),
         space_wire.as_notmuch_index_term(),
     )
-    anchor: notmuch2.Message | None = None
-    for nm_msg in db.messages(q, sort=_SORT_NEWEST):
-        anchor = nm_msg
-        break
-    if anchor is None:
+    # newest anchor — изолированным reader'ом (не ленивый db.messages: C++ move_to_next terminate);
+    # воркер отдаёт сам message-id (VO), db.find не нужен.
+    anchor_mids = nm.notmuch_query_message_ids(str(q), sort_newest_first=True, limit=1)
+    if not anchor_mids:
         return None
 
-    anchor_mid = nm.require_inner_message_id_from_notmuch_message(anchor)
+    anchor_mid = anchor_mids[0]
     tid = nm.thread_id_for_header_message_id_in_db(db, anchor_mid)
     if tid is None:
         raise RuntimeError(

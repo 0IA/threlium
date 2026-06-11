@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import notmuch2  # pyright: ignore[reportMissingImports]
+
 from lightrag import LightRAG
 
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers_from_notmuch
@@ -22,9 +24,10 @@ from threlium.mime_reform import message_has_history
 from threlium.lightrag_ingest import render_lightrag_ingest_document
 from threlium.nm import (
     batch_tag_add,
+    first_notmuch_message_for_inner_id,
+    is_concurrent_revision_discard,
     notmuch_database,
-    read_retry,
-    require_inner_message_id_from_notmuch_message,
+    notmuch_query_message_ids,
 )
 from threlium.settings import (
     ThreliumSettings,
@@ -129,35 +132,87 @@ class _DrainPendingItem:
     correlation: "LitellmCorrelationSnapshot | None"
 
 
-@read_retry
-def _collect_batch(limit: int, *, with_correlation: bool) -> list["_DrainPendingItem"]:
-    """pending-снимки[…limit] под ОДНОЙ READ-транзакцией → только VO наружу.
+_COLLECT_RESUME_MAX_NOPROGRESS = 5
 
-    ``@read_retry``: при discard'е ревизии под конкурентной записью сеанс переоткрывается (rag-loop
-    в движке многопоточен; ``notmuch2.Message`` не покидает ``with``). При ``with_correlation`` снимок
-    корреляции индексатора собирается ЗДЕСЬ ЖЕ (антипаттерн «живой Message наружу / повторный db.get»
-    устранён)."""
-    out: list[_DrainPendingItem] = []
-    selector = lightrag_drain_pending_search()
-    with notmuch_database(write=False) as db:
-        for msg in db.messages(selector):
-            fp = Path(msg.path)
-            if not fp.is_file():
-                continue
-            ids = NotmuchMessageIds.from_notmuch(msg)
-            mid_inner = require_inner_message_id_from_notmuch_message(msg)
-            corr = (
-                LitellmCorrelationSnapshot.from_mapping(
-                    build_litellm_correlation_headers_from_notmuch(
-                        db, msg, call_site=LitellmCallSite.LIGHTRAG_INDEX
-                    )
-                )
-                if with_correlation
-                else None
+
+def _collect_one(
+    db: notmuch2.Database, mid_inner: NotmuchMessageIdInner, *, with_correlation: bool
+) -> "_DrainPendingItem | None":
+    """Один pending-элемент под открытым READ ``db``: ``db.find`` + path/threadid/correlation.
+
+    ``None`` — письмо ушло из индекса (``db.find`` LookupError→None) или файла нет (genuine skip).
+    Discard ревизии (``XapianError`` / cffi-NULL ``RuntimeError`` на ``db.find``/``msg.path``/route-resolve)
+    — ПРОБРАСЫВАЕТСЯ resume-циклу: тот переоткроет БД и повторит ЭТОТ элемент. В ``out`` ничего не
+    попадает до полного успеха элемента (атомарность для resume)."""
+    msg = first_notmuch_message_for_inner_id(db, mid_inner)
+    if msg is None:
+        return None
+    fp = Path(msg.path)
+    if not fp.is_file():
+        return None
+    ids = NotmuchMessageIds.from_notmuch(msg)
+    corr = (
+        LitellmCorrelationSnapshot.from_mapping(
+            build_litellm_correlation_headers_from_notmuch(
+                db, msg, call_site=LitellmCallSite.LIGHTRAG_INDEX
             )
-            out.append(_DrainPendingItem(fp, mid_inner, ids.threadid, corr))
-            if len(out) >= limit:
-                break
+        )
+        if with_correlation
+        else None
+    )
+    return _DrainPendingItem(fp, mid_inner, ids.threadid, corr)
+
+
+def _collect_batch(limit: int, *, with_correlation: bool) -> list["_DrainPendingItem"]:
+    """pending-снимки[…limit] → только frozen-VO наружу. **RESUMABLE.**
+
+    Multi-result отбор pending — изолированным forkserver-reader'ом (``notmuch_query_message_ids``; НЕ
+    ленивый ``db.messages``-итератор: его ``move_to_next`` — void CFFI без error-канала — под конкурентным
+    commit'ом бросает C++ ``Xapian::DatabaseModifiedError`` мимо Python → SIGABRT движка, см.
+    ``nm_reader_worker``) → ФИКСИРОВАННЫЙ список mid. Далее parent-цикл ``db.find(mid[i])`` (single lookup,
+    status-checked) + per-message данные.
+
+    На discard ревизии под конкурентной записью (``XapianError`` / cffi-NULL ``RuntimeError``, см.
+    ``nm.is_concurrent_revision_discard``) переоткрываем БД и ПРОДОЛЖАЕМ с упавшего ``i`` (собранное
+    ``out`` сохранено — frozen-VO), а НЕ рестартим весь батч (re-fetch воркера + все db.find заново) — тот
+    же паттерн, что ``threlium.irt_chain._materialize_irt_chain_session``. Cap — по ПОДРЯД-неуспехам без
+    прогресса (сброс при росте ``i``), поэтому под нагрузкой батч не исчерпает лимит, пока двигается.
+    Итератора в движке нет → C++ terminate невозможен; ``db.find`` discard ловится (Python) и resume'ится."""
+    selector = lightrag_drain_pending_search()
+    mids = notmuch_query_message_ids(str(selector), limit=limit)
+    out: list[_DrainPendingItem] = []
+    i = 0
+    last_i = -1
+    noprogress = 0
+    while i < len(mids):
+        try:
+            with notmuch_database(write=False) as db:
+                while i < len(mids):
+                    item = _collect_one(db, mids[i], with_correlation=with_correlation)
+                    if item is not None:
+                        out.append(item)
+                    i += 1  # продвигаем ТОЛЬКО после полного успеха элемента (discard → i не растёт → resume)
+            return out
+        except Exception as exc:
+            if not is_concurrent_revision_discard(exc):
+                raise
+            if i > last_i:  # был прогресс → сброс no-progress счётчика
+                last_i = i
+                noprogress = 0
+            noprogress += 1
+            if noprogress >= _COLLECT_RESUME_MAX_NOPROGRESS:
+                log.warning(
+                    "drain_collect_resume_exhausted",
+                    collected=len(out), index=i, total=len(mids), err=type(exc).__name__,
+                )
+                raise
+            wait = min(2.0, 0.05 * (2 ** (noprogress - 1)))
+            log.warning(
+                "drain_collect_resume",
+                collected=len(out), index=i, total=len(mids),
+                err=type(exc).__name__, wait_s=round(wait, 3),
+            )
+            time.sleep(wait)
     return out
 
 

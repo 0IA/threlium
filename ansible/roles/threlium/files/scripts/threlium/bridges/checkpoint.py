@@ -4,8 +4,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TypeVar
 
-import notmuch2  # pyright: ignore[reportMissingImports]
-
 import threlium.nm as nm
 from threlium.bridges.routing import require_ingress_route
 from threlium.types import (
@@ -35,8 +33,14 @@ def latest_route_checkpoint(
         NotmuchTag.ROUTE.as_tag_query_term(),
         bridge.as_from_query_term(),
     )
+    # Multi-result отбор newest-first — изолированным reader'ом (не ленивый db.messages-итератор:
+    # C++ move_to_next terminate, см. nm.notmuch_query_message_ids), затем per-id db.find под READ db.
+    mids = nm.notmuch_query_message_ids(str(q), sort_newest_first=True)
     with nm.notmuch_database(write=False) as db:
-        for nm_msg in db.messages(q, sort=notmuch2.Database.SORT.NEWEST_FIRST):
+        for mid in mids:
+            nm_msg = nm.first_notmuch_message_for_inner_id(db, mid)
+            if nm_msg is None:
+                continue
             route_w = IngressRouteB62Wire.parse_present_from_nm_message(
                 nm_msg, MailHeaderName.ROUTE.value
             )
