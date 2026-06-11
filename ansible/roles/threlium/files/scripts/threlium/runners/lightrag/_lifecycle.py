@@ -22,6 +22,8 @@ from threlium.types.systemd_status import SystemdStatusBody
 from threlium.runners.lightrag._bootstrap import bootstrap_knowledge_dir
 from threlium.runners.lightrag._construction import build_rag
 from threlium.runners.lightrag._drain import (
+    await_drain_idle,
+    request_drain_quiesce,
     reset_drain_task,
     schedule_on_loop,
 )
@@ -102,6 +104,18 @@ async def _shutdown_rag_loop(*, deadline_sec: float) -> None:
 
     def _remaining(cap: float) -> float:
         return max(0.5, min(cap, deadline - loop.time()))
+
+    # 0) КРИТИЧНО (восстановимость стора при рестарте): quiesce drain + дождаться in-flight ``ainsert``
+    #    ДО shutdown пулов и blanket-cancel. Шаги 1–2 ниже выставляют shutdown_event на embedding/llm
+    #    пулах и отменяют все задачи — если drain в этот момент в ``rag.ainsert`` (lancedb ``merge_insert``),
+    #    cancel рвёт запись посреди, а ``finalize_storages`` (шаг 3) коммитит полузаписанный lancedb →
+    #    манифест ссылается на нефлашнутый data-файл (``LanceError(IO): Not found …data/*.lance``); порча
+    #    переживает рестарт и отравляет весь следующий прогон (cold-reset чистит лишь на старте сессии).
+    #    Здесь пулы ещё живы → in-flight ainsert доходит до конца; ``shield`` не даёт отменить его по
+    #    таймауту. Бюджетируем щедро (дедлайн 30s); остаток деадлайна — на пулы/cancel/finalize.
+    request_drain_quiesce()
+    if not await await_drain_idle(_remaining(20.0)):
+        log.warning("rag_shutdown_drain_not_idle")
 
     # 1) Выставить shutdown_event на достижимых worker-пулах, чтобы воркеры ЧИСТО вышли (см. helper).
     rag = _daemon_rag
@@ -300,6 +314,7 @@ def _rag_thread_main(settings: ThreliumSettings) -> None:
         _ready_event.set()
         loop.run_forever()
     except BaseException as e:
+        log.error("lightrag_rag_loop_boot_failed", exc_info=e)
         notify_status(SystemdStatusBody.lightrag_boot_failed(message=str(e)))
         _boot_error.append(e)
         _ready_event.set()
@@ -307,8 +322,8 @@ def _rag_thread_main(settings: ThreliumSettings) -> None:
         try:
             if not loop.is_closed():
                 loop.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("rag_loop_close_failed", exc_info=exc)
         _rag_loop = None
         _drain_lock = None
         _bootstrap_task = None
@@ -364,8 +379,8 @@ def stop_rag_loop_thread(*, settings: ThreliumSettings | None = None) -> None:
     finally:
         try:
             loop.call_soon_threadsafe(loop.stop)
-        except RuntimeError:
-            pass
+        except RuntimeError as exc:
+            log.warning("rag_loop_stop_signal_failed", exc_info=exc)
     th.join(timeout=shutdown_timeout + 5.0)
     _rag_thread = None
     _daemon_rag = None

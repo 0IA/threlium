@@ -48,12 +48,46 @@ from threlium.types.systemd_status import SystemdStatusBody
 log = logger.bind(stage="lightrag")
 
 _drain_task: asyncio.Task[None] | None = None
+# Выставляется на shutdown: drain перестаёт self-schedule'ить НОВЫЕ батчи (in-flight доходит сам).
+_drain_quiesce: bool = False
 
 
 def reset_drain_task() -> None:
     """Reset drain task state (called during lifecycle cleanup)."""
-    global _drain_task
+    global _drain_task, _drain_quiesce
     _drain_task = None
+    _drain_quiesce = False
+
+
+def request_drain_quiesce() -> None:
+    """Shutdown: остановить self-schedule НОВЫХ drain-батчей. In-flight ``drain_single_batch`` (его
+    ``ainsert`` → lancedb ``merge_insert``) доходит до конца сам — новый батч не создаётся."""
+    global _drain_quiesce
+    _drain_quiesce = True
+
+
+async def await_drain_idle(timeout: float) -> bool:
+    """Дождаться завершения in-flight drain-батча (его ``ainsert`` → запись lancedb) ДО ``finalize_storages``.
+
+    Иначе blanket-cancel на shutdown прерывает ``merge_insert`` ПОСРЕДИ записи, а ``finalize_storages``
+    коммитит полузаписанный стор → манифест ссылается на нефлашнутый data-файл (``LanceError(IO): Not
+    found …data/*.lance``), и порча переживает рестарт, отравляя весь следующий прогон. ``shield`` — НЕ
+    отменять ainsert по таймауту (отмена посреди merge_insert = та самая порча). ``True`` = drain idle в
+    пределах ``timeout`` (зови ПОСЛЕ :func:`request_drain_quiesce`, пока worker-пулы ещё живы)."""
+    t = _drain_task
+    if t is None or t.done():
+        return True
+    try:
+        await asyncio.wait_for(asyncio.shield(t), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        log.warning("await_drain_idle_timeout", timeout_sec=timeout, exc_info=exc)
+        return False
+    except asyncio.CancelledError:
+        raise
+    except BaseException as exc:
+        log.warning("await_drain_idle_batch_failed", exc_info=exc)
+        return True  # батч упал сам (drain_batch_failed) — это не in-flight lancedb write
+    return True
 
 
 def _lightrag_doc_id(mid_inner: NotmuchMessageIdInner) -> str:
@@ -286,14 +320,16 @@ async def drain_single_batch(
                 return
             notify_status(SystemdStatusBody.lightrag_indexing_batch(batch_size=len(pending)))
             await _ainsert_batch(rag, pending, settings)
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as exc:
+        log.debug("drain_batch_cancelled", exc_info=exc)
         return
     except BaseException as ex:
         log.error("drain_batch_failed", exc_info=ex)
         raise
 
-    # Sweep-проба «есть ли ещё pending» — корреляция не нужна (только truthiness).
-    if _collect_batch(1, with_correlation=False):
+    # Sweep-проба «есть ли ещё pending» — корреляция не нужна (только truthiness). На shutdown
+    # (_drain_quiesce) НОВЫЙ батч не создаём: цепочка останавливается, await_drain_idle дождётся этого.
+    if not _drain_quiesce and _collect_batch(1, with_correlation=False):
         _drain_task = asyncio.create_task(
             drain_single_batch(rag, settings, lock)
         )
