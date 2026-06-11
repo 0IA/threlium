@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import enum
 import functools
+import time
 from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -22,6 +23,9 @@ from pathlib import Path
 import notmuch2  # pyright: ignore[reportMissingImports]
 
 from threlium import nm
+from threlium.logutil import logger
+
+log = logger.bind(component=__name__)
 from threlium.types import (
     FsmStage,
     IngressRouteB62Wire,
@@ -188,41 +192,61 @@ def _parent_missing_msg(parent: NotmuchMessageIdInner) -> str:
     )
 
 
-def _materialize_irt_chain(
-    db: notmuch2.Database, start_inner: NotmuchMessageIdInner
-) -> list[IrtAncestorSnapshot]:
-    """Лист → корень по IRT; все данные вычитываются под открытым read ``db``."""
-    result: list[IrtAncestorSnapshot] = []
-    seen_inner: set[str] = set()
-    next_inner: NotmuchMessageIdInner | None = start_inner
-    is_first = True
+def _materialize_one_ancestor(
+    db: notmuch2.Database,
+    expected: NotmuchMessageIdInner,
+    *,
+    is_leaf: bool,
+    start_inner: NotmuchMessageIdInner,
+    seen_inner: set[str],
+) -> IrtAncestorSnapshot:
+    """Прочитать РОВНО одного предка под открытым read ``db`` в иммутабельный снимок.
 
+    ``RuntimeError`` — нарушение FSM-инварианта (нет листа/предка, цикл): НЕ ретраится.
+    ``notmuch2.XapianError`` / ``NullPointerError`` (discard ревизии под конкурентной записью) может
+    прилететь из любого CFFI-чтения; вызывающий переоткрывает БД и продолжает с ТОГО ЖЕ ``expected``.
+    Контракт resume: ``seen_inner`` пополняется ТОЛЬКО после полностью успешного снимка — иначе после
+    discard'а на чтении заголовков ключ уже лежал бы в ``seen_inner`` и resume ложно сообщил бы о цикле."""
+    nm_msg = nm.first_notmuch_message_for_inner_id(db, expected)
+    if nm_msg is None:
+        raise RuntimeError(
+            _leaf_not_in_index_msg(start_inner) if is_leaf else _parent_missing_msg(expected)
+        )
+    indexed = _require_matching_indexed_mid(nm_msg, expected)
+    key = indexed.value.casefold()
+    if key in seen_inner:
+        raise RuntimeError(
+            "FSM-инвариант: цикл в цепочке In-Reply-To "
+            f"(Message-ID={indexed.as_angle_bracket_header()})"
+        )
+    snap = _snapshot_from_nm_message(nm_msg, indexed)
+    seen_inner.add(key)  # commit ТОЛЬКО после полного снимка (resume-safe, см. docstring)
+    return snap
+
+
+def _drain_irt_frontier(
+    db: notmuch2.Database,
+    start_inner: NotmuchMessageIdInner,
+    frontier: NotmuchMessageIdInner | None,
+    result: list[IrtAncestorSnapshot],
+    seen_inner: set[str],
+) -> None:
+    """Продолжить обход лист → корень с ``frontier`` под открытым read ``db``; снимки — в ``result`` на месте.
+
+    Возврат — когда достигнут корень (``parent is None``). При discard'е CFFI-чтения частичные
+    ``result`` / ``seen_inner`` остаются согласованными (мутируются лишь ПОСЛЕ полного снимка каждого
+    предка), поэтому вызывающий переоткрывает БД и зовёт снова — frontier выводится из ``result[-1]``."""
+    next_inner = frontier
     while next_inner is not None:
-        nm_msg = nm.first_notmuch_message_for_inner_id(db, next_inner)
-        if nm_msg is None:
-            if is_first:
-                raise RuntimeError(_leaf_not_in_index_msg(start_inner))
-            raise RuntimeError(_parent_missing_msg(next_inner))
-        is_first = False
-
-        indexed = _require_matching_indexed_mid(nm_msg, next_inner)
-        key = indexed.value.casefold()
-        if key in seen_inner:
-            raise RuntimeError(
-                "FSM-инвариант: цикл в цепочке In-Reply-To "
-                f"(Message-ID={indexed.as_angle_bracket_header()})"
-            )
-        seen_inner.add(key)
-
-        snap = _snapshot_from_nm_message(nm_msg, indexed)
+        snap = _materialize_one_ancestor(
+            db,
+            next_inner,
+            is_leaf=(len(result) == 0),
+            start_inner=start_inner,
+            seen_inner=seen_inner,
+        )
         result.append(snap)
-
-        parent = _next_parent_inner_raw(snap.header_in_reply_to)
-        if parent is None:
-            break
-        next_inner = parent
-
-    return result
+        next_inner = _next_parent_inner_raw(snap.header_in_reply_to)
 
 
 # Кэш материализации IRT-цепочки на ВРЕМЯ одной FSM-стадии (per-message). Одна стадия обходит цепочку
@@ -254,17 +278,65 @@ def stage_materialization_cache() -> Iterator[None]:
         _IRT_CHAIN_CACHE.reset(token)
 
 
-@nm.read_retry
+_IRT_RESUME_MAX_NOPROGRESS = 5
+_IRT_RESUME_WAIT_MIN = 0.05
+_IRT_RESUME_WAIT_MAX = 2.0
+
+
 def _materialize_irt_chain_session(
     start_inner: NotmuchMessageIdInner,
 ) -> list[IrtAncestorSnapshot]:
-    """Открыть read-БД, БЫСТРО материализовать цепочку в иммутабельные снимки, закрыть.
+    """Открыть read-БД, материализовать IRT-цепочку в иммутабельные снимки. **RESUMABLE.**
 
-    ``@nm.read_retry``: ни один ``notmuch2.Message`` не покидает сеанс; при discard'е ревизии под
-    конкурентной записью сеанс переоткрывается и материализуется заново (idempotent — наружу только
-    frozen-снимки)."""
-    with nm.notmuch_database(write=False) as db:
-        return _materialize_irt_chain(db, start_inner)
+    При discard'е ревизии под конкурентной записью (``XapianError`` / ``NullPointerError``, см.
+    :func:`nm._is_concurrent_revision_discard`) переоткрываем БД и ПРОДОЛЖАЕМ обход с предка, на котором
+    упали — уже собранные frozen-снимки валидны (данные скопированы) и сохраняются. Прежний
+    ``@nm.read_retry`` рестартил весь обход с нуля на каждый discard: под ``-n12`` тяжёлая запись →
+    частые discard'ы → перечитывание O(depth) тришило (профиль: ~300 ретраев/прогон). Теперь discard
+    стоит ОДНО переоткрытие + дочитку хвоста, а не всю цепочку. Наружу — только иммутабельные снимки;
+    ни один ``notmuch2.Message`` не покидает сеанс.
+
+    Cap — по ПОДРЯД идущим неуспехам БЕЗ прогресса (один и тот же предок discard'ится раз за разом):
+    как только глубина выросла, счётчик сбрасывается, поэтому глубокая цепочка под нагрузкой не
+    исчерпает лимит, пока двигается вперёд."""
+    result: list[IrtAncestorSnapshot] = []
+    seen_inner: set[str] = set()
+    noprogress = 0
+    last_depth = 0
+    while True:
+        frontier = (
+            _next_parent_inner_raw(result[-1].header_in_reply_to) if result else start_inner
+        )
+        if frontier is None:
+            return result  # корень достигнут
+        try:
+            with nm.notmuch_database(write=False) as db:
+                _drain_irt_frontier(db, start_inner, frontier, result, seen_inner)
+            return result
+        except (notmuch2.XapianError, notmuch2.NullPointerError) as exc:
+            if len(result) > last_depth:  # был прогресс → сбросить no-progress счётчик
+                last_depth = len(result)
+                noprogress = 0
+            noprogress += 1
+            if noprogress >= _IRT_RESUME_MAX_NOPROGRESS:
+                log.warning(
+                    "irt_chain_materialize_exhausted",
+                    depth=len(result),
+                    frontier=frontier.value,
+                    noprogress=noprogress,
+                    err=type(exc).__name__,
+                )
+                raise
+            wait = min(_IRT_RESUME_WAIT_MAX, _IRT_RESUME_WAIT_MIN * (2 ** (noprogress - 1)))
+            log.warning(
+                "irt_chain_materialize_resume",
+                depth=len(result),
+                frontier=frontier.value,
+                noprogress=noprogress,
+                err=type(exc).__name__,
+                wait_s=round(wait, 3),
+            )
+            time.sleep(wait)
 
 
 def iter_in_reply_to_ancestors_from_inner_id(
