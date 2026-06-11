@@ -50,7 +50,7 @@
                 "type": "function",
                 "function": {
                   "name": "tasks_upsert",
-                  "arguments": "{\"reasoning\": \"e2e L1: record task completion before subagent return\",\"new_subtasks\": [{\"text\": \"Complete the nested subtask\",\"status\": \"done\"}]}"
+                  "arguments": "{\"reasoning\": \"e2e L1: record task completion + close enrich seed before subagent return\",\"new_subtasks\": [{\"text\": \"Complete the nested subtask\",\"status\": \"done\"},{\"text\": \"Locate the task ledger handler in states\",\"status\": \"done\"},{\"text\": \"Draft the reply summarizing the ledger flow\",\"status\": \"done\"}]}"
                 }
               }
             ]

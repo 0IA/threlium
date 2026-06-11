@@ -65,7 +65,9 @@
       "parameters": {
         "context": "stub-subagent-frame-iso-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
-          "phase_l1_done": "1"
+          "phase_l1_done": "1",
+          "l1_finalize_seen": "1",
+          "l1_l0_leaked": "{{#if (contains request.body 'E2E-ISO-L0-BUFFER-CHUNK-MUST-NOT-LEAK-TO-L1')}}1{{else}}0{{/if}}"
         }
       }
     },
