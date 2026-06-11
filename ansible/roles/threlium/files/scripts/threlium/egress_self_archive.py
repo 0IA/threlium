@@ -98,16 +98,14 @@ def find_existing_egress_archive(
     return _find_existing_egress_archive_by_query(q)
 
 
-@nm.read_retry
 def _find_existing_egress_archive_by_query(q: str) -> ExistingEgressArchive | None:
-    """Открыть → быстро материализовать glue-MID в VO → закрыть; ``Message`` не покидает сеанс.
+    """glue-MID самого нового совпадения по ``q`` → VO (или ``None``).
 
-    ``@nm.read_retry`` переоткрывает БД при discard'е ревизии под конкурентной записью."""
-    with nm.notmuch_database(write=False) as db:
-        msg = nm.first_message_for_query(db, q, newest_first=True)
-        if msg is None:
-            return None
-        raw_mid = str(msg.messageid)
-        return ExistingEgressArchive(
-            glue_message_id=RfcMessageIdWire.parse(f"<{raw_mid}>"),
-        )
+    Нужен только ``Message-ID`` → берём его изолированным reader'ом (``notmuch_query_message_ids``,
+    crash-safe + свой retry на discard); ни живого ``notmuch2.Message``, ни открытой ``db`` здесь нет."""
+    mids = nm.notmuch_query_message_ids(q, sort_newest_first=True, limit=1)
+    if not mids:
+        return None
+    return ExistingEgressArchive(
+        glue_message_id=RfcMessageIdWire.parse(mids[0].as_angle_bracket_header()),
+    )

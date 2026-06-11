@@ -12,6 +12,7 @@ from threlium import nm
 from threlium.irt_chain import (
     IrtAncestorSnapshot,
     iter_in_reply_to_ancestors_from_inner_id,
+    snapshot_from_nm_message,
 )
 
 from threlium.types import (
@@ -117,17 +118,6 @@ def _try_resolve_from_snapshot(snap: IrtAncestorSnapshot) -> ResolvedRoute | Non
         snap.header_route,
         snap.header_references,
         snap.header_subject,
-    )
-
-
-def _try_resolve_from_notmuch_message(nm_msg: notmuch2.Message) -> ResolvedRoute | None:
-    mid = nm.require_inner_message_id_from_notmuch_message(nm_msg)
-    return _resolve_from_route_fields(
-        mid,
-        set(nm_msg.tags),
-        IngressRouteB62Wire.parse_present_from_nm_message(nm_msg, MailHeaderName.ROUTE.value),
-        RfcReferencesWire.parse_present_from_nm_message(nm_msg, MailHeaderName.REFERENCES.value),
-        RfcSubjectWire.parse_present_from_nm_message(nm_msg, MailHeaderName.SUBJECT.value),
     )
 
 
@@ -253,7 +243,7 @@ def resolve_route_from_thread_oldest_route_tag_under_db(
         nm_msg = nm.first_notmuch_message_for_inner_id(db, mid)
         if nm_msg is None:
             continue
-        resolved = _try_resolve_from_notmuch_message(nm_msg)
+        resolved = _try_resolve_from_snapshot(snapshot_from_nm_message(nm_msg, mid))  # граница → снимок
         if resolved is not None:
             return resolved
 

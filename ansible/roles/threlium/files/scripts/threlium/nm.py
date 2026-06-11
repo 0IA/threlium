@@ -516,31 +516,6 @@ def first_message_path_for_message_id(mid: NotmuchMessageIdInner) -> Path | None
         return _first_message_path_for_message_id_in_db(db, mid)
 
 
-def first_message_for_query(
-    db: notmuch2.Database,
-    query: str,
-    *,
-    newest_first: bool = True,
-) -> notmuch2.Message | None:
-    """Первое сообщение по ``query`` с фиксированным порядком обхода Xapian.
-
-    Объект :class:`notmuch2.Message` валиден только пока открыт ``db`` (см. модульный докстринг).
-
-    По умолчанию ``newest_first=True``: при нескольких совпадениях — самое новое по дате
-    (детерминированный выбор, напр. для ``find_existing_egress_archive`` при дублях IRT).
-
-    Multi-result отбор (first) — изолированным reader'ом (``notmuch_query_message_ids``), а НЕ ленивым
-    ``db.messages``-итератором (C++ ``move_to_next`` terminate); затем ``db.find(id)`` (single lookup,
-    status-checked) под переданным ``db``.
-    """
-    ids = notmuch_query_message_ids(
-        query, sort_newest_first=newest_first, sort_oldest_first=not newest_first, limit=1
-    )
-    if not ids:
-        return None
-    return first_notmuch_message_for_inner_id(db, ids[0])
-
-
 def first_notmuch_message_for_inner_id(
     db: notmuch2.Database, mid: NotmuchMessageIdInner
 ) -> notmuch2.Message | None:

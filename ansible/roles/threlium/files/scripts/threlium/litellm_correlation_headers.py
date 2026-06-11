@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 from email.message import EmailMessage
+from typing import TYPE_CHECKING
 
 import notmuch2  # pyright: ignore[reportMissingImports]
 
-from threlium import nm
+if TYPE_CHECKING:
+    from threlium.irt_chain import IrtAncestorSnapshot
 from threlium.ingress_route_resolve import (
     resolve_route_from_thread_oldest_route_tag,
     resolve_route_from_thread_oldest_route_tag_under_db,
@@ -64,33 +66,26 @@ def _assemble_litellm_correlation_dict(
     return out
 
 
-def build_litellm_correlation_headers_from_notmuch(
+def build_litellm_correlation_headers_from_snapshot(
     db: notmuch2.Database,
-    nm_msg: notmuch2.Message,
+    snap: "IrtAncestorSnapshot",
     *,
     call_site: LitellmCallSite,
 ) -> dict[str, str]:
-    """Сборка снимка корреляции из :class:`notmuch2.Message` под уже открытым READ ``db``.
+    """Сборка снимка корреляции из иммутабельного ``IrtAncestorSnapshot`` (snapshot-API,
+    ``irt_chain.snapshot_from_nm_message``) под уже открытым READ ``db`` — БЕЗ живого ``notmuch2.Message``.
 
-    Заголовки envelope и резолв ``X-Threlium-Route`` по корню треда — без повторного открытия
-    индекса и без разбора файла с диска (путь LightRAG при ``e2e_litellm_route_correlation``).
-    ``X-Threlium-Thread-Root`` — уголковый ``Message-ID`` самого старого в треде письма с
-    ``tag:route`` (тот же резолв, что и ``X-Threlium-Route``), один на весь notmuch-тред.
-    """
-    mid_inner = nm.require_inner_message_id_from_notmuch_message(nm_msg)
-    from_hdr = nm.header_field_optional(nm_msg, MailHeaderName.FROM)
-    to_hdr = nm.header_field_optional(nm_msg, MailHeaderName.TO)
-    mid_hdr = mid_inner.as_angle_bracket_header()
-    irt_hdr = nm.header_field_optional(nm_msg, MailHeaderName.IN_REPLY_TO)
-    resolved = resolve_route_from_thread_oldest_route_tag_under_db(db, mid_inner)
-    # X-Threlium-Thread-Root НЕ ставится для индексатора: батчевая фоновая операция на общем пуле →
-    # thread-root одного письма misattributed под конкуренцией; per-document коррелятор индексатора —
-    # Message-ID в теле чанка (body-corr, E2E.md §3.6.3). FSM-путь thread-root сохраняет.
+    Заголовки envelope берём из снапшота (он их уже скопировал на границе), ``X-Threlium-Route`` резолвим
+    по корню треда через ``db`` (reuse открытого READ-сеанса; ``snap.message_id_inner`` — ключ). Бизнес-
+    логика на снапшоте, не на Message (живой Message не передаётся в корреляцию). ``X-Threlium-Thread-Root``
+    НЕ ставится для индексатора (батчевая фоновая операция на общем пуле → misattribution; per-document
+    коррелятор — Message-ID в теле чанка, body-corr, E2E.md §3.6.3)."""
+    resolved = resolve_route_from_thread_oldest_route_tag_under_db(db, snap.message_id_inner)
     return _assemble_litellm_correlation_dict(
-        from_hdr=from_hdr,
-        to_hdr=to_hdr,
-        message_id_hdr=mid_hdr,
-        in_reply_to_hdr=irt_hdr,
+        from_hdr=snap.header_from.value if snap.header_from is not None else None,
+        to_hdr=snap.header_to.value if snap.header_to is not None else None,
+        message_id_hdr=snap.message_id_inner.as_angle_bracket_header(),
+        in_reply_to_hdr=snap.header_in_reply_to.value if snap.header_in_reply_to is not None else None,
         route_wire_value=resolved.route_wire.value,
         thread_root_mid=None,
         call_site=call_site,

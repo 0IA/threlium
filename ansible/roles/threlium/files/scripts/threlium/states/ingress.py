@@ -23,6 +23,7 @@ from threlium.mime_reform import (
     system_part_text,
 )
 from threlium import nm
+from threlium.types.notmuch_snapshot import snapshot_from_nm_message
 from threlium.types.ingress_hitl import (
     HitlParentRouting,
     HitlParentWithIntent,
@@ -154,4 +155,8 @@ def _classify_ingress_parent_routing(
         parent_msg = nm.parent_message_for_in_reply_in_db(db, irt_wire)
         if parent_msg is None:
             return None
-        return classify_hitl_parent_notmuch(db, parent_msg)
+        # ГРАНИЦА: живой parent → снимок; дальше classify работает на снимках (не на Message).
+        parent_snap = snapshot_from_nm_message(
+            parent_msg, nm.require_inner_message_id_from_notmuch_message(parent_msg)
+        )
+        return classify_hitl_parent_notmuch(db, parent_snap)

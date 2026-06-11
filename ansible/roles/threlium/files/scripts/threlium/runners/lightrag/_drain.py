@@ -11,7 +11,8 @@ import notmuch2  # pyright: ignore[reportMissingImports]
 
 from lightrag import LightRAG
 
-from threlium.litellm_correlation_headers import build_litellm_correlation_headers_from_notmuch
+from threlium.irt_chain import snapshot_from_nm_message
+from threlium.litellm_correlation_headers import build_litellm_correlation_headers_from_snapshot
 from threlium.litellm_route_context import (
     e2e_route_wire_tail,
     reset_litellm_correlation_ctxvar,
@@ -41,8 +42,6 @@ from threlium.types import (
     LitellmCorrelationSnapshot,
     LitellmRoutingSite,
     NotmuchMessageIdInner,
-    NotmuchMessageIds,
-    NotmuchQueryField,
     NotmuchTag,
     NotmuchThreadScopeId,
 )
@@ -128,7 +127,7 @@ class _DrainPendingItem:
 
     path: Path
     message_id_inner: NotmuchMessageIdInner
-    thread_scope: NotmuchThreadScopeId | None
+    thread_scope: NotmuchThreadScopeId  # инвариант notmuch: всегда present (из снапшота)
     correlation: "LitellmCorrelationSnapshot | None"
 
 
@@ -138,29 +137,29 @@ _COLLECT_RESUME_MAX_NOPROGRESS = 5
 def _collect_one(
     db: notmuch2.Database, mid_inner: NotmuchMessageIdInner, *, with_correlation: bool
 ) -> "_DrainPendingItem | None":
-    """Один pending-элемент под открытым READ ``db``: ``db.find`` + path/threadid/correlation.
+    """Один pending-элемент под открытым READ ``db`` → frozen-VO (snapshot-API, без живого Message наружу).
 
-    ``None`` — письмо ушло из индекса (``db.find`` LookupError→None) или файла нет (genuine skip).
-    Discard ревизии (``XapianError`` / cffi-NULL ``RuntimeError`` на ``db.find``/``msg.path``/route-resolve)
-    — ПРОБРАСЫВАЕТСЯ resume-циклу: тот переоткроет БД и повторит ЭТОТ элемент. В ``out`` ничего не
-    попадает до полного успеха элемента (атомарность для resume)."""
+    Граница: ``db.find`` → живой ``msg`` → ``snapshot_from_nm_message`` (snapshot-API) + threadid; дальше
+    БИЗНЕС-логика (корреляция) — на ``IrtAncestorSnapshot``, не на ``msg``. ``None`` — письмо ушло из
+    индекса (``db.find`` LookupError→None) или файла нет (genuine skip). Discard ревизии (``XapianError`` /
+    cffi-NULL ``RuntimeError`` на ``db.find``/``msg.path``/route-resolve) — ПРОБРАСЫВАЕТСЯ resume-циклу
+    (переоткроет БД и повторит ЭТОТ элемент); в ``out`` ничего не попадает до полного успеха (атомарность)."""
     msg = first_notmuch_message_for_inner_id(db, mid_inner)
     if msg is None:
         return None
-    fp = Path(msg.path)
-    if not fp.is_file():
+    snap = snapshot_from_nm_message(msg, mid_inner)  # граница: живой msg → иммутабельный снимок (ВСЕ поля)
+    if not snap.path.is_file():
         return None
-    ids = NotmuchMessageIds.from_notmuch(msg)
     corr = (
         LitellmCorrelationSnapshot.from_mapping(
-            build_litellm_correlation_headers_from_notmuch(
-                db, msg, call_site=LitellmCallSite.LIGHTRAG_INDEX
+            build_litellm_correlation_headers_from_snapshot(
+                db, snap, call_site=LitellmCallSite.LIGHTRAG_INDEX
             )
         )
         if with_correlation
         else None
     )
-    return _DrainPendingItem(fp, mid_inner, ids.threadid, corr)
+    return _DrainPendingItem(snap.path, snap.message_id_inner, snap.thread_scope, corr)
 
 
 def _collect_batch(limit: int, *, with_correlation: bool) -> list["_DrainPendingItem"]:
@@ -232,7 +231,7 @@ async def _ainsert_with_correlation(
         call_site=correlation.call_site,
         first_mid=ids[0],
     )
-    # X-Threlium-Thread-Root на индексаторе НЕ ставится (build_litellm_correlation_headers_from_notmuch):
+    # X-Threlium-Thread-Root на индексаторе НЕ ставится (build_litellm_correlation_headers_from_snapshot):
     # под конкуренцией пула thread-root misattributed; per-document коррелятор = Message-ID в теле чанка
     # (body-corr, E2E.md §3.6.3). БЕЗ index↔query барьера — RAG eventual-consistent.
     token = set_litellm_correlation_ctxvar(correlation.as_dict())
@@ -297,12 +296,8 @@ async def _ainsert_batch(
             skip_tag_ids.append(mid_inner)
             continue
         try:
-            thread_term = (
-                tid.as_notmuch_thread_term()
-                if tid is not None
-                else NotmuchQueryField.THREAD.term("unknown")
-            )
-            text = render_lightrag_ingest_document(msg, thread_term=thread_term)
+            # thread_scope — инвариант (см. снапшот); fallback на «unknown»-тред устранён.
+            text = render_lightrag_ingest_document(msg, thread_term=tid.as_notmuch_thread_term())
         except Exception as exc:
             log.error(
                 "index_skip",
