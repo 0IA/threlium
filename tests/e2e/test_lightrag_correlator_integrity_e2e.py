@@ -23,6 +23,8 @@ thread-root) to prove which correlators survive (docs/SESSION_HANDOFF.md §4 P0)
 """
 from __future__ import annotations
 
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 
 from tests.e2e.log import clip_log_body, log
@@ -75,11 +77,9 @@ _KG_CALL_SITES = (
     "extract_knowledge_graph",
     "extract_knowledge_graph_gleaning",
 )
-# Rerank is DATA-dependent (fires only when the query retrieves >=2 chunks), so it is NOT a
-# per-message invariant on a cold vdb — asserting it for a single message is flaky (present at
-# -n0, absent at -n4). Covered deterministically by a seeded-vdb variant (TODO 2-turn: seed A
-# indexed -> B queries A -> rerank guaranteed). Recorded best-effort below for visibility.
-_RERANK_CALL_SITE = "lightrag_query_rerank"
+# Rerank (``lightrag_query_rerank``) is DATA-dependent (fires only when the query retrieves >=2 chunks),
+# so it is NOT asserted as a per-message invariant on a single cold message (flaky: present at -n0, absent
+# at -n4). Deterministic coverage needs a seeded-vdb variant (seed A indexed -> B queries A) — deferred.
 
 # Reuse the memory_query stub set: it exercises the full RAG path (aquery + indexing) and its
 # stubs hard-code this stub_tag in their state-matcher hasContext, so the spec must keep it.
@@ -130,8 +130,15 @@ def _assert_lightrag_call_sites_correlated(
     log.info("lightrag_correlator_integrity_ok", present=sorted(present))
 
 
-def test_lightrag_correlator_integrity(e2e_runtime: E2EComposeRuntime) -> None:
-    """One dense message must drive every LightRAG endpoint with correlators intact."""
+@contextlib.contextmanager
+def _integrity_contour(e2e_runtime: E2EComposeRuntime) -> Iterator[tuple[str, str]]:
+    """Один НЕЗАВИСИМЫЙ integrity-contour: inject dense message → full mailflow pipeline →
+    yield ``(wm_base, correlation_key)`` для фасет-ассерта.
+
+    КАЖДЫЙ фасет-тест ниже гоняет СВОЙ контур через этот CM — полная независимость тестов, без
+    shared-fixture / ``xdist_group`` / сериализации (это антипаттерны: тесты должны быть совершенно
+    независимы и свободно распределяться xdist'ом). Цена — отдельный контур на фасет; выигрыш —
+    гранулярная атрибуция флака (видно КАКОЙ коррелятор потерян, а не «весь integrity упал»)."""
     with mailflow_inject_and_wait(LIGHTRAG_INTEGRITY_SPEC, e2e_runtime.project_name) as (
         project,
         raw_id,
@@ -151,35 +158,43 @@ def test_lightrag_correlator_integrity(e2e_runtime: E2EComposeRuntime) -> None:
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            # Query-side wrappers — under THIS test's thread-root (per-call correlation).
-            _assert_lightrag_call_sites_correlated(
-                wm_base,
-                correlation_key,
-                expected=_THREAD_ROOT_CALL_SITES,
-            )
-            # Index embeddings — PER-TEST under this test's static index-corr token (the indexed message
-            # carries the baked `E2E-INDEX-CORR-*` marker; the generic 011 records the call-site there).
-            # Per-test, NOT a global counter: THIS test's point is that ITS OWN index wrapper fired.
-            _assert_lightrag_call_sites_correlated(
-                wm_base,
-                _INDEX_CORR_MARKER,
-                expected=_INDEX_CALL_SITES,
-            )
-            # KG-extraction wrappers — fire-at-all under the fixed global context (aggregation-proof).
-            _assert_lightrag_call_sites_correlated(
-                wm_base,
-                _KG_GLOBAL_CONTEXT,
-                expected=_KG_CALL_SITES,
-            )
-            # Rerank: best-effort visibility (not asserted — see _RERANK_CALL_SITE note).
-            cs = set(wiremock_state_thread_root_call_sites(wm_base, correlation_key))
-            log.info(
-                "lightrag_rerank_observed",
-                fired=_RERANK_CALL_SITE in cs,
-            )
+            yield wm_base, correlation_key
         except Exception:
             log.debug(
                 "failure_artifacts",
                 body=clip_log_body(dump_failure_artifacts(project, repo_root=REPO_ROOT)),
             )
             raise
+
+
+def test_lightrag_query_side_correlators(e2e_runtime: E2EComposeRuntime) -> None:
+    """Query-side wrappers (enrich aquery) preserve the correlator under THIS turn's thread-root.
+
+    ``extract_query_keywords`` / ``lightrag_query`` (embeddings) / ``generate_rag_answer`` — each lands
+    in the thread-root state ONLY if it still carried ``X-Threlium-Thread-Root``; a miss == lost/scrambled
+    correlator. (``generate_rag_answer`` fires on non-empty retrieval — relies on the bootstrap-seeded vdb.)"""
+    with _integrity_contour(e2e_runtime) as (wm_base, correlation_key):
+        _assert_lightrag_call_sites_correlated(
+            wm_base, correlation_key, expected=_THREAD_ROOT_CALL_SITES
+        )
+
+
+def test_lightrag_index_correlator(e2e_runtime: E2EComposeRuntime) -> None:
+    """Index embeddings wrapper preserves THIS test's static index-corr token (per-test, not a global
+    fire-at-all counter): the indexed (enriched) message carries the baked ``E2E-INDEX-CORR-*`` marker and
+    the generic 011 stub records ``lightrag_index`` under it → presence == the index wrapper kept its
+    correlator."""
+    with _integrity_contour(e2e_runtime) as (wm_base, _correlation_key):
+        _assert_lightrag_call_sites_correlated(
+            wm_base, _INDEX_CORR_MARKER, expected=_INDEX_CALL_SITES
+        )
+
+
+def test_lightrag_kg_extraction_correlators(e2e_runtime: E2EComposeRuntime) -> None:
+    """KG-extraction wrappers (``extract_knowledge_graph`` + ``_gleaning``) fire AT ALL with their
+    call-site — recorded under the FIXED global context (the drain batches/aggregates docs into one
+    extraction prompt, so per-message attribution is impossible; fire-at-all is the integrity goal)."""
+    with _integrity_contour(e2e_runtime) as (wm_base, _correlation_key):
+        _assert_lightrag_call_sites_correlated(
+            wm_base, _KG_GLOBAL_CONTEXT, expected=_KG_CALL_SITES
+        )
