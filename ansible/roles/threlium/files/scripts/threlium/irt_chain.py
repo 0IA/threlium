@@ -313,7 +313,12 @@ def _materialize_irt_chain_session(
             with nm.notmuch_database(write=False) as db:
                 _drain_irt_frontier(db, start_inner, frontier, result, seen_inner)
             return result
-        except (notmuch2.XapianError, notmuch2.NullPointerError) as exc:
+        except Exception as exc:
+            # Только discard (вкл. голый cffi-NULL RuntimeError от ``msg.path``, см.
+            # ``nm.is_concurrent_revision_discard``) → resume; FSM-инвариант (нет листа/предка, цикл)
+            # — это тоже RuntimeError, но НЕ discard → пробрасываем.
+            if not nm.is_concurrent_revision_discard(exc):
+                raise
             if len(result) > last_depth:  # был прогресс → сбросить no-progress счётчик
                 last_depth = len(result)
                 noprogress = 0

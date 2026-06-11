@@ -11,6 +11,7 @@ from email.utils import getaddresses
 import notmuch2  # pyright: ignore[reportMissingImports]
 
 from .fsm_stage import FsmStage
+from threlium.logutil import logger
 from threlium.mail_header_names import MailHeaderName
 
 
@@ -18,7 +19,13 @@ def notmuch_message_addressed_to_fsm_stage(nm_msg: notmuch2.Message, stage: FsmS
     """True, если среди адресатов ``To:`` есть ровно канонический mailbox стадии (регистронезависимо)."""
     try:
         raw = str(nm_msg.header(MailHeaderName.TO.value))
-    except (LookupError, notmuch2.NullPointerError):
+    except LookupError as exc:
+        # ``To:`` отсутствует → не адресовано стадии (штатно). ``notmuch2.NullPointerError`` и голый
+        # cffi-NULL ``RuntimeError`` здесь СПЕЦИАЛЬНО НЕ ловим: это discard ревизии под конкурентной
+        # записью (не «нет заголовка») — даём всплыть в ``nm.read_retry`` вызывающего
+        # (``classify_hitl_parent_notmuch`` под ``ingress.main``), который переоткроет БД. Глушение его
+        # как «не адресовано» молча портило бы HITL-классификацию (ср. ``nm.header_field_optional``).
+        logger.warning("nm_addressed_to_header_absent", exc_info=exc)
         return False
     if not raw.strip():
         return False
@@ -33,7 +40,12 @@ def notmuch_message_sent_from_fsm_stage(nm_msg: notmuch2.Message, stage: FsmStag
     """True, если ``From:`` содержит канонический mailbox стадии (регистронезависимо)."""
     try:
         raw = str(nm_msg.header(MailHeaderName.FROM.value))
-    except (LookupError, notmuch2.NullPointerError):
+    except LookupError as exc:
+        # ``From:`` отсутствует → не отправлено стадией (штатно). ``notmuch2.NullPointerError`` / голый
+        # cffi-NULL ``RuntimeError`` НЕ ловим: discard ревизии под конкурентной записью должен всплыть в
+        # ``nm.read_retry`` вызывающего (reopen), а не быть проглоченным как «не от стадии» — иначе молча
+        # портит HITL-классификацию (ср. ``nm.header_field_optional``, та же доктрина).
+        logger.warning("nm_addressed_from_header_absent", exc_info=exc)
         return False
     if not raw.strip():
         return False

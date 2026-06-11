@@ -70,19 +70,38 @@ _RETRY_CONDITION = retry_if_exception(_is_retryable_xapian)
 _RETRY_BEFORE_SLEEP = before_sleep_log(_RETRY_STDLOG, logging.WARNING)
 
 
-def _is_concurrent_revision_discard(exc: BaseException) -> bool:
+# CFFI-сигнатура ``ffi.string(NULL)``: notmuch2-геттеры (``msg.path`` и др.) на инвалидированном
+# discard'ом сообщении возвращают NULL → cffi бросает ГОЛЫЙ ``RuntimeError`` с этим текстом, НЕ
+# ``notmuch2.NullPointerError`` (см. ``is_concurrent_revision_discard``).
+_CFFI_NULL_STRING_SIGNATURE = "cannot use string() on"
+
+
+def is_concurrent_revision_discard(exc: BaseException) -> bool:
     """READ под конкурентной записью: writer закоммитил, Xapian **отбросил ревизию** открытого
-    read-снапшота → in-flight чтение/материализация падает. notmuch2 отдаёт это как ОБЩИЙ
-    ``XapianError`` («A Xapian exception occurred») ИЛИ ``NullPointerError`` (C вернул ``NULL`` на
-    инвалидированном message/db — нет отдельного ``DatabaseModifiedError`` и нет ``reopen()``).
+    read-снапшота → in-flight чтение/материализация падает. ТРИ формы (все — один и тот же discard,
+    лечится переоткрытием БД и повтором, см. :data:`read_retry`):
 
-    Лечится переоткрытием БД и повтором чтения с нуля (см. :data:`read_retry`). Подтверждено
-    профилированием: рвётся не линейность IRT-цепочки (``docs/THREAD_MODEL.md`` §3), а read-снапшот;
-    notmuch single-writer/many-readers корректен только при reopen-on-modified у читателя."""
-    return isinstance(exc, (notmuch2.XapianError, notmuch2.NullPointerError))
+    1. ``notmuch2.XapianError`` («A Xapian exception occurred»);
+    2. ``notmuch2.NullPointerError`` (биндинг вернул NULL на инвалидированном message/db);
+    3. голый ``RuntimeError`` от CFFI ``ffi.string(NULL)`` — ``notmuch2._message.path`` (и др. string-
+       геттеры) на discard'нутом message читают NULL-указатель; notmuch2 **не** оборачивает это в свой
+       тип. Без распознавания он пролетает мимо ``read_retry`` → ``_collect_batch`` / route-resolve /
+       IRT-материализация падает, осиротевший ``notmuch2.Message`` в GC зовёт C++ destructor на устаревшей
+       ревизии → ``Xapian::DatabaseModifiedError`` → ``std::terminate`` → **SIGABRT движка** (рвёт
+       in-flight lancedb-запись → каскад). Это было источником -n12 крэш-каскадов.
+
+    Подтверждено профилированием: рвётся не линейность IRT-цепочки (``docs/THREAD_MODEL.md`` §3), а
+    read-снапшот; notmuch single-writer/many-readers корректен только при reopen-on-modified у читателя."""
+    if isinstance(exc, (notmuch2.XapianError, notmuch2.NullPointerError)):
+        return True
+    return isinstance(exc, RuntimeError) and _CFFI_NULL_STRING_SIGNATURE in str(exc)
 
 
-_RETRY_READ_CONDITION = retry_if_exception(_is_concurrent_revision_discard)
+# Обратная совместимость имени (приватный алиас на публичный предикат).
+_is_concurrent_revision_discard = is_concurrent_revision_discard
+
+
+_RETRY_READ_CONDITION = retry_if_exception(is_concurrent_revision_discard)
 
 from threlium.types import (
     MailHeaderName,
@@ -176,7 +195,8 @@ def header_field_optional(msg: notmuch2.Message, name: MailHeaderName) -> str | 
     его как «отсутствие» молча портило бы данные (см. :func:`_is_concurrent_revision_discard`)."""
     try:
         return str(msg.header(name.value))
-    except LookupError:
+    except LookupError as exc:
+        log.debug("nm_header_absent", header=name.value, exc_info=exc)
         return None
 
 
@@ -267,8 +287,8 @@ def _prepare_settle_target(db: notmuch2.Database, inner: NotmuchMessageIdInner) 
     try:
         db.find(inner.value)
         return
-    except LookupError:
-        pass
+    except LookupError as exc:
+        log.warning("nm_settle_find_miss_recovering", inner=inner.value, exc_info=exc)
     msg = first_notmuch_message_for_inner_id(db, inner)
     if msg is None:
         raise RuntimeError(
@@ -402,7 +422,8 @@ def first_notmuch_message_for_inner_id(
     обязан работать сам)."""
     try:
         return db.find(mid.value)
-    except LookupError:
+    except LookupError as exc:
+        log.debug("nm_find_message_absent", mid=mid.value, exc_info=exc)
         return None
 
 
