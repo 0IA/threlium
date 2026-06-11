@@ -82,12 +82,13 @@ def test_lightrag_selective_indexing(
                 stub_tag=stub_tag,
                 correlation_key=correlation_key,
             )
-            # Drain async: дождаться, что embedding вообще сработал (lightrag_index в call-site списке) —
-            # иначе forbidden-проверка читала бы состояние до индексации.
+            # Drain async: дождаться начала индексации. Индексатор НЕ несёт thread-root (батчевая
+            # фоновая операция на общем пуле → thread-root misattributed; E2E.md §3.6.3) → fire-at-all
+            # из ГЛОБАЛЬНОГО контекста ``lightrag_index_calls`` (011), не per-thread.
             poll_until(
                 lambda: True
                 if "lightrag_index"
-                in set(wiremock_state_thread_root_call_sites(wm_base, correlation_key))
+                in set(wiremock_state_thread_root_call_sites(wm_base, "lightrag_index_calls"))
                 else None,
                 timeout=30.0,
                 desc="lightrag_index drained (011 fired)",

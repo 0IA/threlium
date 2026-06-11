@@ -83,13 +83,16 @@ def build_litellm_correlation_headers_from_notmuch(
     mid_hdr = mid_inner.as_angle_bracket_header()
     irt_hdr = nm.header_field_optional(nm_msg, MailHeaderName.IN_REPLY_TO)
     resolved = resolve_route_from_thread_oldest_route_tag_under_db(db, mid_inner)
+    # X-Threlium-Thread-Root НЕ ставится для индексатора: батчевая фоновая операция на общем пуле →
+    # thread-root одного письма misattributed под конкуренцией; per-document коррелятор индексатора —
+    # Message-ID в теле чанка (body-corr, E2E.md §3.6.3). FSM-путь thread-root сохраняет.
     return _assemble_litellm_correlation_dict(
         from_hdr=from_hdr,
         to_hdr=to_hdr,
         message_id_hdr=mid_hdr,
         in_reply_to_hdr=irt_hdr,
         route_wire_value=resolved.route_wire.value,
-        thread_root_mid=resolved.message_id_inner.as_angle_bracket_header(),
+        thread_root_mid=None,
         call_site=call_site,
     )
 

@@ -46,14 +46,19 @@ from .wiremock_client import (
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_LIGHTRAG_INTEGRITY_BODY_MARKER = "E2E-LIGHTRAG-INTEGRITY-BODY"
 
-# Per-message (thread-root) wrappers: their request body carries THIS test's correlator un-aggregated
-# (embedding = single chunk; enrich aquery = this turn), so they record under the test's thread-root.
+# QUERY-side wrappers: per-handler-call correlation (enrich aquery = this turn) — request carries THIS
+# test's thread-root un-aggregated (set per run_rag_coroutine call, not via the index pool).
 _THREAD_ROOT_CALL_SITES = (
-    "lightrag_index",        # embeddings wrapper (drain)
     "extract_query_keywords",  # query-side
     "lightrag_query",          # query embeddings
     "generate_rag_answer",     # query-side
 )
+# INDEX embeddings (``lightrag_index``): drain stamps NO thread-root (batched background op on ONE
+# rag-loop через общий пул → thread-root misattributed). Index embeds heterogeneous → not per-message
+# correlatable. Goal = «does the index wrapper fire AT ALL» → generic 011 records into a FIXED global
+# context (fire-at-all, like KG). docs/E2E.md §3.6.3.
+_INDEX_GLOBAL_CONTEXT = "lightrag_index_calls"
+_INDEX_CALL_SITES = ("lightrag_index",)
 # KG-extraction wrappers: under -n4 the drain batches multiple docs and LightRAG AGGREGATES their
 # chunks into ONE extraction prompt, so a per-message body-flag would attribute them to a neighbour's
 # correlator (first <corr@localhost> wins). The integrity goal here is only «does the KG-extraction
@@ -137,11 +142,18 @@ def test_lightrag_correlator_integrity(e2e_runtime: E2EComposeRuntime) -> None:
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            # Per-message wrappers — under THIS test's thread-root (correlator un-aggregated).
+            # Query-side wrappers — under THIS test's thread-root (per-call correlation).
             _assert_lightrag_call_sites_correlated(
                 wm_base,
                 correlation_key,
                 expected=_THREAD_ROOT_CALL_SITES,
+            )
+            # Index embeddings — fire-at-all under the fixed global context (no thread-root on the
+            # batched indexer; heterogeneous embeds → not per-message correlatable).
+            _assert_lightrag_call_sites_correlated(
+                wm_base,
+                _INDEX_GLOBAL_CONTEXT,
+                expected=_INDEX_CALL_SITES,
             )
             # KG-extraction wrappers — fire-at-all under the fixed global context (aggregation-proof).
             _assert_lightrag_call_sites_correlated(

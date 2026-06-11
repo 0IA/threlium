@@ -1,21 +1,18 @@
 {
+  "metadata": {
+    "threlium_stub_tag": "lightrag-generic-summarize"
+  },
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "extract_knowledge_graph_gleaning"
+        "equalTo": "summarize_descriptions"
       }
     },
     "bodyPatterns": [
       {
-        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
-      },
-      {
         "contains": "\"tools\""
-      },
-      {
-        "contains": "ZZRELMARKER"
       }
     ]
   },
@@ -25,7 +22,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-wiremock-gleaning",
+      "id": "chatcmpl-e2e-generic-summarize",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -38,11 +35,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_lightrag_097_chat_lightrag_gleaning",
+                "id": "call_lightrag_generic_summarize",
                 "type": "function",
                 "function": {
-                  "name": "extract_knowledge_graph_gleaning",
-                  "arguments": "{\"entities\": [], \"relationships\": []}"
+                  "name": "summarize_descriptions",
+                  "arguments": "{\"summary\": \"E2e generic merged stub summary for indexed entity description.\"}"
                 }
               }
             ]
@@ -55,7 +52,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{#if request.headers.[X-Threlium-Thread-Root]}}{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_thread_root{{/if}}",
+        "context": "lightrag_kg_calls",
         "list": {
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"

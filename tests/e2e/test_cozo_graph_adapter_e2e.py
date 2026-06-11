@@ -37,7 +37,7 @@ from .toolkit import (
 )
 from .wiremock_client import (
     wiremock_public_base,
-    wiremock_state_thread_root_call_sites,
+    wiremock_state_thread_root_list_size,
     wiremock_state_thread_root_property,
 )
 
@@ -97,12 +97,14 @@ def test_cozo_graph_adapter_structure(e2e_runtime: E2EComposeRuntime) -> None:
             )
             wm = _wm(project)
 
-            # ``extract_knowledge_graph`` пишется в ГЛОБАЛЬНЫЙ контекст (batch-агрегация, см. integrity-тест),
-            # не per-thread-root. Per-thread индексационный сигнал = ``lightrag_index`` (embeddings drain); в
-            # lightrag-ainsert он идёт ПОСЛЕ extract(LLM)+graph-upsert → его наличие ⟹ узлы/рёбра уже в cozo.
-            def _indexed() -> list[str] | None:
-                cs = wiremock_state_thread_root_call_sites(wm, corr_a)
-                return cs if "lightrag_index" in cs else None
+            # Индексатор НЕ несёт thread-root (батчевая фоновая операция; E2E.md §3.6.3), а ГЛОБАЛЬНЫЙ
+            # ``lightrag_index_calls`` под -n4 заполняют ЧУЖИЕ index'ы → барьер прошёл бы рано. Ждём
+            # СВОЮ extraction: стаб 085 матчит ТОЛЬКО ZZRELMARKER-тело cozo и append-only пишет hit в
+            # ``cozo-extract-zzrelmarker`` (изолировано контентом, не thread-root). extract_kg идёт
+            # ПЕРЕД graph-upsert → его наличие + settle ниже ⟹ узлы/рёбра ZZ уже в cozo.
+            def _indexed() -> bool | None:
+                hits = wiremock_state_thread_root_list_size(wm, "cozo-extract-zzrelmarker")
+                return True if hits > 0 else None
 
             poll_until(
                 _indexed,

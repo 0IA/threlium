@@ -55,10 +55,21 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{#if request.headers.[X-Threlium-Thread-Root]}}{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_thread_root{{/if}}",
         "list": {
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "cozo-extract-zzrelmarker",
+        "list": {
+          "addLast": {
+            "hit": "1"
           }
         }
       }

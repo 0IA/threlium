@@ -4,12 +4,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from lightrag import LightRAG
 
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers_from_notmuch
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
 from threlium.litellm_route_context import (
     e2e_route_wire_tail,
     reset_litellm_correlation_ctxvar,
@@ -81,26 +81,29 @@ def _effective_batch_size(settings: ThreliumSettings) -> int:
     return max(1, settings.lightrag.insert_batch)
 
 
+@dataclass(frozen=True)
+class _DrainPendingItem:
+    """Иммутабельный снимок pending-письма drain'а — материализуется РАЗ в collect-проходе.
+
+    Снимок-подход (как :class:`~threlium.irt_chain.IrtAncestorSnapshot`): живой ``notmuch2.Message``
+    не покидает открытый ``with notmuch_database`` — наружу только frozen-VO. Корреляция снимается в
+    ТОМ ЖЕ сеансе, что и письмо (без второго ``db.get`` живого Message)."""
+
+    path: Path
+    message_id_inner: NotmuchMessageIdInner
+    thread_scope: NotmuchThreadScopeId | None
+    correlation: "LitellmCorrelationSnapshot | None"
+
+
 @read_retry
-def _correlation_snapshot_for_path(fp0: Path) -> "LitellmCorrelationSnapshot":
-    """Снять LiteLLM-correlation snapshot (VO) по пути письма; ``@read_retry`` reopen-on-modified.
-
-    ``notmuch2.Message`` не покидает сеанс — наружу только ``LitellmCorrelationSnapshot``."""
-    with notmuch_database(write=False) as db:
-        nm_msg = db.get(str(fp0.resolve()))
-        corr = build_litellm_correlation_headers_from_notmuch(
-            db, nm_msg, call_site=LitellmCallSite.LIGHTRAG_INDEX
-        )
-    return LitellmCorrelationSnapshot.from_mapping(corr)
-
-
-@read_retry
-def _collect_batch(limit: int) -> list[tuple[Path, NotmuchMessageIdInner, NotmuchThreadScopeId | None]]:
-    """(path, message_id_inner, thread_scope)[…limit] под одной READ-транзакцией → только VO наружу.
+def _collect_batch(limit: int, *, with_correlation: bool) -> list["_DrainPendingItem"]:
+    """pending-снимки[…limit] под ОДНОЙ READ-транзакцией → только VO наружу.
 
     ``@read_retry``: при discard'е ревизии под конкурентной записью сеанс переоткрывается (rag-loop
-    в движке многопоточен; ``notmuch2.Message`` не покидает ``with``)."""
-    out: list[tuple[Path, NotmuchMessageIdInner, NotmuchThreadScopeId | None]] = []
+    в движке многопоточен; ``notmuch2.Message`` не покидает ``with``). При ``with_correlation`` снимок
+    корреляции индексатора собирается ЗДЕСЬ ЖЕ (антипаттерн «живой Message наружу / повторный db.get»
+    устранён)."""
+    out: list[_DrainPendingItem] = []
     selector = lightrag_drain_pending_search()
     with notmuch_database(write=False) as db:
         for msg in db.messages(selector):
@@ -109,7 +112,16 @@ def _collect_batch(limit: int) -> list[tuple[Path, NotmuchMessageIdInner, Notmuc
                 continue
             ids = NotmuchMessageIds.from_notmuch(msg)
             mid_inner = require_inner_message_id_from_notmuch_message(msg)
-            out.append((fp, mid_inner, ids.threadid))
+            corr = (
+                LitellmCorrelationSnapshot.from_mapping(
+                    build_litellm_correlation_headers_from_notmuch(
+                        db, msg, call_site=LitellmCallSite.LIGHTRAG_INDEX
+                    )
+                )
+                if with_correlation
+                else None
+            )
+            out.append(_DrainPendingItem(fp, mid_inner, ids.threadid, corr))
             if len(out) >= limit:
                 break
     return out
@@ -120,21 +132,21 @@ async def _ainsert_with_correlation(
     texts: list[str],
     ids: list[str],
     file_paths: list[str],
+    correlation: "LitellmCorrelationSnapshot",
     settings: ThreliumSettings,
 ) -> float:
-    """ainsert with e2e correlation ctxvar. Returns elapsed seconds."""
-    snap = _correlation_snapshot_for_path(Path(file_paths[0]))
+    """ainsert с e2e-correlation ctxvar. Снимок собран в collect-проходе, не повторным ``db.get``."""
     log.debug(
         "drain_e2e_ainsert",
         batch_size=len(ids),
-        route_tail=e2e_route_wire_tail(snap.route_wire),
-        call_site=snap.call_site,
+        route_tail=e2e_route_wire_tail(correlation.route_wire),
+        call_site=correlation.call_site,
         first_mid=ids[0],
     )
-    # Корреляция per-call (call-site + thread-root) через ctxvar; БЕЗ пер-тред index↔query барьера —
-    # RAG = eventual-consistent supplementary память, индексация может отставать от запросов (контекст
-    # переписки приходит детерминированно через notmuch/FSM, не через RAG read-your-writes).
-    token = set_litellm_correlation_ctxvar(snap.as_dict())
+    # X-Threlium-Thread-Root на индексаторе НЕ ставится (build_litellm_correlation_headers_from_notmuch):
+    # под конкуренцией пула thread-root misattributed; per-document коррелятор = Message-ID в теле чанка
+    # (body-corr, E2E.md §3.6.3). БЕЗ index↔query барьера — RAG eventual-consistent.
+    token = set_litellm_correlation_ctxvar(correlation.as_dict())
     try:
         t0 = time.monotonic()
         await rag.ainsert(texts, ids=ids, file_paths=file_paths)
@@ -154,7 +166,7 @@ async def _ainsert_plain(
 
 async def _ainsert_batch(
     rag: LightRAG,
-    pending: list[tuple[Path, NotmuchMessageIdInner, NotmuchThreadScopeId | None]],
+    pending: list["_DrainPendingItem"],
     settings: ThreliumSettings,
 ) -> None:
     """Render pending messages → ainsert → tag as indexed."""
@@ -164,9 +176,11 @@ async def _ainsert_batch(
     ids: list[str] = []
     tag_ids: list[NotmuchMessageIdInner] = []
     file_paths: list[str] = []
+    correlations: list["LitellmCorrelationSnapshot | None"] = []
     skip_tag_ids: list[NotmuchMessageIdInner] = []
 
-    for fp, mid_inner, tid in pending:
+    for item in pending:
+        fp, mid_inner, tid = item.path, item.message_id_inner, item.thread_scope
         try:
             msg = email_message_from_path(fp)
         except Exception as exc:
@@ -214,6 +228,7 @@ async def _ainsert_batch(
         ids.append(_lightrag_doc_id(mid_inner))
         tag_ids.append(mid_inner)
         file_paths.append(str(fp))
+        correlations.append(item.correlation)
 
     if skip_tag_ids:
         skipped_tagged = batch_tag_add(skip_tag_ids, NotmuchTag.LIGHTRAG_SKIPPED)
@@ -227,12 +242,15 @@ async def _ainsert_batch(
         if not skip_tag_ids:
             raise RuntimeError(
                 "lightrag: pending batch produced no texts "
-                f"(paths={[str(p[0]) for p in pending]!r})"
+                f"(paths={[str(it.path) for it in pending]!r})"
             )
         return
 
-    if settings.e2e.litellm_route_correlation:
-        elapsed = await _ainsert_with_correlation(rag, texts, ids, file_paths, settings)
+    lead_correlation = correlations[0]
+    if settings.e2e.litellm_route_correlation and lead_correlation is not None:
+        elapsed = await _ainsert_with_correlation(
+            rag, texts, ids, file_paths, lead_correlation, settings
+        )
     else:
         elapsed = await _ainsert_plain(rag, texts, ids, file_paths)
 
@@ -260,7 +278,9 @@ async def drain_single_batch(
 
     try:
         async with lock:
-            pending = _collect_batch(batch_size)
+            pending = _collect_batch(
+                batch_size, with_correlation=settings.e2e.litellm_route_correlation
+            )
             if not pending:
                 notify_status(SystemdStatusBody.lightrag_idle_no_pending())
                 return
@@ -272,7 +292,8 @@ async def drain_single_batch(
         log.error("drain_batch_failed", exc_info=ex)
         raise
 
-    if _collect_batch(1):
+    # Sweep-проба «есть ли ещё pending» — корреляция не нужна (только truthiness).
+    if _collect_batch(1, with_correlation=False):
         _drain_task = asyncio.create_task(
             drain_single_batch(rag, settings, lock)
         )

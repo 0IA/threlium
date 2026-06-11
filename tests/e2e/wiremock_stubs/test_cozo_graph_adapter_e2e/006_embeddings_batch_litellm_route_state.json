@@ -5,14 +5,11 @@
     "bodyPatterns": [
       {
         "contains": "threlium_e2e_embed"
+      },
+      {
+        "contains": "ZZ"
       }
-    ],
-    "customMatcher": {
-      "name": "state-matcher",
-      "parameters": {
-        "hasContext": "stub-cozo-graph-adapter-01::{{request.headers.[X-Threlium-Thread-Root]}}"
-      }
-    }
+    ]
   },
   "response": {
     "status": 200,
@@ -28,7 +25,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{#if request.headers.[X-Threlium-Thread-Root]}}{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_thread_root{{/if}}",
         "list": {
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
