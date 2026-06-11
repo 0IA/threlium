@@ -98,12 +98,6 @@ from .mailflow import (
     mailflow_inject_and_wait,
 )
 from .notmuch_assert import (
-    assert_notmuch_folder_contains_body_token,
-    assert_notmuch_thread_has_no_unread,
-    assert_notmuch_thread_stage_message_count_at_least,
-    assert_notmuch_thread_tag_count,
-    poll_notmuch_positive,
-    poll_notmuch_thread_in_stage_folder,
     poll_lightrag_indexed_positive,
 )
 from .pipeline import (

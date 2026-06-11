@@ -16,7 +16,6 @@ from .bridges.email import (
 )
 from .constants import REPO_ROOT, TIMEOUT_POLL_SHORT
 from .diag import (
-    mailflow_fsm_maildir_systemd_snapshot,
     mailflow_wait_fsm_maildir_activity,
     reset_maildrop_debug_log,
 )
@@ -35,7 +34,7 @@ from .greenmail import (
     wait_for_greenmail_inbox_message_gone_host,
     wait_for_greenmail_user_reply,
 )
-from .poll import mailflow_diag_block, mailflow_log_phase, poll_until
+from .poll import mailflow_log_phase, poll_until
 from .runtime import discover_runtime
 from .smtp_ingress import smtp_inject_inbound
 
@@ -266,12 +265,10 @@ def mailflow_inject_and_wait(
     mailflow_log_phase(
         f"{spec.label}: after wait_for_greenmail_inbox_message_gone_host (+{time.monotonic() - t0:.1f}s)"
     )
-    snap = mailflow_fsm_maildir_systemd_snapshot(project_name, repo_root=REPO_ROOT)
-    mailflow_diag_block(
-        f"{spec.label}: fsm maildir + systemd snapshot after IMAP IDLE pickup",
-        snap,
-        max_chars=30000,
-    )
+    # NB: the per-injection `mailflow_fsm_maildir_systemd_snapshot` (docker-exec + journalctl tail) was
+    # removed from this hot path — under -n12 it forked a journal scan in the SUT on EVERY inject and
+    # starved the engine ([[no-docker-exec-journalctl-in-tests]]). It survives in `dump_failure_artifacts`
+    # for failure diagnostics only.
     mailflow_wait_fsm_maildir_activity(
         project_name,
         repo_root=REPO_ROOT,

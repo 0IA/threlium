@@ -1,41 +1,33 @@
 """GreenMail IMAP/SMTP waits (host-first)."""
 from __future__ import annotations
 
-import email
 import imaplib
 import re
-import shlex
 import smtplib
-import time
 import uuid
 from email.header import decode_header
 from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 
-from tests.e2e.log import clip_log_body, log
+from tests.e2e.log import log
 from tests.e2e.mail_wire import e2e_parse_rfc822, e2e_smtp_send
 
 from .bridges.email import (
     e2e_thread_root_mid_for_message_id,
-    notmuch_id_search_term,
-    rfc_first_message_id_in_in_reply_to_header,
 )
 from .constants import (
     E2E_FETCHMAIL_PASS,
     E2E_FETCHMAIL_USER,
     E2E_GREENMAIL_READINESS_PROBE_FROM,
     E2E_GREENMAIL_REPLY_USER,
-    E2E_IMAP_PROCESSED_FOLDER,
-    E2E_REPLY_BODY,
     E2E_REPLY_BODY_SNIPPET,
     E2E_REPLY_SUBJECT,
     REPO_ROOT,
     TIMEOUT_POLL_SHORT,
 )
-from .poll import poll_until, poll_until_backoff
-from .remote_boot import REMOTE_PROBE_LOGGER_BOOT, REMOTE_RFC822_PARSER_BOOT
-from .runtime import _compose_container, _mapped_port, discover_runtime, service_exec
+from .poll import poll_until_backoff
+from .runtime import _mapped_port, discover_runtime
 
 def _decoded_email_subject(msg: Any) -> str:
     """Subject из заголовка письма в виде строки (RFC 2047 decode)."""
@@ -336,194 +328,6 @@ def run_greenmail_host_readiness_probe(
     return probe_msg_id
 
 
-def wait_for_greenmail_inbox_message(
-    project_name: str,
-    *,
-    user: str = E2E_FETCHMAIL_USER,
-    password: str = E2E_FETCHMAIL_PASS,
-    message_id: str | None = None,
-    subject: str | None = None,
-    timeout: float = TIMEOUT_POLL_SHORT,
-    repo_root: Path | None = None,
-) -> None:
-    """Wait for a message to appear in GreenMail INBOX (SUT-side IMAP).
-
-    When ``message_id`` / ``subject`` are provided, the probe matches by
-    those anchors (header inspection) instead of a bare ``count > 0``.
-    """
-    root = repo_root or REPO_ROOT
-
-    need_filter = bool(message_id or subject)
-    if need_filter:
-        mid_check = (
-            f"if msg.get('Message-ID','').strip('<>') != {message_id.strip('<>')!r}: continue\n"
-            if message_id else ""
-        )
-        subj_check = (
-            f"if msg.get('Subject','') != {subject!r}: continue\n"
-            if subject else ""
-        )
-        script = (
-            "import imaplib, email\n"
-            + REMOTE_PROBE_LOGGER_BOOT
-            + "m = imaplib.IMAP4('greenmail', 3143)\n"
-            f"m.login({user!r}, {password!r})\n"
-            "_, data = m.select('INBOX')\n"
-            "count = int((data[0] or b'0').decode())\n"
-            "if count <= 0:\n"
-            "    m.logout(); _probe_out.info('INBOX_COUNT=0'); raise SystemExit(2)\n"
-            "_, ids_data = m.search(None, 'ALL')\n"
-            "ids = ids_data[0].split() if ids_data and ids_data[0] else []\n"
-            "for uid in ids:\n"
-            "    _, raw = m.fetch(uid, '(BODY.PEEK[HEADER])')\n"
-            "    cell = raw[0] if raw and raw[0] else None\n"
-            "    if not isinstance(cell, tuple) or len(cell) < 2: continue\n"
-            "    hdr = cell[1]\n"
-            "    if not isinstance(hdr, (bytes, bytearray)): continue\n"
-            + REMOTE_RFC822_PARSER_BOOT
-            + "    msg = parse_rfc822(hdr)\n"
-            f"    {mid_check}"
-            f"    {subj_check}"
-            "    m.logout(); _probe_out.info('INBOX_COUNT=%d MATCH=1' % (count,)); raise SystemExit(0)\n"
-            "m.logout(); _probe_out.info('INBOX_COUNT=%d MATCH=0' % (count,)); raise SystemExit(2)\n"
-        )
-    else:
-        script = (
-            "import imaplib\n"
-            + REMOTE_PROBE_LOGGER_BOOT
-            + "m = imaplib.IMAP4('greenmail', 3143)\n"
-            f"m.login({user!r}, {password!r})\n"
-            "_, data = m.select('INBOX')\n"
-            "count = int((data[0] or b'0').decode('utf-8'))\n"
-            "m.logout()\n"
-            "_probe_out.info('INBOX_COUNT=%d' % (count,))\n"
-            "raise SystemExit(0 if count > 0 else 2)\n"
-        )
-
-    probe_cmd = ["bash", "-lc", f"python3 - <<'PY'\n{script}PY"]
-
-    snap: dict[str, str] = {"inbox": "?", "rc": "?"}
-
-    def _probe() -> bool | None:
-        r = service_exec(project_name, "sut", probe_cmd, repo_root=root, timeout=30)
-        snap["rc"] = str(r.returncode)
-        for line in (r.stdout or "").splitlines():
-            if line.startswith("INBOX_COUNT="):
-                snap["inbox"] = line.split("=", 1)[1].strip()
-                break
-        return True if r.returncode == 0 else None
-
-    def _extra() -> str:
-        return f"IMAP_INBOX={snap['inbox']} probe_exit={snap['rc']}"
-
-    anchor_desc = ""
-    if message_id:
-        anchor_desc += f" mid={message_id!r}"
-    if subject:
-        anchor_desc += f" subj={subject!r}"
-    poll_until_backoff(
-        _probe,
-        timeout=timeout,
-        desc=f"greenmail inbox message present (SUT-side){anchor_desc}",
-        progress_extra=_extra,
-    )
-
-
-def wait_for_greenmail_inbox_message_gone(
-    project_name: str,
-    *,
-    user: str = E2E_FETCHMAIL_USER,
-    password: str = E2E_FETCHMAIL_PASS,
-    message_id: str | None = None,
-    subject: str | None = None,
-    timeout: float = TIMEOUT_POLL_SHORT,
-    repo_root: Path | None = None,
-) -> None:
-    """Wait for a message to be processed in GreenMail INBOX (SUT-side IMAP).
-
-    IMAP bridge marks processed messages ``\\Seen``; this function searches
-    UNSEEN — when the target message is no longer UNSEEN, bridge has processed it.
-    Without anchors falls back to ``UNSEEN count == 0``.
-    """
-    root = repo_root or REPO_ROOT
-
-    need_filter = bool(message_id or subject)
-    if need_filter:
-        mid_check = (
-            f"if msg.get('Message-ID','').strip('<>') != {message_id.strip('<>')!r}: continue\n"
-            if message_id else ""
-        )
-        subj_check = (
-            f"if msg.get('Subject','') != {subject!r}: continue\n"
-            if subject else ""
-        )
-        script = (
-            "import imaplib, email\n"
-            + REMOTE_PROBE_LOGGER_BOOT
-            + "m = imaplib.IMAP4('greenmail', 3143)\n"
-            f"m.login({user!r}, {password!r})\n"
-            "m.select('INBOX')\n"
-            "_, ids_data = m.search(None, 'UNSEEN')\n"
-            "ids = ids_data[0].split() if ids_data and ids_data[0] else []\n"
-            "if not ids:\n"
-            "    m.logout(); _probe_out.info('UNSEEN=0 GONE=1'); raise SystemExit(0)\n"
-            "for uid in ids:\n"
-            "    _, raw = m.fetch(uid, '(BODY.PEEK[HEADER])')\n"
-            "    cell = raw[0] if raw and raw[0] else None\n"
-            "    if not isinstance(cell, tuple) or len(cell) < 2: continue\n"
-            "    hdr = cell[1]\n"
-            "    if not isinstance(hdr, (bytes, bytearray)): continue\n"
-            + REMOTE_RFC822_PARSER_BOOT
-            + "    msg = parse_rfc822(hdr)\n"
-            f"    {mid_check}"
-            f"    {subj_check}"
-            "    m.logout(); _probe_out.info('UNSEEN=%d GONE=0' % (len(ids),)); raise SystemExit(2)\n"
-            "m.logout(); _probe_out.info('UNSEEN=%d GONE=1' % (len(ids),)); raise SystemExit(0)\n"
-        )
-    else:
-        script = (
-            "import imaplib\n"
-            + REMOTE_PROBE_LOGGER_BOOT
-            + "m = imaplib.IMAP4('greenmail', 3143)\n"
-            f"m.login({user!r}, {password!r})\n"
-            "m.select('INBOX')\n"
-            "_, ids_data = m.search(None, 'UNSEEN')\n"
-            "ids = ids_data[0].split() if ids_data and ids_data[0] else []\n"
-            "count = len(ids)\n"
-            "m.logout()\n"
-            "_probe_out.info('UNSEEN=%d' % (count,))\n"
-            "raise SystemExit(0 if count == 0 else 2)\n"
-        )
-
-    probe_cmd = ["bash", "-lc", f"python3 - <<'PY'\n{script}PY"]
-
-    snap: dict[str, str] = {"inbox": "?", "rc": "?"}
-
-    def _probe() -> bool | None:
-        r = service_exec(project_name, "sut", probe_cmd, repo_root=root, timeout=30)
-        snap["rc"] = str(r.returncode)
-        for line in (r.stdout or "").splitlines():
-            if line.startswith("INBOX_COUNT="):
-                snap["inbox"] = line.split("=", 1)[1].strip()
-                break
-        return True if r.returncode == 0 else None
-
-    def _extra() -> str:
-        return f"IMAP_INBOX={snap['inbox']} probe_exit={snap['rc']}"
-
-    anchor_desc = ""
-    if message_id:
-        anchor_desc += f" mid={message_id!r}"
-    if subject:
-        anchor_desc += f" subj={subject!r}"
-    poll_until_backoff(
-        _probe,
-        timeout=timeout,
-        desc=f"greenmail inbox message gone (SUT-side IMAP IDLE){anchor_desc}",
-        progress_extra=_extra,
-    )
-
-
 def wait_for_greenmail_user_reply(
     project_name: str,
     *,
@@ -561,8 +365,14 @@ def wait_for_greenmail_user_reply(
 
     Ответ агента приходит на ``EmailIngressRoute.origin`` (smtp inject: ``pytest@localhost``); IMAP по умолчанию —
     ``E2E_GREENMAIL_REPLY_USER`` (``pytest``), не ``E2E_FETCHMAIL_USER`` (входящая инъекция в ящик ``test``).
+
+    **Host-side IMAP** (без ``docker exec`` в теле теста, [[no-docker-exec-journalctl-in-tests]]): poll'им
+    проброшенный порт GreenMail с control-node (``discover_runtime`` → ``greenmail_imap_host/port``); это тот
+    же сетевой протокол, что у :func:`wait_for_greenmail_inbox_message_gone_host` /
+    :func:`greenmail_wait_agent_reply_message_id`, без форка процесса в SUT.
     """
-    root = repo_root or REPO_ROOT
+    rt = discover_runtime(project_name, repo_root=repo_root or REPO_ROOT)
+    host, port = rt.greenmail_imap_host, rt.greenmail_imap_port
 
     irt_anchor: str | None = None
     if reply_in_reply_to is not None and str(reply_in_reply_to).strip():
@@ -573,84 +383,32 @@ def wait_for_greenmail_user_reply(
         irt_anchor = str(canonical_id).strip().strip("<>").lower()
     # ``route_wire`` в одиночку: без якоря (устаревшая подсказка; на внешнем SMTP Route нет).
 
-    if irt_anchor is not None:
-        # Тот же уровень отступа, что и тело ``for msg_id in reversed(ids):`` (8 пробелов).
-        anchor_check = (
-            f"        _irt_raw = (msg.get('In-Reply-To') or '').strip()\n"
-            f"        _m = re.search(r'<([^>]+)>', _irt_raw)\n"
-            f"        _irt_first = (_m.group(1).strip().lower() if _m else '') or ''\n"
-            f"        if _irt_first != {irt_anchor!r}:\n"
-            f"            continue\n"
-        )
-    else:
-        anchor_check = ""
-
-    py_body = f"""import imaplib
-import re
-import sys
-{REMOTE_PROBE_LOGGER_BOOT}{REMOTE_RFC822_PARSER_BOOT}from email.header import decode_header
-
-def _decode_subject(raw: str) -> str:
-    if not raw:
-        return ""
-    parts = decode_header(raw)
-    out = []
-    for text, enc in parts:
-        if isinstance(text, bytes):
-            out.append(text.decode(enc or "utf-8", errors="replace"))
-        else:
-            out.append(text)
-    return "".join(out)
-
-def _plain_body(msg) -> str:
-    if msg.is_multipart():
-        for p in msg.walk():
-            if p.get_content_type() == "text/plain":
-                pl = p.get_payload(decode=True)
-                if isinstance(pl, bytes):
-                    return pl.decode("utf-8", errors="replace")
-                return str(pl or "")
-    pl = msg.get_payload(decode=True)
-    if isinstance(pl, bytes):
-        return pl.decode("utf-8", errors="replace")
-    return str(pl or "")
-
-def check() -> bool:
-    sn = {(subject_substring or "").lower()!r}
-    bn = {(body_substring or "").lower()!r}
-    m = imaplib.IMAP4("greenmail", 3143)
-    m.login({user!r}, {password!r})
-    m.select("INBOX")
-    _, data = m.search(None, "ALL")
-    ids = data[0].split() if data and data[0] else []
-    for msg_id in reversed(ids):
-        _, raw_data = m.fetch(msg_id, "(RFC822)")
-        if not raw_data or not isinstance(raw_data[0], tuple):
-            continue
-        raw = raw_data[0][1]
-        msg = parse_rfc822(raw)
-{anchor_check}\
-        subj = _decode_subject(msg.get("Subject") or "").lower()
-        body = _plain_body(msg).lower()
-        if (sn and sn in subj) or (bn and bn in body):
-            m.logout()
-            _probe_out.info("GREENMAIL_REPLY_OK=1")
-            return True
-    m.logout()
-    return False
-
-raise SystemExit(0 if check() else 1)
-"""
-    cmd = ["bash", "-lc", "python3 <<'PY'\n" + py_body + "\nPY\n"]
-    snap = {"rc": "?"}
+    sn = (subject_substring or "").lower()
+    bn = (body_substring or "").lower()
 
     def _probe() -> bool | None:
-        r = service_exec(project_name, "sut", cmd, repo_root=root, timeout=int(TIMEOUT_POLL_SHORT))
-        snap["rc"] = str(r.returncode)
-        return True if r.returncode == 0 else None
-
-    def _extra() -> str:
-        return f"greenmail_reply_probe_exit={snap['rc']}"
+        with imaplib.IMAP4(host, port, timeout=int(TIMEOUT_POLL_SHORT)) as imap:
+            imap.login(user, password)
+            imap.select("INBOX")
+            _, data = imap.search(None, "ALL")
+            ids = data[0].split() if data and data[0] else []
+            for msg_id in reversed(ids):
+                _, raw_data = imap.fetch(msg_id, "(RFC822)")
+                if not raw_data or not isinstance(raw_data[0], tuple):
+                    continue
+                msg = e2e_parse_rfc822(raw_data[0][1])
+                if irt_anchor is not None:
+                    m = re.search(r"<([^>]+)>", (msg.get("In-Reply-To") or "").strip())
+                    irt_first = (m.group(1).strip().lower() if m else "")
+                    if irt_first != irt_anchor:
+                        continue
+                subj = _decoded_email_subject(msg).lower()
+                body = _imap_message_plain_body(msg).lower()
+                if (sn and sn in subj) or (bn and bn in body):
+                    imap.logout()
+                    return True
+            imap.logout()
+            return None
 
     anchor_desc = ""
     if irt_anchor is not None:
@@ -658,8 +416,7 @@ raise SystemExit(0 if check() else 1)
     poll_until_backoff(
         _probe,
         timeout=timeout,
-        desc=f"greenmail INBOX reply (thread-correlated){anchor_desc}",
-        progress_extra=_extra,
+        desc=f"greenmail INBOX reply (thread-correlated, host-side){anchor_desc} on {host}:{port}",
     )
 
 
