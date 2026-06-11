@@ -46,19 +46,25 @@ from .wiremock_client import (
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_LIGHTRAG_INTEGRITY_BODY_MARKER = "E2E-LIGHTRAG-INTEGRITY-BODY"
 
-# QUERY-side wrappers: per-handler-call correlation (enrich aquery = this turn) — request carries THIS
-# test's thread-root un-aggregated (set per run_rag_coroutine call, not via the index pool).
+# Generic per-test index-correlation marker (docs/E2E.md §3.6.3, §7). The drain stamps NO thread-root
+# on indexing embeds (batched op via the shared pool → thread-root misattributed), and the INDEXED
+# message is an enriched one whose Message-ID != correlation_key, so neither thread-root nor a body
+# Message-ID body-corr identifies THIS test's index call. Instead the test bakes a STATIC token into
+# its injected body that survives distill→chunk→embed; the generic 011 stub regexExtracts the convention
+# token `E2E-INDEX-CORR-<...>` and append-only records the call-site into a per-token context. The token
+# is unique to this test → a TRUE per-test counter (a global fire-at-all counter would false-pass on a
+# neighbour's index, and "the index wrapper fires with its correlator" IS this test's whole point).
+_INDEX_CORR_MARKER = "E2E-INDEX-CORR-lightrag-integrity"
+_INDEX_CALL_SITES = ("lightrag_index",)
+
+# QUERY-side wrappers: per-handler-call correlation (enrich aquery = this turn) — recorded by the per-test
+# stubs under THIS test's thread-root (the FSM/query path keeps thread-root). Read under correlation_key
+# (== thread-root for the single injected message).
 _THREAD_ROOT_CALL_SITES = (
     "extract_query_keywords",  # query-side
     "lightrag_query",          # query embeddings
     "generate_rag_answer",     # query-side
 )
-# INDEX embeddings (``lightrag_index``): drain stamps NO thread-root (batched background op on ONE
-# rag-loop через общий пул → thread-root misattributed). Index embeds heterogeneous → not per-message
-# correlatable. Goal = «does the index wrapper fire AT ALL» → generic 011 records into a FIXED global
-# context (fire-at-all, like KG). docs/E2E.md §3.6.3.
-_INDEX_GLOBAL_CONTEXT = "lightrag_index_calls"
-_INDEX_CALL_SITES = ("lightrag_index",)
 # KG-extraction wrappers: under -n4 the drain batches multiple docs and LightRAG AGGREGATES their
 # chunks into ONE extraction prompt, so a per-message body-flag would attribute them to a neighbour's
 # correlator (first <corr@localhost> wins). The integrity goal here is only «does the KG-extraction
@@ -82,7 +88,10 @@ LIGHTRAG_INTEGRITY_SPEC = MailflowScenarioSpec(
     raw_id_prefix="e2e-lr-integrity-",
     stub_dir=_WIREMOCK_STUBS_ROOT / "test_memory_query_e2e",
     stub_tag="stub-memory-query-01",
-    body_head=f"{E2E_LIGHTRAG_INTEGRITY_BODY_MARKER}\ne2e lightrag correlator integrity body",
+    body_head=(
+        f"{E2E_LIGHTRAG_INTEGRITY_BODY_MARKER}\n{_INDEX_CORR_MARKER}\n"
+        "e2e lightrag correlator integrity body"
+    ),
     min_chat_completion_posts=3,
     reply_body_needle="e2e-memory-query-verified-answer",
 )
@@ -148,11 +157,12 @@ def test_lightrag_correlator_integrity(e2e_runtime: E2EComposeRuntime) -> None:
                 correlation_key,
                 expected=_THREAD_ROOT_CALL_SITES,
             )
-            # Index embeddings — fire-at-all under the fixed global context (no thread-root on the
-            # batched indexer; heterogeneous embeds → not per-message correlatable).
+            # Index embeddings — PER-TEST under this test's static index-corr token (the indexed message
+            # carries the baked `E2E-INDEX-CORR-*` marker; the generic 011 records the call-site there).
+            # Per-test, NOT a global counter: THIS test's point is that ITS OWN index wrapper fired.
             _assert_lightrag_call_sites_correlated(
                 wm_base,
-                _INDEX_GLOBAL_CONTEXT,
+                _INDEX_CORR_MARKER,
                 expected=_INDEX_CALL_SITES,
             )
             # KG-extraction wrappers — fire-at-all under the fixed global context (aggregation-proof).
