@@ -616,6 +616,22 @@ def run_bridge(deliver: Callable[[EmailMessage], None], *, settings: ThreliumSet
                 except Exception as stop_exc:  # noqa: BLE001
                     log.warning("idle_stop_after_unsolicited_failed", detail=str(stop_exc))
                 responses = None
+            except (imaplib.IMAP4.abort, imaplib.IMAP4.error, OSError) as idle_proto_exc:
+                # Искажённый/интерливленный IDLE-ответ сервера под нагрузкой (напр.
+                # ``imaplib.IMAP4.abort: unexpected response: b'*...EXISTS completed.'``) или оборванный
+                # сокет: протокол IMAP десинхронизирован → надёжно восстановиться на ЭТОМ соединении
+                # нельзя. Чистый выход → systemd рестартует мост (``Restart=on-failure``,
+                # ``RestartUSec=1s``); на старте резюмируем из DURABLE notmuch-checkpoint
+                # (``_max_imap_checkpoint_from_notmuch`` / ``_max_update_id`` / ``sync_batch``) + IMAP-MOVE
+                # обработанных писем в ``Threlium.Processed`` (INBOX = только необработанное). Без
+                # необработанного traceback и без внутрипроцессного reconnect — durable-состояние уже
+                # лежит в notmuch (письма на диске), отдельное Redis-хранилище не нужно.
+                log.error(
+                    "imap_idle_protocol_error",
+                    detail=str(idle_proto_exc),
+                    hint="clean exit -> systemd restart -> resume from notmuch checkpoint",
+                )
+                sys.exit(1)
             if responses:
                 log.info("idle_events", count=len(responses))
             # Drain до пустого: письмо, пришедшее ВО ВРЕМЯ предыдущего process_inbox_tail
