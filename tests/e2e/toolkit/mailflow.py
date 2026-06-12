@@ -14,7 +14,7 @@ from .bridges.email import (
     email_ingress_notmuch_id_inner,
     e2e_thread_root_mid_for_message_id,
 )
-from .constants import REPO_ROOT, TIMEOUT_POLL_SHORT
+from .constants import REPO_ROOT, TIMEOUT_POLL_LIVE_MAIL, TIMEOUT_POLL_SHORT
 from .diag import (
     mailflow_wait_fsm_maildir_activity,
     reset_maildrop_debug_log,
@@ -57,6 +57,21 @@ class MailflowScenarioSpec:
     # Сколько старых ходов треда инжектить ПЕРЕД основным, чтобы их distill-брифы
     # (каждый под cap distill) накопились в unified до переполнения → summarize.
     summarize_overflow_prior_turns: int = 1
+    # Seed one PRIOR turn in the same thread AND wait for its LightRAG KG-extraction (entities land in
+    # entities_vdb) BEFORE the main/query turn. Makes the main turn's enrich aquery retrieve a non-empty
+    # hybrid context → ``generate_rag_answer`` fires deterministically (LightRAG returns a no-LLM
+    # fail-response on empty retrieval; a single cold turn's enrich runs before any extract_knowledge_graph
+    # → entities_vdb empty → no generate_rag_answer). Used by the lightrag correlator-integrity test.
+    rag_seed_index_prior_turn: bool = False
+    # When set together with ``rag_seed_index_prior_turn``: after the seed turn, additionally wait (as a
+    # happens-before readiness barrier, NOT a behavioral assert) until the seed's OWN chunk-index embed has
+    # recorded ``lightrag_index`` into the body-corr context keyed by this marker (the static token baked in
+    # ``body_head``, recorded by the generic 011 stub via ``regexExtract``). This guarantees the integrity
+    # index facet reads an ALREADY-populated marker context instead of racing the async drain with a 30s poll
+    # (docs/E2E.md §3.6.2: prefer a happens-before barrier over a timeout race). Under -n12 the integrity
+    # doc's index lands ~30-60s after the contour (drain queue depth) — the marker SURVIVES and the index
+    # DOES fire, just later than the facet's poll window, so the barrier (readiness) is the right fix.
+    rag_seed_index_wait_marker: str | None = None
     min_chat_completion_posts: int = 1
     # Cold-reset SUT: один probe в knowledge/ → меньше drain/bootstrap embeddings на тред.
     min_embedding_posts: int = 5
@@ -88,7 +103,9 @@ def mailflow_inject_and_wait(
         wiremock_public_base,
     )
 
-    needs_prior_thread_turn = spec.summarize_overflow_body or spec.oversized_trim_body
+    needs_prior_thread_turn = (
+        spec.summarize_overflow_body or spec.oversized_trim_body or spec.rag_seed_index_prior_turn
+    )
     seed_id: str | None = None
     main_in_reply_to: str | None = None
     if needs_prior_thread_turn:
@@ -225,6 +242,52 @@ def mailflow_inject_and_wait(
                 f"(+{time.monotonic() - t0:.1f}s)"
             )
         main_in_reply_to = chain_in_reply_to
+
+        if spec.rag_seed_index_prior_turn:
+            # Barrier: wait until the seed turn's drain has run extract_knowledge_graph (the generic 012
+            # stub records it into the GLOBAL ``lightrag_kg_calls`` context). That call upserts >=1 entity
+            # into entities_vdb, so the NEXT (query) turn's hybrid aquery retrieves a non-empty context and
+            # LightRAG actually calls generate_rag_answer (vs a no-LLM fail-response on empty retrieval).
+            # The context is global (KG extraction drops thread-root, batched) → under load it is already
+            # populated and this returns immediately; in isolation it waits for the seed's own KG drain.
+            from tests.e2e.wiremock_client import (  # noqa: PLC0415
+                wiremock_state_thread_root_call_sites,
+            )
+
+            def _kg_seeded() -> bool | None:
+                cs = wiremock_state_thread_root_call_sites(wm_base, "lightrag_kg_calls")
+                return True if "extract_knowledge_graph" in cs else None
+
+            poll_until(
+                _kg_seeded,
+                timeout=TIMEOUT_POLL_SHORT,
+                interval=2.0,
+                desc="seed turn KG-extracted (entities_vdb populated for query-turn retrieval)",
+            )
+            mailflow_log_phase(
+                f"{spec.label}: seed KG-extraction barrier passed (+{time.monotonic() - t0:.1f}s)"
+            )
+
+            if spec.rag_seed_index_wait_marker:
+                # Happens-before barrier for the index facet: wait until the seed's OWN chunk index has
+                # recorded lightrag_index into the body-corr marker context. Readiness wait (the drain is
+                # async + queue-deep under -n12), budgeted like other SUT-readiness waits — NOT a behavioral
+                # assert timeout. Once populated, the index facet reads it time-independently (§3.6.2).
+                marker = spec.rag_seed_index_wait_marker
+
+                def _seed_indexed() -> bool | None:
+                    cs = wiremock_state_thread_root_call_sites(wm_base, marker)
+                    return True if "lightrag_index" in cs else None
+
+                poll_until(
+                    _seed_indexed,
+                    timeout=TIMEOUT_POLL_LIVE_MAIL,
+                    interval=2.0,
+                    desc=f"seed turn chunk-indexed (lightrag_index in body-corr marker {marker!r})",
+                )
+                mailflow_log_phase(
+                    f"{spec.label}: seed index barrier passed (+{time.monotonic() - t0:.1f}s)"
+                )
 
     if spec.body_override is not None:
         inject_body = spec.body_override

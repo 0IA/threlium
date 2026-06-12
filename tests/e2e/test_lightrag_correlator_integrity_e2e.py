@@ -81,19 +81,27 @@ _KG_CALL_SITES = (
 # so it is NOT asserted as a per-message invariant on a single cold message (flaky: present at -n0, absent
 # at -n4). Deterministic coverage needs a seeded-vdb variant (seed A indexed -> B queries A) — deferred.
 
-# Reuse the memory_query stub set: it exercises the full RAG path (aquery + indexing) and its
-# stubs hard-code this stub_tag in their state-matcher hasContext, so the spec must keep it.
+# OWN isolated stub set (cloned from the plain-mailflow template, stub_tag ``stub-lightrag-integrity-01``)
+# — NOT borrowed from ``test_memory_query_e2e``. Sharing a sibling's stub_dir + stub_tag meant both contours
+# collided on the same mappings under -n12 (isolation violation, docs/E2E.md §2/§5). ``rag_seed_index_prior_
+# turn`` seeds ONE prior turn in the thread AND waits for its LightRAG KG-extraction (entities_vdb populated)
+# before the main/query turn, so the query turn's HYBRID aquery retrieves a non-empty context and LightRAG
+# actually calls ``generate_rag_answer``. Without the seed a single cold turn enriches BEFORE any
+# extract_knowledge_graph runs → entities_vdb empty → ``_build_query_context`` None →
+# ``generate_rag_answer`` never fires (the query-side facet's flake; not rag-loop capacity).
 LIGHTRAG_INTEGRITY_SPEC = MailflowScenarioSpec(
     label="lightrag_correlator_integrity",
     raw_id_prefix="e2e-lr-integrity-",
-    stub_dir=_WIREMOCK_STUBS_ROOT / "test_memory_query_e2e",
-    stub_tag="stub-memory-query-01",
+    stub_dir=_WIREMOCK_STUBS_ROOT / "test_lightrag_correlator_integrity_e2e",
+    stub_tag="stub-lightrag-integrity-01",
     body_head=(
         f"{E2E_LIGHTRAG_INTEGRITY_BODY_MARKER}\n{_INDEX_CORR_MARKER}\n"
         "e2e lightrag correlator integrity body"
     ),
+    rag_seed_index_prior_turn=True,
+    rag_seed_index_wait_marker=_INDEX_CORR_MARKER,
     min_chat_completion_posts=3,
-    reply_body_needle="e2e-memory-query-verified-answer",
+    reply_body_needle="ok from llm-mock",
 )
 
 
@@ -172,7 +180,8 @@ def test_lightrag_query_side_correlators(e2e_runtime: E2EComposeRuntime) -> None
 
     ``extract_query_keywords`` / ``lightrag_query`` (embeddings) / ``generate_rag_answer`` — each lands
     in the thread-root state ONLY if it still carried ``X-Threlium-Thread-Root``; a miss == lost/scrambled
-    correlator. (``generate_rag_answer`` fires on non-empty retrieval — relies on the bootstrap-seeded vdb.)"""
+    correlator. (``generate_rag_answer`` fires only on non-empty retrieval; the spec's
+    ``rag_seed_index_prior_turn`` seeds + KG-extracts a prior turn so the query turn retrieves it.)"""
     with _integrity_contour(e2e_runtime) as (wm_base, correlation_key):
         _assert_lightrag_call_sites_correlated(
             wm_base, correlation_key, expected=_THREAD_ROOT_CALL_SITES
