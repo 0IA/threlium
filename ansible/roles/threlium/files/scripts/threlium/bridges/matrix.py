@@ -183,12 +183,15 @@ def matrix_room_name_wire_from_sync_state_events(
 def _room_message_plain_body(ev: RoomMessage) -> str:
     content = ev.source.get("content")
     if isinstance(content, dict):
+        # Битый room-message content → ПАДАЕМ (fail-fast инвариант проекта): краш + рестарт через systemd
+        # вскрывает ломаный стаб /sync, отдавший невалидный content, а не маскирует его. Ошибку логируем
+        # обязательно перед падением; recovery (skip сообщения) запрещён.
         try:
             parsed = msgspec.convert(content, type=MatrixInboundRoomMessageSourceContent)
         except msgspec.ValidationError as exc:
-            log.warning("matrix_room_content_parse_failed", exc_info=exc)
-            parsed = None
-        if parsed is not None and parsed.body:
+            log.error("matrix_room_content_parse_failed", exc_info=exc)
+            raise
+        if parsed.body:
             return parsed.body
         b = content.get("body")
         if isinstance(b, str):
@@ -271,8 +274,13 @@ async def _matrix_ingress_loop(
             # 2) sync (короткий, если есть pending — быстрее доперепроверить).
             resp = await client.sync(timeout=2_000 if pending else 60_000)
             if isinstance(resp, SyncError):
+                # Fail-fast (инвариант проекта): на sync-ошибке ПАДАЕМ — рестарт через systemd. Краш тут
+                # вскрывает не баг моста, а баг отвечающей стороны (стаб /sync отдал не то / опоздал).
+                # Ошибку логируем обязательно перед падением.
+                log.error("matrix_sync_error", detail=str(resp))
                 raise RuntimeError(f"FSM-инвариант: Matrix sync error: {resp!s}")
             if not isinstance(resp, SyncResponse):
+                log.error("matrix_sync_unexpected_type", type=type(resp).__name__)
                 raise RuntimeError(f"FSM-инвариант: неожиданный тип ответа sync: {type(resp).__name__}")
             checkpoint = _require_next_batch_from_sync(resp)
             if not sync_ok_logged:
