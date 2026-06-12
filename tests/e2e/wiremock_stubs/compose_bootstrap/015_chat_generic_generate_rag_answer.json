@@ -1,0 +1,70 @@
+{
+  "metadata": {
+    "threlium_stub_tag": "lightrag-generic-rag-answer"
+  },
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
+    "headers": {
+      "X-Threlium-Call-Site": {
+        "equalTo": "generate_rag_answer"
+      }
+    },
+    "bodyPatterns": [
+      {
+        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
+      },
+      {
+        "contains": "\"tools\""
+      }
+    ]
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "transformers": [
+      "response-template"
+    ],
+    "jsonBody": {
+      "id": "chatcmpl-e2e-generic-generate_rag_answer",
+      "object": "chat.completion",
+      "created": 0,
+      "model": "gpt-4o-mini",
+      "choices": [
+        {
+          "index": 0,
+          "finish_reason": "tool_calls",
+          "message": {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_lightrag_generic_generate_rag_answer",
+                "type": "function",
+                "function": {
+                  "name": "generate_rag_answer",
+                  "arguments": "{\"answer\": \"E2e generic RAG answer (nonce {{randomValue length=16 type='ALPHANUMERIC'}}). No specific data available for this query.\"}"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "list": {
+          "addLast": {
+            "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+          }
+        }
+      }
+    }
+  ]
+}
