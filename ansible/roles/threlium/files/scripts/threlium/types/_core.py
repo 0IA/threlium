@@ -149,8 +149,11 @@ class _OptionalStripEmpty(msgspec.Struct, frozen=True, kw_only=True):
         """``notmuch2.Message.header`` + present-or-None (``LookupError`` как отсутствие заголовка)."""
         try:
             raw = msg.header(header_name)
-        except LookupError as exc:
-            log.debug("nm_header_absent", header=header_name, exc_info=exc)
+        except LookupError:
+            # Отсутствие опц. заголовка — штатный путь present-or-None (контракт), НЕ ошибка:
+            # логируем событие, но БЕЗ exc_info (рендер трейсбека = горячая GIL-точка под -n4,
+            # IRT-обход читает ~6 заголовков на предка × все стадии). always-log-errors не нарушено.
+            log.debug("nm_header_absent", header=header_name)
             return None
         return cls.parse_present_optional(str(raw))
 
@@ -215,8 +218,11 @@ class _OptionalStripLowerEmpty(msgspec.Struct, frozen=True, kw_only=True):
 
         try:
             raw = msg.header(header_name)
-        except LookupError as exc:
-            log.debug("nm_header_absent", header=header_name, exc_info=exc)
+        except LookupError:
+            # Отсутствие опц. заголовка — штатный путь present-or-None (контракт), НЕ ошибка:
+            # логируем событие, но БЕЗ exc_info (рендер трейсбека = горячая GIL-точка под -n4,
+            # IRT-обход читает ~6 заголовков на предка × все стадии). always-log-errors не нарушено.
+            log.debug("nm_header_absent", header=header_name)
             return None
         return cls.parse_present_optional(str(raw))
 

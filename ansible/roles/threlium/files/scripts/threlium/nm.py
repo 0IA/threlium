@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import configparser
+import functools
 import logging
 import multiprocessing
 import os
@@ -181,8 +182,9 @@ def header_field_optional(msg: notmuch2.Message, name: MailHeaderName) -> str | 
     его как «отсутствие» молча портило бы данные (см. :func:`_is_concurrent_revision_discard`)."""
     try:
         return str(msg.header(name.value))
-    except LookupError as exc:
-        log.debug("nm_header_absent", header=name.value, exc_info=exc)
+    except LookupError:
+        # Отсутствие заголовка — штатный present-or-None (НЕ ошибка); без exc_info (трейсбек = GIL-хотспот).
+        log.debug("nm_header_absent", header=name.value)
         return None
 
 
@@ -191,7 +193,12 @@ def _thread_id_for_resolved_path_in_db(db: notmuch2.Database, abs_path: Path) ->
     return NotmuchThreadScopeId.from_notmuch_thread_attr(msg.threadid)
 
 
+@functools.cache
 def database_dir_from_config() -> Path:
+    # Путь к union-notmuch БД статичен на жизнь процесса (NOTMUCH_CONFIG / ~/.notmuch-config не меняются).
+    # Кэшируем РОВНО раз: раньше каждый notmuch_database()/обход IRT/батч drain заново stat'ил + парсил
+    # INI через configparser — измеримая лишняя работа на rag-loop под -n4 (py-spy: configparser.read в
+    # стеках drain и egress_router IRT-обхода). Движок перезапускается на cold-reset → кэш свежий.
     cfg_path = Path(os.environ.get("NOTMUCH_CONFIG", Path.home() / ".notmuch-config"))
     if not cfg_path.is_file():
         raise FileNotFoundError(f"notmuch config missing: {cfg_path}")
