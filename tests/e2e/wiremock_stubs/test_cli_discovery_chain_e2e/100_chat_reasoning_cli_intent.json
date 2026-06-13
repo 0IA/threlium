@@ -56,7 +56,7 @@
                 "type": "function",
                 "function": {
                   "name": "cli_intent",
-                  "arguments": "{\"argv\": [\"bash\", \"-c\", \"rg -l E2E-CLI-DISCOVERY-MARKER /home/threlium/threlium/agent/e2e-cli-discovery-marker.txt | grep -E 'DISCOVERY|MARKER' | head -n 5; echo E2E-CLI-DISCOVERY-STDOUT-MARKER\"], \"reasoning\": \"e2e discovery chain: rg | grep -E with pipe in quotes (th-agent regression)\"}"
+                  "arguments": "{\"argv\": [\"bash\", \"-c\", \"rg -l E2E-CLI-DISCOVERY-MARKER /home/threlium/threlium/agent/e2e-cli-discovery-marker.txt | grep -E 'DISCOVERY|MARKER' | head -n 5; echo E2E-CLI-DISCOVERY-STDOUT-MARKER\"], \"cwd\": \"/home/threlium/threlium/agent\", \"reasoning\": \"e2e discovery chain: rg | grep -E pipe in quotes + cwd set — th-agent regression: with cwd present, reasoning/cli_intent/email_body.j2 renders the cwd branch which used the Ansible-only 'combine' filter and crashed reasoning\"}"
                 }
               }
             ]

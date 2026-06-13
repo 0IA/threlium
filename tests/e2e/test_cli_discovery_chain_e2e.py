@@ -1,4 +1,14 @@
-"""E2E: ``cli_intent`` shell chain (``sh -c`` + pipe in ``grep -E``) → sandbox ``cli_exec`` → finalize.
+"""E2E: ``cli_intent`` shell chain (``sh -c`` + pipe in ``grep -E``) **with ``cwd`` set** → sandbox
+``cli_exec`` → finalize.
+
+The ``cwd`` is load-bearing as a **regression guard**: when a ``cli_intent`` carries a ``cwd``,
+``prompts/reasoning/cli_intent/email_body.j2`` renders its ``cwd`` branch. That branch used the
+Ansible-only ``combine`` filter (absent from Threlium's Jinja env) → ``TemplateRuntimeError`` crashed
+the reasoning stage, so the message never reached ``cli_intent``/``cli_exec`` and the pipeline never
+finalized. It slipped to production (th-agent stuck on a coding task with a ``cwd``) precisely because
+no e2e test exercised ``cli_intent`` *with* ``cwd``. Full-pipeline finalize here proves the cwd render
+path is sound. (Note: ``cwd`` is NOT propagated to the executed command — ``systemd-run`` resets it —
+so ``argv`` stays absolute; this guards the *render*, not exec-cwd semantics.)
 
 Стабы: ``wiremock_stubs/test_cli_discovery_chain_e2e/`` (``stub-cli-discovery-chain-01``).
 """

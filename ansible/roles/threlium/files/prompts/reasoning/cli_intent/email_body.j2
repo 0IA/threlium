@@ -3,6 +3,6 @@
     cli_intent body: canonical JSON for cli_fsm.parse_cli_intent_payload. -#}
 {%- set _cli = {'argv': argv, 'privileged': privileged | default(false)} -%}
 {%- if cwd is defined and cwd -%}
-{%-   set _cli = _cli | combine({'cwd': cwd}) -%}
+{%-   set _ = _cli.update({'cwd': cwd}) -%}
 {%- endif -%}
 {{ {'cli': _cli} | tojson }}
