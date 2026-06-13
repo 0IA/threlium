@@ -6,7 +6,7 @@
 
 ## Возможности
 
-- **~11.3k строк Python (SLOC, 11 282)** — обработчики FSM и раннеры (`threlium/`, без `types/`); конфиги, промпты и Ansible вместо фреймворков
+- **~14.1k строк Python (SLOC, 14 090)** — обработчики FSM и раннеры (`threlium/`, без `types/`); конфиги, промпты и Ansible вместо фреймворков
 - **FSM на Maildir** — событие = письмо RFC 5322; стадия = `stages/<stage>/Maildir/`
 - **Union notmuch index** — одна БД на все stage-Maildir; история в `cur/`, отдельного legacy-архива вне `stages/` нет
 - **Оркестрация systemd --user** — `fdm` → `notmuch insert` → `threlium-dispatch.sh` → `threlium-work@` / `threlium-engine`
