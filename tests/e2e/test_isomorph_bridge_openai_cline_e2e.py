@@ -45,6 +45,7 @@ from .wiremock_client import (
     wiremock_public_base,
     wiremock_state_seed_context,
 )
+from threlium.types.litellm_correlation_header import thread_root_hash
 
 # group_vars/e2e.yml → bridges.isomorph.listen_port / api_key.
 _ISO_PORT = 8040
@@ -88,7 +89,9 @@ def isomorph_cline(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntim
     # clean_isomorph_test_threads делал конкурентный `notmuch new` при живом движке → риск
     # Xapian::DatabaseModifiedError SIGABRT (см. fix(notmuch) db._destroy + drop per-test reindex).
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
-    wiremock_state_seed_context(wm_base, composite_context_key(_STUB_TAG, _thread_root()))
+    wiremock_state_seed_context(
+        wm_base, composite_context_key(_STUB_TAG, thread_root_hash(_thread_root()))
+    )
     configure_cline(
         rt, provider=_PROVIDER, api_key=_API_KEY, model=_MODEL,
         base_url=f"http://127.0.0.1:{_ISO_PORT}/v1", data_dir=_CLINE_DATA, cwd=_CLINE_CWD,

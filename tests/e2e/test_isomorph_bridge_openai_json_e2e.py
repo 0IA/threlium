@@ -43,6 +43,7 @@ from .wiremock_client import (
     wiremock_state_reset_phase,
     wiremock_state_seed_context,
 )
+from threlium.types.litellm_correlation_header import thread_root_hash
 
 _ISO_PORT = 8040
 _API_KEY = "e2e-isomorph-api-key"
@@ -83,7 +84,9 @@ def isomorph_json(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntime
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
     wait_bridge_health(rt, port=_ISO_PORT)  # мост мог ещё не подняться после сессионного cold-reset
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
-    wiremock_state_seed_context(wm_base, composite_context_key(_STUB_TAG, _thread_root()))
+    wiremock_state_seed_context(
+        wm_base, composite_context_key(_STUB_TAG, thread_root_hash(_thread_root()))
+    )
     try:
         yield rt
     finally:
@@ -121,7 +124,7 @@ def test_isomorph_bridge_openai_json_multiturn_continuity(isomorph_json: E2EComp
     # Своё тело хода-1 (свой _MARKER_MT) → свой content-addressed thread-root, НЕ коллизирующий с happy_path.
     # Сидим свой контекст (фикстура засидила happy_path-root, нам нужен свой); стабы templated по thread-root.
     body1: dict[str, object] = {**_BODY, "messages": [{"role": "user", "content": f"ping mt [{_MARKER_MT}]"}]}
-    ctx1 = composite_context_key(_STUB_TAG, thread_root_from_body(_SURFACE, body1))
+    ctx1 = composite_context_key(_STUB_TAG, thread_root_hash(thread_root_from_body(_SURFACE, body1)))
     wiremock_state_seed_context(wm, ctx1)
     s1, r1 = bridge_post_json(rt, port=_ISO_PORT, path=_PATH, body=body1, api_key=_API_KEY, surface=_SURFACE)
     assert s1 == 200, r1

@@ -43,6 +43,7 @@ from .wiremock_client import (
     wiremock_public_base,
     wiremock_state_seed_context,
 )
+from threlium.types.litellm_correlation_header import thread_root_hash
 
 _ISO_PORT = 8040
 _API_KEY = "e2e-isomorph-api-key"
@@ -56,7 +57,9 @@ def _seed(rt: E2EComposeRuntime, *, stub_tag: str, stub_dir: Path, marker: str) 
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
     wait_bridge_health(rt, port=_ISO_PORT)
     upsert_wiremock_mapping_directory(wm_base, stub_dir, stub_tag=stub_tag)
-    wiremock_state_seed_context(wm_base, composite_context_key(stub_tag, e2e_explicit_root_mid(marker)))
+    wiremock_state_seed_context(
+        wm_base, composite_context_key(stub_tag, thread_root_hash(e2e_explicit_root_mid(marker)))
+    )
 
 
 def _body(surface: IsomorphApiSurface, marker: str) -> dict[str, object]:

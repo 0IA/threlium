@@ -30,6 +30,7 @@ from .wiremock_client import (
     wiremock_public_base,
     wiremock_state_seed_context,
 )
+from threlium.types.litellm_correlation_header import thread_root_hash
 
 _ISO_PORT = 8040
 _API_KEY = "e2e-isomorph-api-key"
@@ -46,7 +47,9 @@ def isomorph_timeout_scenario(e2e_runtime: E2EComposeRuntime) -> Generator[E2ECo
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
-    wiremock_state_seed_context(wm_base, composite_context_key(_STUB_TAG, e2e_explicit_root_mid(_MARKER)))
+    wiremock_state_seed_context(
+        wm_base, composite_context_key(_STUB_TAG, thread_root_hash(e2e_explicit_root_mid(_MARKER)))
+    )
     try:
         yield rt
     finally:

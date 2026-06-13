@@ -14,6 +14,7 @@ from threlium.types import (
     NotmuchMessageIdInner,
     RfcMessageIdWire,
 )
+from threlium.types.litellm_correlation_header import thread_root_hash
 
 def rfc_first_message_id_in_in_reply_to_header(value: str | None) -> str | None:
     """Первый токен ``<…>`` из заголовка ``In-Reply-To`` (RFC 5322). Пусто → ``None``."""
@@ -86,16 +87,19 @@ def e2e_smtp_inject_ingress_route_wire_for_message_id(
 
 
 def e2e_thread_root_mid_for_message_id(raw_message_id: str) -> str:
-    """Уголковый ``Message-ID`` старейшего в notmuch-треде письма с ``tag:route`` (как ``X-Threlium-Thread-Root``).
+    """Коррелятор ``X-Threlium-Thread-Root`` для теста: ``sha256`` от inner-``Message-ID`` корня треда.
 
-    Продукт берёт то же значение, что ``resolved.message_id_inner`` у
+    Продукт кладёт в заголовок ``X-Threlium-Thread-Root`` именно ``thread_root_hash`` от того же
+    inner-``Message-ID``, что ``resolved.message_id_inner`` у
     :func:`~threlium.ingress_route_resolve.resolve_route_from_thread_oldest_route_tag_under_db`
-    (один коррелятор на весь тред, все каналы). Тест подбирает ``raw_message_id`` / вход стаба
-    так, что после ингресса этим ``Message-ID`` оказывается именно то письмо; для SMTP-инъекции
-    это каноника ``email_ingress_notmuch_id_inner`` (короче route wire — лимит WireMock State).
+    (один коррелятор на весь тред, все каналы) — поэтому тест считает тот же хэш. Тест подбирает
+    ``raw_message_id`` так, что после ингресса этим ``Message-ID`` оказывается именно корень треда;
+    для SMTP-инъекции это каноника ``email_ingress_notmuch_id_inner``. Хэш короткий и устойчив к
+    усечению длинных значений заголовков (см. :func:`threlium.types.litellm_correlation_header.thread_root_hash`).
+    Для проверок notmuch по RAW inner-``Message-ID`` — ``email_ingress_notmuch_id_inner`` напрямую.
     """
     inner = email_ingress_notmuch_id_inner(raw_message_id)
-    return f"<{inner}>"
+    return thread_root_hash(f"<{inner}>")
 
 
 def e2e_smtp_inject_ingress_route_wire() -> str:

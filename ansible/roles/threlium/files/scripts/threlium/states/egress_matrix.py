@@ -24,7 +24,10 @@ from threlium.mail import serialize_rfc822_for_wire
 from threlium.mime_reform import system_part_text
 from threlium.nm import require_fsm_message_id
 from threlium.settings import ThreliumSettings
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
+from threlium.types.litellm_correlation_header import (
+    LitellmCorrelationHeader,
+    thread_root_hash,
+)
 from threlium.types import (
     FsmStage,
     IngressRoute,
@@ -107,7 +110,7 @@ def main(
         )
         correlation_headers = {
             LitellmCorrelationHeader.THREAD_ROOT_MID.value:
-                thread_resolved.message_id_inner.as_angle_bracket_header(),
+                thread_root_hash(thread_resolved.message_id_inner.as_angle_bracket_header()),
         }
     else:
         routing, _snap = resolve_egress_task_route_ancestor(

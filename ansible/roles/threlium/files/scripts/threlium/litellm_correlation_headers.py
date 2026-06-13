@@ -20,7 +20,10 @@ from threlium.types import (
 )
 from threlium.litellm_route_context import get_litellm_correlation_from_ctxvar
 from threlium.settings import ThreliumSettings
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
+from threlium.types.litellm_correlation_header import (
+    LitellmCorrelationHeader,
+    thread_root_hash,
+)
 
 
 def _header_line(msg: EmailMessage, name: str) -> str | None:
@@ -61,7 +64,7 @@ def _assemble_litellm_correlation_dict(
             out[hdr.value] = nv
     out[MailHeaderName.ROUTE.value] = route_wire_value
     if thread_root_mid:
-        out[LitellmCorrelationHeader.THREAD_ROOT_MID.value] = thread_root_mid
+        out[LitellmCorrelationHeader.THREAD_ROOT_MID.value] = thread_root_hash(thread_root_mid)
     out[LitellmCorrelationHeader.CALL_SITE.value] = call_site.value
     return out
 

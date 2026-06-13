@@ -37,7 +37,10 @@ from threlium.types import (
     TelegramPtbOutboundReplyBody,
     MailHeaderName,
 )
-from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
+from threlium.types.litellm_correlation_header import (
+    LitellmCorrelationHeader,
+    thread_root_hash,
+)
 
 _HDR = MailHeaderName
 
@@ -91,7 +94,7 @@ def main(
         )
         correlation_headers = {
             LitellmCorrelationHeader.THREAD_ROOT_MID.value:
-                thread_resolved.message_id_inner.as_angle_bracket_header(),
+                thread_root_hash(thread_resolved.message_id_inner.as_angle_bracket_header()),
         }
     else:
         routing, _snap = resolve_egress_task_route_ancestor(

@@ -8,6 +8,7 @@ from threlium.types import (
     RfcMessageIdWire,
     TelegramNativeId,
 )
+from threlium.types.litellm_correlation_header import thread_root_hash
 
 def e2e_telegram_generate_update_bundle(
     *,
@@ -49,4 +50,4 @@ def e2e_telegram_thread_root_mid_for_message(
     )
     mid_wire = RfcMessageIdWire.from_native(native)
     inner = NotmuchMessageIdInner.from_present_wire(mid_wire)
-    return inner.as_angle_bracket_header()
+    return thread_root_hash(inner.as_angle_bracket_header())

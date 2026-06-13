@@ -10,12 +10,14 @@ from threlium.types import (
     NotmuchMessageIdInner,
     RfcMessageIdWire,
 )
+from threlium.types.litellm_correlation_header import thread_root_hash
 
 def e2e_matrix_thread_root_mid_for_sync_event(*, room_id: str, event_id: str) -> str:
-    """Уголковый ``Message-ID`` корня matrix-треда по ``room_id`` + ``event_id`` из ответа ``/sync``.
+    """Коррелятор ``X-Threlium-Thread-Root`` matrix-треда: ``sha256`` от inner-``Message-ID`` корня (room+event).
 
-    Совпадает с :mod:`threlium.bridges.matrix` (``RfcMessageIdWire.from_native(MatrixNativeId(v=1, …))``)
-    и с ``X-Threlium-Thread-Root`` для LiteLLM / WireMock State ``correlation_key``.
+    Корень — ``RfcMessageIdWire.from_native(MatrixNativeId(v=1, …))`` как в :mod:`threlium.bridges.matrix`;
+    продукт кладёт в заголовок ``thread_root_hash`` от этого же inner-``Message-ID`` (LiteLLM / WireMock
+    State ``correlation_key``), поэтому тест считает тот же хэш.
     """
     native = MatrixNativeId(
         v=1,
@@ -24,7 +26,7 @@ def e2e_matrix_thread_root_mid_for_sync_event(*, room_id: str, event_id: str) ->
     )
     mid_wire = RfcMessageIdWire.from_native(native)
     inner = NotmuchMessageIdInner.from_present_wire(mid_wire)
-    return inner.as_angle_bracket_header()
+    return thread_root_hash(inner.as_angle_bracket_header())
 
 
 def e2e_matrix_generate_room_ids() -> tuple[str, str]:
