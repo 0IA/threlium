@@ -1,14 +1,17 @@
 """E2E: ``cli_intent`` shell chain (``sh -c`` + pipe in ``grep -E``) **with ``cwd`` set** → sandbox
 ``cli_exec`` → finalize.
 
-The ``cwd`` is load-bearing as a **regression guard**: when a ``cli_intent`` carries a ``cwd``,
-``prompts/reasoning/cli_intent/email_body.j2`` renders its ``cwd`` branch. That branch used the
-Ansible-only ``combine`` filter (absent from Threlium's Jinja env) → ``TemplateRuntimeError`` crashed
-the reasoning stage, so the message never reached ``cli_intent``/``cli_exec`` and the pipeline never
-finalized. It slipped to production (th-agent stuck on a coding task with a ``cwd``) precisely because
-no e2e test exercised ``cli_intent`` *with* ``cwd``. Full-pipeline finalize here proves the cwd render
-path is sound. (Note: ``cwd`` is NOT propagated to the executed command — ``systemd-run`` resets it —
-so ``argv`` stays absolute; this guards the *render*, not exec-cwd semantics.)
+The ``cwd`` is load-bearing as a **regression guard** for TWO bugs:
+1. **render**: when a ``cli_intent`` carries a ``cwd``, ``prompts/reasoning/cli_intent/email_body.j2``
+   renders its ``cwd`` branch. That branch once used the Ansible-only ``combine`` filter (absent from
+   Threlium's Jinja env) → ``TemplateRuntimeError`` crashed reasoning, so the message never reached
+   ``cli_intent``/``cli_exec``. It slipped to production (th-agent stuck on a coding task with a
+   ``cwd``) precisely because no e2e exercised ``cli_intent`` *with* ``cwd``.
+2. **exec-cwd**: the marker file is read by a **RELATIVE** path (``e2e-cli-discovery-marker.txt``) and
+   ``cwd`` is set to the dir holding it. ``rg`` finds the marker — and the chain emits its stdout
+   marker, finalizing — ONLY if ``cwd`` is actually applied to the executed command. Earlier ``cwd``
+   was passed to ``subprocess.run`` (the systemd-run *client*) but not to the transient unit
+   (``--working-directory``), so it was silently ignored; a relative read would have failed.
 
 Стабы: ``wiremock_stubs/test_cli_discovery_chain_e2e/`` (``stub-cli-discovery-chain-01``).
 """

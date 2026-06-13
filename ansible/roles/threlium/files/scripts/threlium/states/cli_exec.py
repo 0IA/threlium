@@ -40,18 +40,26 @@ def _build_scope_cmd(
     config: ThreliumSettings,
     *,
     privileged: bool,
+    cwd: str | None = None,
 ) -> list[str]:
     props = [
         f"--property=MemoryMax={config.cli.exec_memory_max}",
         f"--property=CPUQuota={config.cli.exec_cpu_quota}",
         f"--property=TasksMax={config.cli.exec_tasks_max}",
     ]
+    # cwd → systemd-run --working-directory (option, BEFORE the ``--`` separator). The transient
+    # unit runs in the manager's default cwd otherwise; ``subprocess.run(cwd=)`` would only set the
+    # systemd-run CLIENT's cwd, NOT the spawned unit's — so the requested cwd was silently ignored.
+    # A missing/relative dir makes systemd-run fail to start → surfaces as an exec-error observation
+    # (the agent sees it and can correct), which is correct fail-fast, not a silent no-op.
+    workdir = [f"--working-directory={cwd}"] if cwd else []
     if privileged:
         return [
             "systemd-run",
             "--wait",
             "--pipe",
             "--uid=0",
+            *workdir,
             *props,
             "--",
             *exec_argv,
@@ -72,6 +80,7 @@ def _build_scope_cmd(
         "--wait",
         "--pipe",
         "--quiet",
+        *workdir,
         *sandbox_props,
         *props,
         "--",
@@ -108,7 +117,9 @@ def main(
         cmd_line=cmd_line,
     )
 
-    scope_cmd = _build_scope_cmd(exec_argv, config, privileged=privileged)
+    scope_cmd = _build_scope_cmd(
+        exec_argv, config, privileged=privileged, cwd=cli.cwd or None
+    )
 
     try:
         result = subprocess.run(
@@ -116,7 +127,6 @@ def main(
             capture_output=True,
             timeout=config.cli.exec_timeout,
             text=True,
-            cwd=cli.cwd or None,
             env=_subprocess_env_for_systemd_user(),
         )
         observation = (

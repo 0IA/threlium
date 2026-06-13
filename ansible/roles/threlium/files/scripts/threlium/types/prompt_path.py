@@ -139,6 +139,7 @@ class PromptPath(StrEnum):
     INGRESS_RESPONSE_NOT_FORMED = "ingress/response_not_formed.j2"
     INGRESS_TASK_INCOMPLETE = "ingress/task_incomplete.j2"
     INGRESS_TASKS_UPSERT_ERROR = "ingress/tasks_upsert_error.j2"
+    INGRESS_TASKS_UPSERT_NOOP = "ingress/tasks_upsert_noop.j2"
 
     LIGHTRAG_ENRICH_TASK_PLAN = "lightrag/enrich_task_plan.j2"
     LIGHTRAG_ENRICH_TASK_PLAN_TOOL_SPEC = (

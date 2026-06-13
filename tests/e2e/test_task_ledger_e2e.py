@@ -14,7 +14,6 @@ from tests.e2e.log import clip_log_body, log
 
 from .toolkit import (
     E2EComposeRuntime,
-    E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
     dump_failure_artifacts,
@@ -84,6 +83,23 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
         min_rerank_posts=0,
         reply_body_needle="e2e-task-ledger-upsert-error-verified",
         wiremock_journal_ready_needle="call_e2e_upserterr_finalize_ok",
+    ),
+    MailflowScenarioSpec(
+        # No-op tasks_upsert (empty new_subtasks AND subtask_updates): pre-fix this hard-errored and
+        # re-dispatched forever (production livelock). The handler must render a guidance notice and
+        # relay it back via enrich_fast so reasoning corrects itself and finalizes. 101_ok gates on
+        # the rendered guidance text appearing in the reasoning prompt → proves the soft path, not
+        # just "recovered somehow".
+        label="task_ledger_noop",
+        raw_id_prefix="e2e-task-ledger-noop-",
+        stub_dir=_WIREMOCK_STUBS_ROOT / "test_task_ledger_noop_e2e",
+        stub_tag="stub-task-ledger-noop-01",
+        body_head="E2E-TASK-LEDGER-NOOP-BODY\ne2e task ledger no-op upsert guidance test body",
+        min_chat_completion_posts=3,
+        min_embedding_posts=1,
+        min_rerank_posts=0,
+        reply_body_needle="e2e-task-ledger-noop-verified",
+        wiremock_journal_ready_needle="call_e2e_noop_finalize_ok",
     ),
 )
 

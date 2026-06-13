@@ -18,15 +18,14 @@
         "contains": "\"tools\""
       },
       {
-        "contains": "E2E-CLI-DISCOVERY-CHAIN-BODY"
+        "contains": "E2E-TASK-LEDGER-NOOP-BODY"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-cli-discovery-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_cli_intent_done"
+        "hasContext": "stub-task-ledger-noop-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasProperty": "phase_upsert_ok_done"
       }
     }
   },
@@ -35,11 +34,8 @@
     "headers": {
       "Content-Type": "application/json"
     },
-    "transformers": [
-      "response-template"
-    ],
     "jsonBody": {
-      "id": "chatcmpl-e2e-live-cli-intent-allow",
+      "id": "chatcmpl-e2e-task-ledger-noop-reasoning-3-finalize-ok",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -52,11 +48,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_threlium_e2e_cli_intent_allow",
+                "id": "call_e2e_noop_finalize_ok",
                 "type": "function",
                 "function": {
-                  "name": "cli_intent",
-                  "arguments": "{\"argv\": [\"bash\", \"-c\", \"rg -l E2E-CLI-DISCOVERY-MARKER e2e-cli-discovery-marker.txt | grep -E 'DISCOVERY|MARKER' | head -n 5; echo E2E-CLI-DISCOVERY-STDOUT-MARKER\"], \"cwd\": \"/home/threlium/threlium/agent\", \"reasoning\": \"e2e discovery chain: rg | grep -E pipe in quotes + cwd LOAD-BEARING (rg reads the marker by RELATIVE path — resolves only if cwd is actually applied at exec). Guards two regressions: (1) reasoning/cli_intent/email_body.j2 cwd branch once used the Ansible-only 'combine' filter and crashed reasoning; (2) cwd was passed only to the systemd-run client, not the unit (--working-directory), so it was silently ignored\"}"
+                  "name": "response_finalize",
+                  "arguments": "{\"reasoning\": \"e2e: seeded subtask done, gate passes\", \"subject\": \"Re: e2e reply\", \"verification_summary\": \"e2e: ledger closed after correcting the content_id\", \"content\": \"e2e-task-ledger-noop-verified\"}"
                 }
               }
             ]
@@ -66,15 +62,6 @@
     }
   },
   "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "stub-cli-discovery-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_cli_intent_done": "1"
-        }
-      }
-    },
     {
       "name": "recordState",
       "parameters": {

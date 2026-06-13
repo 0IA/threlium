@@ -1,0 +1,20 @@
+{#- LLM-facing text is English-only: Cyrillic uses roughly 2–3× more tokens per word.
+    This Jinja comment is stripped and never sent to the model.
+    tasks_upsert was called with NO actions (empty new_subtasks AND empty subtask_updates) —
+    a reasoning-only no-op. This notice rides as <history> back through enrich_fast so reasoning
+    can correct itself. Variable: task_state (rendered ledger). -#}
+TASKS_UPSERT had no effect: you called it with no new_subtasks and no subtask_updates. A call with only `reasoning` (or other optional fields) changes nothing and does NOT advance the thread — do not repeat it.
+
+How to use tasks_upsert correctly:
+- ADD work: list items in `new_subtasks` (exact text; content_id is derived from the text).
+- CHANGE progress: list `{content_id, status}` in `subtask_updates`, using a content_id shown in the ledger below (lattice: pending → in_progress → done|cancelled, never backwards).
+- RENAME a subtask: add a NEW subtask with the new text AND cancel the old one (you cannot edit text in place — content_id is the text hash).
+- DROP a subtask no longer needed: set it `cancelled`.
+
+What is NOT allowed: a tasks_upsert with neither a new_subtask nor a subtask_update.
+
+If the ledger already reflects reality and there is nothing to add or change, do NOT call tasks_upsert again — choose your next concrete move instead: route to `response_finalize` if every subtask is done/cancelled (with at least one done) and the reply is ready, or pick another action (`cli_intent`, `memory_query`, `formal_reason`, …) to make real progress.
+
+Current ledger:
+
+{{ task_state }}
