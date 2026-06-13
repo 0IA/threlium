@@ -1,5 +1,4 @@
 {
-  "id": "ba116692-16fb-50ad-94ae-177db4b98750",
   "request": {
     "method": "POST",
     "urlPathPattern": "^/bot[^/]+/getMe$"

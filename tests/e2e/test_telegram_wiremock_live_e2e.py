@@ -32,7 +32,6 @@ from .wiremock_client import (
     wiremock_state_thread_root_reply_targets,
     composite_context_key,
     find_wiremock_requests_by_body_contains,
-    journal_has_compose_bootstrap_request,
     log_wiremock_correlation_journal,
     prepare_wiremock_scenario,
     wiremock_journal_request_body,

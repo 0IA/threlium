@@ -67,5 +67,11 @@ services:
     volumes:
       # wiremock-state-extension (ServiceLoader); см. tests/e2e/compose/wiremock/README.md
       - ./wiremock/wiremock-state-extension-standalone-0.10.1.jar:/var/wiremock/extensions/wiremock-state-extension-standalone-0.10.1.jar:ro
+      # Bootstrap-стабы (27 шт.) — в дефолтный mappings-root WireMock → грузятся ФАЙЛАМИ на старте (vendored
+      # JsonFileMappingsSource.loadMappings → listFilesRecursively). Поэтому `docker restart wiremock` даёт
+      # ЧИСТЫЙ инстанс с bootstrap БЕЗ API-upload (cold-reset рестартует контейнер, см. conftest
+      # _e2e_wiremock_journal_reset_once). ТОЛЬКО compose_bootstrap (плоско) — НЕ всё дерево wiremock_stubs/
+      # (рекурсия затянула бы scenario-сабдиры). Scenario-стабы — API-per-test (in-memory, не на диске).
+      - ../wiremock_stubs/compose_bootstrap:/home/wiremock/mappings:ro
     ports:
       - "9080:8080"

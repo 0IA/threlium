@@ -106,7 +106,14 @@ from .pipeline import (
     e2e_sut_threlium_user_journal_rotate_and_vacuum,
 )
 from .poll import mailflow_diag_block, mailflow_log_phase, poll_until, poll_until_backoff
-from .runtime import E2EComposeRuntime, compose_logs, discover_runtime, service_exec, tcp_open
+from .runtime import (
+    E2EComposeRuntime,
+    compose_logs,
+    discover_runtime,
+    e2e_restart_compose_service,
+    service_exec,
+    tcp_open,
+)
 from .smtp_ingress import smtp_inject_inbound
 from .wiremock_assert import (
     assert_wiremock_mailflow_min_embedding_posts,
@@ -115,6 +122,10 @@ from .wiremock_assert import (
     assert_wiremock_mailflow_zero_unmatched,
     wait_for_wiremock_global_unmatched_zero,
 )
-from .workers import wait_for_sut_threlium_user_workers_idle
+from .workers import (
+    e2e_fsm_pending_diag,
+    e2e_wait_fsm_and_index_drained,
+    wait_for_sut_threlium_user_workers_idle,
+)
 
 __all__ = [n for n in globals() if not n.startswith("_")]

@@ -1,5 +1,4 @@
 {
-  "id": "ba116692-16fb-50ad-94ae-177db4b98751",
   "request": {
     "method": "POST",
     "urlPathPattern": "^/bot[^/]+/getUpdates$"
@@ -9,7 +8,9 @@
     "headers": {
       "Content-Type": "application/json"
     },
-    "transformers": ["response-template"],
+    "transformers": [
+      "response-template"
+    ],
     "body": "{\"ok\":true,\"result\":[ {{#each (state context='telegram_updates' property='list' default='[]')}}{{#unless @first}},{{/unless}}{\"update_id\":{{update_id}},\"message\":{\"message_id\":{{message_id}},\"from\":{\"id\":{{from_id}},\"is_bot\":false,\"first_name\":\"{{from_first_name}}\",\"username\":\"{{from_username}}\"},\"chat\":{{#if thread_kind}}{\"id\":{{chat_id}},\"type\":\"supergroup\",\"title\":\"{{chat_title}}\"}{{else}}{\"id\":{{chat_id}},\"type\":\"private\",\"first_name\":\"{{from_first_name}}\",\"username\":\"{{from_username}}\"}{{/if}},\"date\":{{msg_date}},\"text\":\"{{text}}\"{{#if thread_kind}},\"message_thread_id\":{{message_thread_id}}{{/if}} } }{{/each}}]}",
     "fixedDelayMilliseconds": 2000
   }

@@ -57,13 +57,12 @@ from .wiremock_client import (
     WiremockCorrelation,
     assert_wiremock_matrix_e2e_openai_coverage,
     assert_wiremock_transport_egress_via_state,
-    journal_has_compose_bootstrap_request,
-    journal_has_request,
     log_wiremock_correlation_journal,
     prepare_wiremock_scenario,
     wiremock_matrix_register_room,
     wiremock_matrix_unregister_room,
     wiremock_public_base,
+    wiremock_state_thread_root_list_size,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -202,13 +201,17 @@ def test_live_matrix_bridge_duplicate_skip_on_running_stack(
                 event_body="e2e matrix duplicate_skip probe",
                 room_name="E2E Matrix Dup Room",
             )
+            # Барьер «мост сделал /sync после первой регистрации» — по STATE-счётчику, НЕ по journal+stub_tag
+            # (полный отказ от stub_tag, docs §3.6.1). Bootstrap /sync-стаб статически инкрементит
+            # ``matrix_sync_calls`` (list.addLast — единственный писатель = matrix-мост, append-only safe §3.6.3).
+            sync_calls_before = wiremock_state_thread_root_list_size(base, "matrix_sync_calls")
             poll_until(
                 lambda: True
-                if journal_has_compose_bootstrap_request(base, method="GET", url_contains="/sync")
+                if wiremock_state_thread_root_list_size(base, "matrix_sync_calls") > sync_calls_before
                 else None,
                 timeout=TIMEOUT_POLL_SHORT,
                 interval=2.0,
-                desc="matrix /sync activity after first register",
+                desc="matrix /sync activity after first register (state counter)",
             )
             wiremock_matrix_register_room(
                 base,

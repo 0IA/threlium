@@ -1,5 +1,4 @@
 {
-  "id": "c4e8f2a1-9b3d-4f6e-a7c2-1d5e8f0a3b6c",
   "request": {
     "method": "POST",
     "urlPath": "/__threlium/e2e/state/standard_tasks_ledger"

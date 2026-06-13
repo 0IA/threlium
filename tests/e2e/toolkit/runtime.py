@@ -61,6 +61,20 @@ def _compose_project_containers(project_name: str) -> list[Any]:
     )
 
 
+def e2e_restart_compose_service(project_name: str, service: str, *, timeout: int = 20) -> None:
+    """``docker restart`` одного compose-сервиса (``wiremock`` / ``greenmail``) — ЧИСТЫЙ рестарт в cold-reset.
+
+    WireMock грузит bootstrap-стабы из примонтированного ``/home/wiremock/mappings`` на старте (file-load,
+    ``JsonFileMappingsSource.listFilesRecursively``, без API-upload); GreenMail in-memory → пустые ящики.
+    Так контейнер-рестарт заменяет API-чистку (journal + State + non-bootstrap mappings + greenmail flush)
+    одним атомарным шагом и БЕЗ ``stub_tag`` (изоляция = thread-root, docs §3.6). Poll-мосты переживают:
+    ``StartLimitIntervalSec=0`` в ``threlium-bridge@.service`` → self-heal-рестарт до готовности backend,
+    без permanent-fail. Вызывающий ДОЛЖЕН затем дождаться готовности (``wait_for_wiremock_ready`` /
+    ``wait_for_greenmail_ready``) перед тем, как пускать контуры."""
+    container = _compose_container(project_name, service)
+    container.restart(timeout=timeout)
+
+
 def _mapped_port(project_name: str, service: str, container_port: int) -> tuple[str, int]:
     c = _compose_container(project_name, service)
     c.reload()

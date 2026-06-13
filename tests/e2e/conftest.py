@@ -37,19 +37,19 @@ Prereq — **hard failure, не skip**. Отсутствие Linux / Docker daem
 существующими стабами/контекстами и не создают unmatched. Тяжёлая чистка
 (Maildir/notmuch/LightRAG/GreenMail) — только при провижининге стека
 (``wipe_bake.py`` / ``wipe_sync.py``), не при каждом запуске pytest.
-Дальше журнал **не** чистится автоматически — при любых
-несматченных записях падает guard в :func:`pytest_runtest_call` до и после **тела** каждого
-``tests/e2e/test_*.py`` (глобально по инстансу; без локов на сам хук и без повторного
-``DELETE /__admin/requests``; межпроцессный ``FileLock`` для WireMock Admin API —
-:func:`~tests.e2e.wiremock_client._wiremock_admin_api_exclusive`, в т.ч. вокруг
-:func:`~tests.e2e.wiremock_client.wiremock_unmatched_request_entries` для ``GET …/unmatched``).
-При истинном параллельном прогоне на общем WireMock каждый HTTP должен матчиться стабами (State +
-``X-Threlium-Route`` и узкие ``matches``), иначе журнал unmatched перестаёт быть пустым и любой воркер
-упадёт на assert — так и задумано.
+ЕДИНЫЙ режим финализации (без флагов): в teardown каждого сценарного теста — барьер слива
+(:func:`~tests.e2e.toolkit.workers.e2e_wait_fsm_and_index_drained`), затем сбор unmatched, выгрузка
+стабов, ``reset`` журнала; если НЕ слилось ИЛИ есть unmatched → ``pytest.fail`` с диагностикой
+(«что застряло» + «какие unmatched» с телами) + дозапись в файл-агрегатор (``_e2e_finalize_diag``).
+Плюс общий гейт в :func:`pytest_sessionfinish`: любой остаточный unmatched в конце прогона → прогон
+FAILED, даже если все тесты прошли. Зелёно ⟺ полный слив + ноль unmatched везде (полное покрытие
+стабами). При истинном параллельном прогоне на общем WireMock каждый HTTP должен матчиться стабами
+(State + ``X-Threlium-Route`` и узкие ``matches``) — иначе тест падает с дырой в стабах.
 
 """
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import os
 from collections.abc import Generator
@@ -84,9 +84,9 @@ from .toolkit import (
     e2e_controller_hint_cleanup,
     e2e_controller_hint_read,
     e2e_controller_hint_write,
-    e2e_flush_greenmail_inboxes,
     e2e_flush_sut_fsm_maildirs,
     e2e_install_deterministic_knowledge_corpus,
+    e2e_restart_compose_service,
     e2e_restart_threlium_engine_only,
     e2e_shared_compose_stack_is_healthy,
     e2e_start_threlium_user_pipeline_services,
@@ -94,17 +94,19 @@ from .toolkit import (
     e2e_wait_bootstrap_indexed,
     resolve_e2e_sut_image,
     run_greenmail_host_readiness_probe,
+    wait_for_greenmail_ready,
     wait_for_sut_threlium_user_workers_idle,
+    e2e_wait_fsm_and_index_drained,
+    e2e_fsm_pending_diag,
     wait_for_wiremock_ready,
 )
 from .wiremock_client import (
-    assert_wiremock_unmatched_journal_empty,
     assert_wiremock_zero_unmatched_requests,
-    reset_non_bootstrap_wiremock_mappings,
+    e2e_drain_scenario_stub_ids,
     reset_request_journal,
     upsert_wiremock_compose_bootstrap_stubs,
     wiremock_public_base,
-    wiremock_state_reset_all_contexts,
+    wiremock_unmatched_request_entries,
 )
 
 _ACTIVE_E2E_PROJECT: str | None = None
@@ -123,15 +125,13 @@ E2E_SESSIONFINISH_FAIL_DRAIN_SEC_ENV = "THRELIUM_E2E_SESSIONFINISH_FAIL_DRAIN_SE
 
 _E2E_TESTS_ROOT = Path(__file__).resolve().parent
 
-# Cold-reset: пауза между опустошением источников (WireMock State telegram_updates/matrix_rooms +
-# GreenMail) и flush Maildir. Даёт живому telegram/matrix-мосту докрутить in-flight getUpdates/sync,
-# если он уже забрал утёкший update до сброса, чтобы последующий flush убрал отравленное сообщение
-# из ingress Maildir. Мост долго-поллит, но WireMock-стаб getUpdates/sync отвечает сразу → реального
-# простоя ≈ один RTT; 5 с с запасом. См. ``_e2e_wiremock_journal_reset_once``.
-_E2E_BRIDGE_INJECT_SETTLE_SEC = 5.0
-
 _THRELIUM_E2E_WM_JOURNAL_RESET_STASH = pytest.StashKey[bool]()
 _THRELIUM_E2E_SESSION_TMP_DIR = pytest.StashKey[Path]()
+
+
+#: Файл агрегации диагностики финализации (дописывается при падении teardown-барьера) —
+#: видно гэпы по ВСЕМ тестам разом, а не только по первому упавшему. Один режим, без флагов.
+_E2E_FINALIZE_DIAG_FILE = "/tmp/e2e_finalize_diag.txt"
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -185,12 +185,16 @@ def _e2e_wiremock_journal_reset_once(
     параллельных тестов (поэтому это НЕ thrash — engine рестартует под локом, пока контуров ещё нет;
     см. [[n4-coldreset-thrash-rootcause]]):
 
-    1. ``e2e_stop_threlium_user_pipeline_services`` — снять engine + work@ + sweep@ (мосты живут);
-    2. WireMock: ``reset_request_journal`` + ``wiremock_state_reset_all_contexts`` +
-       ``reset_non_bootstrap_wiremock_mappings`` + ``upsert_wiremock_compose_bootstrap_stubs`` и
-       ``e2e_flush_greenmail_inboxes`` + settle — опустошить ИСТОЧНИКИ (State/GreenMail), пока мост
-       не переинжектил утёкший update в ingress уже ПОСЛЕ flush;
-    3. ``e2e_flush_sut_fsm_maildirs`` (engine снят) — стереть Maildir + notmuch + **весь LightRAG**
+    1. ПАРАЛЛЕЛЬНО (3 потока, разные контейнеры): ``e2e_stop_threlium_user_pipeline_services`` (снять
+       engine + work@ + sweep@, мосты живут) ‖ ``e2e_restart_compose_service(wiremock)`` ‖
+       ``e2e_restart_compose_service(greenmail)``. Контейнер-рестарт = ЧИСТЫЙ инстанс БЕЗ API-чистки и
+       БЕЗ ``stub_tag``: WireMock грузит bootstrap из mounted ``mappings/`` файлами на старте (vendored
+       ``JsonFileMappingsSource.listFilesRecursively``), journal+State пусты; GreenMail in-memory → пустые
+       ящики. Мосты self-heal на рестарте backend (``StartLimitIntervalSec=0``). Settle НЕ нужен (чистый
+       State С НУЛЯ ⇒ нет leaked-inject). Барьер: ``_stop_fut.result()`` (смерть engine-процесса → release
+       FD) ПЕРЕД flush;
+    2. ``wait_for_wiremock_ready`` + ``wait_for_greenmail_ready`` — дождаться готовности backends;
+    3. ``e2e_flush_sut_fsm_maildirs`` (engine мёртв) — стереть Maildir + notmuch + **весь LightRAG**
        (redis ``FLUSHALL`` + ``rm -rf lightrag``). КРИТИЧНО: в индекс LightRAG за прогон попадает не
        только документ из ``knowledge/``, а КАЖДОЕ обработанное письмо → без этого wipe мусор писем
        прошлого прогона переживёт сессию и исказит изоляцию;
@@ -234,27 +238,36 @@ def _e2e_wiremock_journal_reset_once(
             return
         try:
             rt = discover_runtime(pn)
-            e2e_stop_threlium_user_pipeline_services(rt)
-            # Порядок важен против отравления следующей сессии (мосты НЕ останавливаем — общий стек,
-            # параллельность). telegram/matrix-мост жив и поллит WireMock: при непустых
-            # ``telegram_updates`` / ``matrix_rooms`` (утечка прошлой сессии) он переинжектил бы update
-            # в ingress Maildir уже ПОСЛЕ flush → engine крэш-луп (ingress_distill 404, контекст очищен).
-            # Поэтому сперва опустошаем ИСТОЧНИКИ (WireMock State + GreenMail), пока engine/work/sweep
-            # сняты; затем settle на цикл поллинга моста (докрутить in-flight инжект); и только потом
-            # flush Maildir (SINK). После пустого State/GreenMail мост больше ничего не отдаёт.
-            wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            reset_request_journal(wm)
-            wiremock_state_reset_all_contexts(wm)
-            reset_non_bootstrap_wiremock_mappings(wm)
-            upsert_wiremock_compose_bootstrap_stubs(wm)
-            e2e_flush_greenmail_inboxes(rt)
-            time.sleep(_E2E_BRIDGE_INJECT_SETTLE_SEC)
-            # SINK flush (engine снят): Maildir + notmuch + ВЕСЬ LightRAG (redis FLUSHALL + rm lightrag).
-            # В индекс за прогон попадает каждое обработанное письмо — без wipe мусор писем прошлой сессии
-            # пережил бы reset и исказил изоляцию. Engine ещё стоит → cozo/lancedb локи сняты, rm безопасен.
+            wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)  # для reset_request_journal ниже
+            # ЧИСТЫЙ cold-reset РЕСТАРТАМИ КОНТЕЙНЕРОВ (вместо API-чистки + stub_tag — полный отказ от
+            # stub_tag, docs §3.6.1). Три НЕЗАВИСИМЫХ рестарта ПАРАЛЛЕЛЬНО (разные контейнеры):
+            #   • engine-stop — graceful drain rag-loop + барьер смерти ПРОЦЕССА (release FD на lightrag/);
+            #   • wiremock restart — пустой journal + State + ТОЛЬКО bootstrap-стабы из mounted
+            #     ``/home/wiremock/mappings`` (file-load на старте: vendored ``JsonFileMappingsSource``
+            #     → ``listFilesRecursively``). Нет API-upload, нет ``reset_non_bootstrap``, нет ``stub_tag``;
+            #     scenario-стабы (in-memory) пропадают — их грузит ``prepare_wiremock_scenario`` per-test;
+            #   • greenmail restart — пустые ящики (in-memory; юзеры из ``GREENMAIL_OPTS``).
+            # Poll-мосты (matrix/telegram/isomorph/email) переживают рестарт backend: в
+            # ``threlium-bridge@.service`` ``StartLimitIntervalSec=0`` → self-heal-рестарт до готовности backend,
+            # без permanent-fail. Settle НЕ нужен: чистый WireMock State (``matrix_rooms``/``telegram_updates``
+            # пусты С НУЛЯ) ⇒ никакого leaked-inject прошлой сессии. ИНВАРИАНТ (corruption-guard): flush
+            # Maildir/LightRAG (``rm -rf lightrag``) — ТОЛЬКО ПОСЛЕ полной смерти engine-процесса (иначе
+            # осиротевший inode под живым FD → битый lancedb-манифест ``Not found``). Поэтому ``join`` stop ДО flush.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _ex:
+                _stop_fut = _ex.submit(e2e_stop_threlium_user_pipeline_services, rt)
+                _wm_fut = _ex.submit(e2e_restart_compose_service, pn, "wiremock")
+                _gm_fut = _ex.submit(e2e_restart_compose_service, pn, "greenmail")
+                _stop_fut.result()  # БАРЬЕР: engine полностью мёртв (FD released) → flush безопасен.
+                _wm_fut.result()
+                _gm_fut.result()
+            # Backends подняты, bootstrap file-loaded — дождаться готовности (port+health) до flush/start.
+            wait_for_wiremock_ready(pn, timeout=TIMEOUT_POLL_SHORT)
+            wait_for_greenmail_ready(pn, timeout=TIMEOUT_POLL_SHORT)
+            # SINK flush (engine мёртв): Maildir + notmuch + ВЕСЬ LightRAG (redis FLUSHALL + rm lightrag —
+            # стор НЕ в wiremock/greenmail, а в SUT: lancedb-файлы $HOME/lightrag + Redis KV). Без wipe мусор
+            # писем прошлой сессии исказил бы изоляцию. Engine мёртв → cozo/lancedb FD+локи сняты, rm безопасен.
             e2e_flush_sut_fsm_maildirs(rt)
-            # Детерминированный корпус: запечённые 27 playbook-доков → ОДИН маленький probe из тестовых
-            # ресурсов, чтобы стартующий engine проиндексировал ровно его (engine ещё стоит, до reindex).
+            # Детерминированный корпус: запечённые 27 playbook-доков → ОДИН probe из тестовых ресурсов.
             e2e_install_deterministic_knowledge_corpus(rt)
         except Exception as e:
             # До старта engine: стек ещё снят, ничего деструктивного для параллельных контуров не сделано
@@ -314,44 +327,46 @@ def _e2e_py_file_is_scenario_module(path: Path) -> bool:
     )
 
 
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_call(item: pytest.Item) -> Generator[None, None, None]:
-    """Глобально пустой журнал ``GET /__admin/requests/unmatched`` до и после тела сценарного теста.
+def _e2e_unmatched_diag_lines(entries: list) -> list[str]:
+    """Форматирует unmatched-записи WireMock в строки диагностики: method/url/cs/tr/тело(клип).
 
-    Выполняется после setup фикстур (в т.ч. ``prepare_wiremock_scenario``) и до teardown. Сам хук не оборачивают
-    локами; опрос Admin ``GET …/unmatched`` идёт через
-    :func:`~tests.e2e.wiremock_client.wiremock_unmatched_request_entries`, где ``GET`` сериализуется
-    :func:`~tests.e2e.wiremock_client._wiremock_admin_api_exclusive` (иначе 500 WM при ``pytest -n N``).
-    При ``pytest -n N`` параллельные воркеры делят один WireMock — инвариант «unmatched пуст» держится
-    за счёт изоляции стабов (State, корреляторы), а не за счёт сериализации всего хука. Любой unmatched —
-    жёсткий fail на любом воркере; повторная полная очистка WM (журнал, маппинги, глобальный State)
-    кроме :func:`_e2e_wiremock_journal_reset_once` запрещена.
-    """
-    path = getattr(item, "path", None)
-    if path is None:
-        yield
-        return
-    p = Path(path)
-    if not _e2e_py_file_is_scenario_module(p):
-        yield
-        return
+    Тело-клип = ровно то, что нужно для написания недостающего стаба (последнее user-сообщение /
+    имена tool обычно в хвосте JSON)."""
+    lines: list[str] = []
+    for e in entries:
+        req = e.get("request", e) if isinstance(e, dict) else {}
+        hdrs = req.get("headers") or {}
+        cs = hdrs.get("X-Threlium-Call-Site") or hdrs.get("x-threlium-call-site")
+        tr = hdrs.get("X-Threlium-Thread-Root") or hdrs.get("x-threlium-thread-root")
+        body = req.get("body") or ""
+        body_clip = " ".join(body.split())[-400:] if isinstance(body, str) else ""
+        lines.append(
+            f"  {req.get('method')} {req.get('url')}  cs={cs}  tr={tr}\n    body={body_clip}"
+        )
+    return lines
 
-    pn = _ACTIVE_E2E_PROJECT
-    if not pn:
-        yield
-        return
 
+def _e2e_finalize_diag(
+    project_name: str, wm: str, *, nodeid: str, drained: bool, unmatched: list
+) -> str:
+    """Отчёт о неполной финализации теста (единый режим): «что застряло» + «какие unmatched».
+
+    Возвращает текст для ``pytest.fail`` И дописывает его в :data:`_E2E_FINALIZE_DIAG_FILE`
+    (агрегация гэпов по всем тестам разом — то, что давал прежний triage, но уже в одном режиме)."""
+    parts: list[str] = [f"E2E finalize barrier FAILED for {nodeid}:"]
+    if not drained:
+        parts.append("  [STUCK — FSM/index did not drain in time]:")
+        parts.append("    " + e2e_fsm_pending_diag(project_name).replace("\n", "\n    "))
+    if unmatched:
+        parts.append(f"  [UNMATCHED — {len(unmatched)} request(s) matched no stub = stub gap]:")
+        parts.extend(_e2e_unmatched_diag_lines(unmatched))
+    report = "\n".join(parts)
     try:
-        rt = discover_runtime(pn)
-    except Exception:
-        yield
-        return
-
-    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    nid = item.nodeid
-    assert_wiremock_unmatched_journal_empty(wm, phase=f"{nid} (before test body)")
-    yield
-    assert_wiremock_unmatched_journal_empty(wm, phase=f"{nid} (after test body)")
+        with open(_E2E_FINALIZE_DIAG_FILE, "a") as f:
+            f.write(report + "\n" + ("=" * 80) + "\n")
+    except OSError:
+        pass
+    return report
 
 
 _RUNTIME_JSON_GREENMAIL_PROBE_MID_KEY = "greenmail_readiness_probe_inner_mid"
@@ -402,14 +417,53 @@ def e2e_runtime(
 
 
 @pytest.fixture(autouse=True, scope="function")
-def _e2e_autouse_runtime(request: pytest.FixtureRequest) -> None:
-    """Для ``tests/e2e/test_*.py``: session ``compose_stack`` + per-test ``e2e_runtime``."""
+def _e2e_autouse_runtime(request: pytest.FixtureRequest) -> Generator[None, None, None]:
+    """Для ``tests/e2e/test_*.py``: session ``compose_stack`` + per-test ``e2e_runtime``.
+
+    TEARDOWN — ЕДИНЫЙ режим финализации (docs/E2E.md §6.4), без флагов/режимов:
+    1. **Барьер слива** — дождаться полной доработки продукта по письмам теста (FSM дошёл до archive →
+       egress отправлен, LLM-вызовов больше не будет + индексатор слит). Стабы ещё на месте → недо-
+       завершённый пайплайн доходит сам (само-исцеление); иначе выгрузка обрывает FSM → 500 → шторм.
+    2. **Сбор unmatched** (с телами) — что не сматчилось = дыра в стабах.
+    3. **Выгрузка** сценарных стабов (тест держит ТОЛЬКО свои + bootstrap).
+    4. **reset** журнала unmatched (чистый старт следующему тесту).
+    5. Если НЕ слилось ИЛИ есть unmatched → ``pytest.fail`` с диагностикой («что застряло» + «какие
+       unmatched» с телами) + дозапись в файл-агрегатор. Зелёно ⟺ полный слив + ноль unmatched."""
     p = getattr(request.node, "path", None)
-    if p is None:
+    is_scenario = p is not None and _e2e_py_file_is_scenario_module(Path(p))
+    if is_scenario:
+        request.getfixturevalue("e2e_runtime")
+    yield
+    if not is_scenario:
         return
-    if not _e2e_py_file_is_scenario_module(Path(p)):
-        return
-    request.getfixturevalue("e2e_runtime")
+    rt = request.getfixturevalue("e2e_runtime")
+    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
+    # 1. Барьер слива (щедрый таймаут = бюджет полного пайплайна; под xdist хелпер сам ужимает до best-effort).
+    drained = e2e_wait_fsm_and_index_drained(rt.project_name, timeout=120.0)
+    # 2. Сбор unmatched (с телами).
+    try:
+        unmatched = wiremock_unmatched_request_entries(wm)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("unmatched_collect_failed", error=repr(exc))
+        unmatched = []
+    # 3. Выгрузка стабов теста.
+    try:
+        e2e_drain_scenario_stub_ids()
+    except Exception as exc:  # noqa: BLE001
+        log.warning("scenario_stub_unload_failed", error=repr(exc))
+    # 5. Отчёт (до reset — нужны unmatched), затем reset журнала, затем падение.
+    report = None
+    if (not drained) or unmatched:
+        report = _e2e_finalize_diag(
+            rt.project_name, wm, nodeid=request.node.nodeid, drained=drained, unmatched=unmatched
+        )
+    # 4. reset журнала — всегда, чистый старт следующему тесту.
+    try:
+        reset_request_journal(wm)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("unmatched_journal_reset_failed", error=repr(exc))
+    if report is not None:
+        pytest.fail(report, pytrace=False)
 
 
 @pytest.fixture(scope="session")
@@ -627,13 +681,24 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
                         drain_sec=drain_sec,
                         exitstatus=exitstatus,
                     )
-                wait_for_sut_threlium_user_workers_idle(pn_fin, timeout=drain_sec)
-                assert_wiremock_zero_unmatched_requests(wm, wait_timeout_sec=drain_sec)
-                # Изоляцию обеспечивает state-matcher + composite_context_key
-                # (docs/E2E.md). После прогона WireMock-журнал, State и
-                # pipeline НЕ трогаем — контексты нужны для обработки стале сообщений
-                # и для пост-mortem отладки.
-                log.info("wiremock_sessionfinish_left_running")
+                try:
+                    wait_for_sut_threlium_user_workers_idle(pn_fin, timeout=drain_sec)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("sessionfinish_idle_wait_incomplete", error=repr(e))
+                # ЕДИНЫЙ режим, общий гейт: ЛЮБОЙ остаточный unmatched в конце прогона → прогон FAILED,
+                # даже если все тесты прошли (поздний async-трафик, проскочивший мимо teardown-окна).
+                try:
+                    assert_wiremock_zero_unmatched_requests(wm, wait_timeout_sec=drain_sec)
+                    log.info("wiremock_sessionfinish_left_running")
+                except Exception as e:  # noqa: BLE001
+                    try:
+                        leftover = wiremock_unmatched_request_entries(wm)
+                        diag = "\n".join(_e2e_unmatched_diag_lines(leftover)) if leftover else repr(e)
+                    except Exception:  # noqa: BLE001
+                        diag = repr(e)
+                    log.error("session_unmatched_nonempty_run_failed", diag=clip_log_body(diag))
+                    if session.exitstatus == 0:
+                        session.exitstatus = pytest.ExitCode.TESTS_FAILED
             except Exception as e:  # pragma: no cover
                 log.warning("wiremock_sessionfinish_reset_skipped", error=repr(e))
 

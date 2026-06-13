@@ -11,5 +11,18 @@
     "transformers": ["response-template"],
     "body": "{\"next_batch\":\"nb_{{randomValue length=20 type='ALPHANUMERIC'}}\",\"rooms\":{\"join\":{ {{#each (state context='matrix_rooms' property='list' default='[]')}}\"{{room_id}}\":{\"timeline\":{\"events\":[{\"type\":\"m.room.message\",\"event_id\":\"{{event_id}}\",\"sender\":\"{{sender}}\",\"origin_server_ts\":1700000000000,\"content\":{\"msgtype\":\"m.text\",\"body\":\"{{event_body}}\"}}],\"prev_batch\":\"\",\"limited\":false},\"state\":{\"events\":[{\"type\":\"m.room.name\",\"state_key\":\"\",\"event_id\":\"$name_{{@index}}\",\"sender\":\"{{sender}}\",\"origin_server_ts\":1699999999000,\"content\":{\"name\":\"{{room_name}}\"}}]},\"ephemeral\":{\"events\":[]},\"account_data\":{\"events\":[]},\"unread_notifications\":{\"notification_count\":0,\"highlight_count\":0}}{{#unless @last}},{{/unless}}{{/each}} } },\"presence\":{\"events\":[]},\"account_data\":{\"events\":[]},\"to_device\":{\"events\":[]},\"device_one_time_keys_count\":{},\"device_lists\":{\"changed\":[],\"left\":[]}}",
     "fixedDelayMilliseconds": 500
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "matrix_sync_calls",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    }
+  ]
 }

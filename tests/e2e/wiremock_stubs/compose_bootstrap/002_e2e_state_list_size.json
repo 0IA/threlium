@@ -1,5 +1,4 @@
 {
-  "id": "674826fa-13c4-577c-bcf4-ad96bd59af1d",
   "request": {
     "method": "POST",
     "urlPath": "/__threlium/e2e/state/list_size"

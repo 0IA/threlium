@@ -1,5 +1,4 @@
 {
-  "id": "ba116692-16fb-50ad-94ae-177db4b98752",
   "request": {
     "method": "POST",
     "urlPath": "/__threlium/e2e/telegram/register_update"

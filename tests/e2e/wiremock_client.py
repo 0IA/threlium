@@ -1359,23 +1359,6 @@ def journal_has_request(
     return False
 
 
-def journal_has_compose_bootstrap_request(
-    public_base: str,
-    *,
-    method: str,
-    url_contains: str,
-    timeout: float = TIMEOUT_POLL_SHORT,
-) -> bool:
-    """Журнал запросов, обслуженных ``compose_bootstrap`` (Matrix ``/sync``, Telegram ``getUpdates``, …)."""
-    return journal_has_request(
-        public_base,
-        stub_tag=THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG,
-        method=method,
-        url_contains=url_contains,
-        timeout=timeout,
-    )
-
-
 def journal_entries_for_stub_tag_with_header(
     public_base: str,
     *,
@@ -1850,6 +1833,70 @@ def teardown_wiremock_scenario(
     _ = public_base, correlation_key, stub_tag, timeout
 
 
+# Реестр SCENARIO-стаб-id'ов текущего теста — в ФАЙЛЕ per-PID (НЕ module-global): рекордер
+# (``upsert/register_wiremock_mapping_directory``) и дренер (``e2e_drain_scenario_stub_ids``, зовётся из
+# conftest autouse-фикстуры) могут оказаться в РАЗНЫХ module-объектах ``wiremock_client`` под pytest
+# import-mode (dual-import) → раздельные module-global теряют записи. Файл по ``os.getpid()`` общий для
+# рекордера и дренера (один и тот же worker-процесс), независимо от того, сколько раз импортнут модуль.
+# Каждый тест держит ТОЛЬКО свои стабы + bootstrap (file-load); накопление сценарных мапингов раздувает
+# matching, а выгрузка вскрывает ПЕРЕСЕЧЕНИЯ стабов/контекста между тестами как баги изоляции (docs §6.4, §2).
+def _e2e_scenario_stub_registry_path() -> str:
+    return f"/tmp/e2e_scenario_stub_unload_{os.getpid()}.txt"
+
+
+def _e2e_record_scenario_stub_ids(base_url: str, ids: Sequence[str]) -> None:
+    """Дописать (base_url, id'ы) в per-PID реестр для последующей per-test выгрузки."""
+    line = base_url + "\t" + ",".join(ids) + "\n"
+    try:
+        with open(_e2e_scenario_stub_registry_path(), "a") as f:
+            f.write(line)
+    except OSError as exc:  # pragma: no cover
+        log.warning("scenario_stub_record_failed", err=repr(exc))
+
+
+def remove_wiremock_mappings_by_ids(
+    base_url: str, ids: Sequence[str], *, timeout: float = TIMEOUT_POLL_SHORT
+) -> None:
+    """``DELETE /__admin/mappings/{id}`` для каждого id — точечная выгрузка сценарных стабов теста.
+
+    Best-effort: ``404`` (стаб уже снят — например соседний воркер удалил ОБЩИЙ id при ПЕРЕСЕЧЕНИИ
+    каталогов = баг изоляции, docs §6.4) логируем и продолжаем, не валим teardown."""
+    root = _normalize_wiremock_public_root(base_url)
+    with _wiremock_admin_api_exclusive(timeout=timeout):
+        for sid in ids:
+            try:
+                r = _wm_session().delete(f"{root}/__admin/mappings/{sid}", timeout=timeout)
+                if r.status_code == 404:
+                    log.debug("wiremock_stub_remove_404", stub_id=sid)
+                elif r.status_code not in (200, 204):
+                    r.raise_for_status()
+            except requests.RequestException as exc:
+                log.warning("wiremock_stub_remove_failed", stub_id=sid, err=repr(exc))
+
+
+def e2e_drain_scenario_stub_ids() -> None:
+    """Выгрузить из WireMock ВСЕ сценарные стабы, записанные в per-PID реестр; очистить реестр.
+
+    Вызов — conftest autouse-фикстурой в teardown каждого теста (см. ``_e2e_record_scenario_stub_ids``)."""
+    path = _e2e_scenario_stub_registry_path()
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+        os.unlink(path)
+    except FileNotFoundError:
+        return
+    by_base: dict[str, list[str]] = {}
+    for ln in lines:
+        if "\t" not in ln:
+            continue
+        base, ids_csv = ln.split("\t", 1)
+        ids = [i for i in ids_csv.split(",") if i]
+        if ids:
+            by_base.setdefault(base, []).extend(ids)
+    for base, ids in by_base.items():
+        remove_wiremock_mappings_by_ids(base, ids)
+
+
 def stub_tag_metadata(tag: str) -> dict[str, str]:
     """Метаданные для :func:`register_mapping` / :func:`register_wiremock_mapping_directory` (remove-by-tag)."""
     return {THRELIUM_E2E_WIREMOCK_STUB_TAG_KEY: tag}
@@ -2010,6 +2057,11 @@ def register_wiremock_mapping_directory(
     else:
         with _wiremock_admin_api_exclusive(timeout=timeout):
             _body()
+    # Регистрируем SCENARIO-стабы для per-test выгрузки (docs §6.4: тест держит ТОЛЬКО свои стабы +
+    # bootstrap; накопление сценарных мапингов за сессию раздувает matching). Bootstrap (mounted
+    # file-load) НЕ трогаем. Выгрузка — autouse-фикстурой в conftest по окончании теста.
+    if ids_out and stub_tag != THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG:
+        _e2e_record_scenario_stub_ids(base_url, ids_out)
     return ids_out
 
 
@@ -2076,6 +2128,11 @@ def upsert_wiremock_mapping_directory(
     else:
         with _wiremock_admin_api_exclusive(timeout=timeout):
             _body()
+    # Регистрируем SCENARIO-стабы для per-test выгрузки (docs §6.4: тест держит ТОЛЬКО свои стабы +
+    # bootstrap; накопление сценарных мапингов за сессию раздувает matching). Bootstrap (mounted
+    # file-load) НЕ трогаем. Выгрузка — autouse-фикстурой в conftest по окончании теста.
+    if ids_out and stub_tag != THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG:
+        _e2e_record_scenario_stub_ids(base_url, ids_out)
     return ids_out
 
 

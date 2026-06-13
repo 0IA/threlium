@@ -411,6 +411,41 @@ cold-reset следующего прогона стирает диагности
 исключения идут в `notifier()` = docker-logs, не в state) и **намеренно НЕ добавляется** (правка vendored-
 `RecordStateEventListener`). Для исключений — харнесс (п.1–2); для wiring/absent — п.4 (`'error'`) и п.5.
 
+### 3.6.5. LightRAG retrieval включён suite-wide — контракт embed-стаба + калибровка ⭐
+
+Весь e2e-сьют исторически калибровался вокруг **пустого** retrieval (причина ниже), поэтому включение
+реального retrieval — это **suite-wide** смена калибровки, а не локальная правка одного теста. Эти инварианты
+**соблюдать при любой правке embed-стабов**.
+
+- **Embed-стаб: батч-контракт (баг `@first`, найден 2026-06-12).** Стаб эмбеддингов рендерит вектор по 1536
+  измерениям через `{{#arrayJoin ',' (range 0 1535) as |d|}}…{{/arrayJoin}}` для **каждого** входа батча
+  `{{#each r.input as |txt|}}…{{/each}}`. LiteLLM/LightRAG шлёт embed **батчем** (`[query, ll_keywords,
+  hl_keywords]` на retrieval, до N чанков на index). **Ловушка:** Handlebars `@first` ВНУТРИ `arrayJoin`
+  резолвится против ВНЕШНЕГО `{{#each r.input}}`, не против итерации измерения — `{{#if @first}}<val>{{else}}0.0
+  {{/if}}` отдавал вектор только 1-му входу батча, входам 2..N — все-нули. LightRAG берёт `ll_embedding =
+  all_embeddings[1]` (2-й вход) → нулевой query-вектор → LanceDB на вырожденном векторе возвращает пусто →
+  hybrid `_build_query_context` → `None` → `generate_rag_answer` НЕ файрился. **Контракт: вектор рендерится
+  ОДИНАКОВО для всех входов батча — никакой `@first`/позиционной логики по входу.** Идиома:
+  `{{#arrayJoin ',' (range 0 1535) as |d|}}<val>{{/arrayJoin}}` (один `<val>` на каждое измерение и каждый вход).
+- **Почему включение retrieval = suite-wide.** При сломанном retrieval `generate_rag_answer` /
+  `lightrag_query_rerank` почти никогда не файрились → у большинства тестов **нет** стабов под них. Починка
+  embed'ов включает retrieval на КАЖДОМ enrich по всему сьюту → эти вызовы начинают файриться в ~70 контурах →
+  нет матча → unmatched-лавина → глобальный guard (§5) падает. **Калибровка:** generic catch-all
+  `generate_rag_answer` + `rerank` стабы в `compose_bootstrap/` (как generic KG-стабы 012/013/014), плюс
+  per-test стаб только там, где тест ассертит конкретный контент.
+- **Кросс-стаб косинус.** Векторы во ВСЕХ стабах согласованы по форме: при коллинеарных векторах cosine=1.0
+  везде (retrieval тянет top_k «всего»); при произвольно-разных может упасть ниже lightrag-дефолта
+  `cosine_better_than_threshold` (0.2) → retrieval не находит ничего. Любая попытка сделать векторы
+  **per-контент различимыми** (чтобы retrieval был точечным) обязана сохранить инвариант: вектор одного и того
+  же контента воспроизводим (query keywords ↔ indexed chunk), а cross-контент cosine > threshold там, где
+  retrieval ДОЛЖЕН найти. ⚠ **Открытый трейдофф латентности (под расследованием):** коллинеарные uniform-векторы
+  → retrieval тянет top_k «всего» → раздутый reasoning-контекст → +нагрузка на единый rag-loop → тяжёлые
+  контуры (matrix `full_contour`, `formal_reason`) рискуют не успеть за поведенческий poll. Доктрина §1/§5:
+  таймаут = скрытый стопор, не «нагрузка» — измерять стадии контура, не бампить таймаут.
+- **Retrieval-параметры** (`settings.lightrag.query_*`, дефолты): `query_top_k=40`, `query_chunk_top_k=20`,
+  `query_max_entity_tokens=6000`, `query_max_relation_tokens=8000`, `query_max_total_tokens=30000`,
+  `query_mode=hybrid`, `query_api=aquery_llm` (включает финальный `generate_rag_answer`), `enable_rerank=True`.
+
 ---
 
 ## 4. Каналы: коррелятор + транспорт
@@ -687,13 +722,14 @@ multi-turn.
   свой `openai_compatible_client.py` (замена litellm) шёл с httpx-дефолтом `follow_redirects=False` → 307 не
   следовался (не 4xx/5xx, не ретраябелен), reasoning падал на парсинге → весь 307-gate ломался. Пример —
   `test_live_telegram_wiremock_private_tail_307_second_message`.
-- **LightRAG-стор — в Redis, не в файлах.** `doc_status`/`full_docs`/`text_chunks`/`*entities*`/
-  `llm_response_cache` — ключи Redis (`$THRELIUM_HOME/lightrag/` хранит только faiss-индексы). Удаление
-  `kv_store_doc_status.json` — **no-op** (файла нет): движок видит probe как `Duplicate document` и **пропускает
-  embedding** → bootstrap-тест ловит «нет e2e-bootstrap embeddings». Для форс-переиндексации bootstrap нужен
-  `redis-cli flushall` + снос faiss; doc_status читать из Redis (`redis-cli get doc_status:*`), не из файла.
-  Reindex делает flushall + рестарт **общего** engine → модуль `test_knowledge_bootstrap_live_e2e` serial-only
-  под xdist (§5).
+- **LightRAG-стор: KV/doc_status — Redis, vector — LanceDB, graph — CozoDB (НЕ файловый JSON).**
+  `doc_status`/`full_docs`/`text_chunks`/`llm_response_cache` — ключи Redis; векторы — таблицы LanceDB в
+  `$THRELIUM_HOME/lightrag/`; граф — CozoDB. Удаление `kv_store_doc_status.json` — **no-op** (файла нет):
+  движок видит probe как `Duplicate document` и **пропускает embedding** → bootstrap-тест ловит «нет
+  e2e-bootstrap embeddings». Для форс-переиндексации bootstrap нужен `redis-cli flushall` + снос
+  `$THRELIUM_HOME/lightrag/` (LanceDB-таблицы + Cozo); doc_status читать из Redis (`redis-cli get
+  doc_status:*`), не из файла. Reindex делает flushall + рестарт **общего** engine → модуль
+  `test_knowledge_bootstrap_live_e2e` serial-only под xdist (§5).
 - **Notmuch-дедуп при повторном `/sync`** — штатно (`duplicate Message-ID, skip`).
 - **Sessionfinish после FAIL** — это **не** «зависание» runner: guard всё равно ждёт idle + пустой unmatched
   (укороченный `FAIL_DRAIN_SEC=30c`). Параллельные smoke на том же compose с runner не запускать.
@@ -724,20 +760,17 @@ multi-turn.
   либо per-doc-цикл, либо (выбранное) **body-липкий-флаг + call-site** вместо thread-root для индекс-стабов
   (коррелятор в теле, повторён в каждом чанке — `e2e_dense_threlium_ctx_body`). Прод не затронут: там корреляции нет
   (`_ainsert_plain`), смешанные батчи штатны.
-- **Vector store = Milvus Lite (serverless), НЕ faiss.** faiss не concurrent-write-safe: при `max_parallel_insert>1`
-  гонка на `faiss_index_*.tmp` → **SIGABRT движка** → рестарт общего движка каскадит на всех `-n4`. Milvus
-  сериализует запись векторов внутри стора → `max_parallel_insert=4` безопасен. Грабли интеграции: (1) **id'ы
-  ДОЛЖНЫ влезать в `VARCHAR(64)`** — lightrag-схема хардкодит поле `id`, а сырой base62-MID (~84–108) даёт
-  chunk-id 117 → `MilvusException value length exceeds max_length=64` → insert отвергнут, pipeline halted, письмо
-  не индексировано, half-state коллекции → `[Errno 17] File exists` на след. рестарте. Фикс: `_drain._lightrag_doc_id`
-  = `th-`+sha1 (короткий dedup-ключ; notmuch-трекинг отдельно через `tag_ids`). (2) **`initialize_pipeline_status()`
-  после `initialize_storages()` обязателен** — иначе shared_storage `get_data_init_lock` no-op → конкурентный
-  `create_collection` гонит. (3) Config — из `settings.lightrag.milvus_uri/db_name`; `os.environ` лишь как граница
-  `check_storage_env_vars`; `db_name` ПУСТОЙ (непустой → серверный режим pymilvus, Lite ломается); форс-импорт
-  `pymilvus.orm` ДО выставления `MILVUS_URI` (он валидирует его как HTTP при импорте). **Эмпирически:** Milvus Lite
-  **переживает reload движка** (has_collection + load_collection целы после абрупт-выхода) — File-exists был
-  ВТОРИЧЕН к id-length, boot-wipe не нужен. Qdrant-local пробовали — **отпадает** (embedded Rust-ядро не
-  concurrent-write-safe → SIGABRT, lightrag сам пишет «use server Qdrant»).
+- **Vector store = LanceDB (vector) + CozoDB (graph), НЕ faiss/Milvus/Qdrant.** Требование к стору —
+  **concurrent-write-safe** при `max_parallel_insert>1` (иначе рестарт общего движка каскадит на всех `-n4`).
+  LanceDB даёт **MVCC** (lock-free конкурентные чтения+записи, Lance-формат) и **нативный async API**
+  (`connect_async`, не блокирует event-loop); регистрация — `_construction._register_lancedb_storage`
+  (`lancedb_impl.py`), без патча вендора. Cozo — MVCC graph. **Исторический контекст (отвергнутые сторы, не
+  citing as current):** *faiss* — гонка на `faiss_index_*.tmp` → **SIGABRT** на параллельной записи; *Milvus
+  Lite* — синхронный gRPC морозил event-loop + хардкод `id VARCHAR(64)` отвергал base62-MID (>64) →
+  pipeline halt; *Qdrant-local* — embedded Rust-ядро не concurrent-write-safe → SIGABRT (lightrag сам пишет
+  «use server Qdrant»). Урок, перенесённый в LanceDB: chunk/doc-`id` — короткий dedup-ключ
+  (`_drain._lightrag_doc_id` = `th-`+sha1), notmuch-трекинг отдельно через `tag_ids`; `initialize_pipeline_
+  status()` после `initialize_storages()` обязателен (иначе shared_storage `get_data_init_lock` no-op).
 
 ---
 
