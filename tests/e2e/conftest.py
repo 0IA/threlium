@@ -424,11 +424,20 @@ def _e2e_autouse_runtime(request: pytest.FixtureRequest) -> Generator[None, None
     1. **Барьер слива** — дождаться полной доработки продукта по письмам теста (FSM дошёл до archive →
        egress отправлен, LLM-вызовов больше не будет + индексатор слит). Стабы ещё на месте → недо-
        завершённый пайплайн доходит сам (само-исцеление); иначе выгрузка обрывает FSM → 500 → шторм.
-    2. **Сбор unmatched** (с телами) — что не сматчилось = дыра в стабах.
-    3. **Выгрузка** сценарных стабов (тест держит ТОЛЬКО свои + bootstrap).
-    4. **reset** журнала unmatched (чистый старт следующему тесту).
-    5. Если НЕ слилось ИЛИ есть unmatched → ``pytest.fail`` с диагностикой («что застряло» + «какие
-       unmatched» с телами) + дозапись в файл-агрегатор. Зелёно ⟺ полный слив + ноль unmatched."""
+    2. **Выгрузка** сценарных стабов (тест держит ТОЛЬКО свои + bootstrap).
+
+    Журнал WireMock — ОБЩИЙ на инстанс (все xdist-воркеры), поэтому per-test глобальные операции над
+    ним xdist-небезопасны и здесь НЕ делаются:
+    - **reset журнала НЕ делаем** — ``DELETE /__admin/requests`` стёр бы журнал ПАРАЛЛЕЛЬНЫХ тестов
+      (их journal-ассерты → ``[]``). Чистый старт сессии даёт cold-reset РЕСТАРТОМ контейнера wiremock
+      (пустой журнал «с нуля», см. :func:`_e2e_wiremock_journal_reset_once`); per-test reset избыточен.
+    - **zero-unmatched — ЕДИНЫЙ глобальный гейт в** :func:`pytest_sessionfinish` (любой остаточный
+      unmatched в конце прогона → прогон FAILED, даже если все тесты прошли). Per-test ``GET unmatched``
+      вернул бы трафик СОСЕДЕЙ → ложный per-test FAIL под xdist, поэтому per-test не падаем на unmatched.
+
+    Per-test ``pytest.fail`` оставлен ТОЛЬКО под ``-n0`` (serial — инстанс монопольный, «не слилось»
+    атрибутируется этому тесту). Под xdist — best-effort drain-wait + выгрузка стабов, без падения;
+    глобальные инварианты проверяет sessionfinish."""
     p = getattr(request.node, "path", None)
     is_scenario = p is not None and _e2e_py_file_is_scenario_module(Path(p))
     if is_scenario:
@@ -437,32 +446,20 @@ def _e2e_autouse_runtime(request: pytest.FixtureRequest) -> Generator[None, None
     if not is_scenario:
         return
     rt = request.getfixturevalue("e2e_runtime")
-    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     # 1. Барьер слива (щедрый таймаут = бюджет полного пайплайна; под xdist хелпер сам ужимает до best-effort).
     drained = e2e_wait_fsm_and_index_drained(rt.project_name, timeout=120.0)
-    # 2. Сбор unmatched (с телами).
-    try:
-        unmatched = wiremock_unmatched_request_entries(wm)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("unmatched_collect_failed", error=repr(exc))
-        unmatched = []
-    # 3. Выгрузка стабов теста.
+    # 2. Выгрузка стабов теста (само-исцеление пайплайна выше уже отработало → обрыв FSM исключён).
     try:
         e2e_drain_scenario_stub_ids()
     except Exception as exc:  # noqa: BLE001
         log.warning("scenario_stub_unload_failed", error=repr(exc))
-    # 5. Отчёт (до reset — нужны unmatched), затем reset журнала, затем падение.
-    report = None
-    if (not drained) or unmatched:
+    # Per-test FAIL только под -n0 (serial): глобальный журнал атрибутируется этому тесту лишь когда он
+    # один на инстансе. Под xdist глобальные инварианты (unmatched + drain) — на pytest_sessionfinish.
+    if not hasattr(request.config, "workerinput") and not drained:
+        wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
         report = _e2e_finalize_diag(
-            rt.project_name, wm, nodeid=request.node.nodeid, drained=drained, unmatched=unmatched
+            rt.project_name, wm, nodeid=request.node.nodeid, drained=drained, unmatched=[]
         )
-    # 4. reset журнала — всегда, чистый старт следующему тесту.
-    try:
-        reset_request_journal(wm)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("unmatched_journal_reset_failed", error=repr(exc))
-    if report is not None:
         pytest.fail(report, pytrace=False)
 
 
