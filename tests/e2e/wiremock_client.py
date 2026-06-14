@@ -707,6 +707,17 @@ def wiremock_matrix_register_room(
 
     На общем WireMock POST сериализуется через :func:`_wiremock_admin_api_exclusive` (тот же lock, что и Admin API).
     """
+    # Unified (P)-lifecycle: register THIS injection's notmuch thread (un-hashed inner Message-ID, what
+    # `notmuch id:` keys on — NOT the sha256 thread-root) so the per-test teardown drain barrier is
+    # THREAD-SCOPED and waits for this test's OWN pipeline before unloading its (P) stubs — never a global
+    # best-effort early unload (the -n12 churn-404 → worker-crash root). See docs/E2E.md (B)/(P)
+    # stub-lifecycle + [[n12-stub-churn-404-worker-crash-root]].
+    from tests.e2e.toolkit.bridges.matrix import e2e_matrix_nm_inner_for_sync_event
+    from tests.e2e.toolkit.workers import e2e_record_test_drain_thread
+
+    e2e_record_test_drain_thread(
+        e2e_matrix_nm_inner_for_sync_event(room_id=room_id, event_id=event_id)
+    )
     root = _normalize_wiremock_public_root(public_base)
     url = f"{root}/__threlium/e2e/matrix/register_room"
     with _wiremock_admin_api_exclusive(timeout=timeout):
@@ -765,6 +776,19 @@ def wiremock_telegram_register_update(
     ``thread_kind`` — непустая строка для forum topic (ветка supergroup + ``message_thread_id`` в
     ``031_telegram_get_updates.json``); пустая — личка.
     """
+    # Unified (P)-lifecycle: register THIS injection's notmuch thread (un-hashed inner Message-ID, what
+    # `notmuch id:` keys on — NOT the sha256 thread-root) so the per-test teardown drain barrier is
+    # THREAD-SCOPED and waits for this test's OWN pipeline before unloading its (P) stubs — never a global
+    # best-effort early unload (the -n12 churn-404 → worker-crash root). See docs/E2E.md (B)/(P)
+    # stub-lifecycle + [[n12-stub-churn-404-worker-crash-root]].
+    from tests.e2e.toolkit.bridges.telegram import e2e_telegram_nm_inner_for_message
+    from tests.e2e.toolkit.workers import e2e_record_test_drain_thread
+
+    e2e_record_test_drain_thread(
+        e2e_telegram_nm_inner_for_message(
+            chat_id=chat_id, message_id=message_id, message_thread_id=message_thread_id
+        )
+    )
     root = _normalize_wiremock_public_root(public_base)
     url = f"{root}/__threlium/e2e/telegram/register_update"
     mtid = 0 if message_thread_id is None else int(message_thread_id)

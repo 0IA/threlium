@@ -19,14 +19,29 @@ def e2e_matrix_thread_root_mid_for_sync_event(*, room_id: str, event_id: str) ->
     продукт кладёт в заголовок ``thread_root_hash`` от этого же inner-``Message-ID`` (LiteLLM / WireMock
     State ``correlation_key``), поэтому тест считает тот же хэш.
     """
+    inner = _matrix_message_id_inner(room_id=room_id, event_id=event_id)
+    return thread_root_hash(inner.as_angle_bracket_header())
+
+
+def _matrix_message_id_inner(*, room_id: str, event_id: str) -> NotmuchMessageIdInner:
     native = MatrixNativeId(
         v=1,
         room_id=MatrixRoomId(room_id.strip()),
         event_id=MatrixRoomEventId(event_id.strip()),
     )
-    mid_wire = RfcMessageIdWire.from_native(native)
-    inner = NotmuchMessageIdInner.from_present_wire(mid_wire)
-    return thread_root_hash(inner.as_angle_bracket_header())
+    return NotmuchMessageIdInner.from_present_wire(RfcMessageIdWire.from_native(native))
+
+
+def e2e_matrix_nm_inner_for_sync_event(*, room_id: str, event_id: str) -> str:
+    """UN-hashed inner ``Message-ID`` (``notmuch id:``-форма) корня matrix-треда.
+
+    Отличается от :func:`e2e_matrix_thread_root_mid_for_sync_event` (возвращает ``thread_root_hash`` =
+    sha256 = ``X-Threlium-Thread-Root`` / WireMock ``correlation_key`` для гейтинга стабов). Здесь — то,
+    по чему ``notmuch search id:`` находит входящее письмо после моста. Нужен для регистрации drain-треда
+    (:func:`e2e_record_test_drain_thread`): по хэшу ``notmuch id:`` не резолвится → global fallback. См.
+    [[n12-stub-churn-404-worker-crash-root]] + docs/E2E.md (B)/(P) stub-lifecycle.
+    """
+    return _matrix_message_id_inner(room_id=room_id, event_id=event_id).value
 
 
 def e2e_matrix_generate_room_ids() -> tuple[str, str]:

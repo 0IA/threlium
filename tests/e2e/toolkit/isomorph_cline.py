@@ -20,6 +20,7 @@ import base64
 import datetime
 import hashlib
 import json
+import re
 import shlex
 from pathlib import Path
 
@@ -87,6 +88,38 @@ def thread_root_from_body(surface: IsomorphApiSurface, body: dict[str, object]) 
     Для прямых HTTP-тестов (тест сам владеет телом → тривиальный предвычет, без Cline/даты/шаблона).
     Возвращает каноничную RFC-форму ``<...@localhost>`` — ключ контекста WireMock-стабов."""
     return ingress_message_id(parent_value="", tail_body=parse_history(surface, body).tail_body).value
+
+
+def e2e_isomorph_nm_inner_for_body(surface: IsomorphApiSurface, body: dict[str, object]) -> str:
+    """UN-hashed inner ``Message-ID`` (``notmuch id:``-форма) ingress-хода isomorph из тела запроса.
+
+    Отличается от :func:`thread_root_from_body` (каноничный ``<...@localhost>``) только снятием угловых
+    скобок — это РОВНО то, по чему ``notmuch search id:`` находит вставленное письмо (assert-инвариант
+    ``nm_oldest_message_id == thread_root.strip("<>")`` в isomorph-тестах). Нужен для регистрации
+    drain-треда (:func:`e2e_record_test_drain_thread`), чтобы per-test teardown-барьер был thread-scoped,
+    а не глобальный best-effort с ранней выгрузкой (P)-стабов (корень -n12 churn-404). См.
+    [[n12-stub-churn-404-worker-crash-root]] + docs/E2E.md (B)/(P) stub-lifecycle.
+    """
+    return thread_root_from_body(surface, body).strip("<>").strip()
+
+
+def _register_isomorph_drain_for_body(surface: IsomorphApiSurface, body: dict[str, object]) -> None:
+    from .workers import e2e_record_test_drain_thread  # noqa: PLC0415
+
+    e2e_record_test_drain_thread(e2e_isomorph_nm_inner_for_body(surface, body))
+
+
+def _register_isomorph_drain_inner(inner: str) -> None:
+    from .workers import e2e_record_test_drain_thread  # noqa: PLC0415
+
+    e2e_record_test_drain_thread((inner or "").strip().strip("<>").strip())
+
+
+def _register_isomorph_drain_from_prompt(prompt: str) -> None:
+    """Зарегистрировать drain-тред Cline-инъекции по ``E2E_MID:<...>``-токену в промпте (explicit-root)."""
+    m = re.search(r"E2E_MID:<([^>]+)>", prompt or "")
+    if m:
+        _register_isomorph_drain_inner(m.group(1))
 
 
 def precompute_isomorph_thread_root(
@@ -268,7 +301,11 @@ def start_cline_background(
     rt: E2EComposeRuntime, *, provider: str, data_dir: str, cwd: str, out_path: str, prompt: str,
     cli_timeout_sec: int = 120, task_timeout_sec: int = 110,
 ) -> None:
-    """``nohup``-фоновый headless Cline (`-y --json`) на мост; вывод (включая SSE-ответ) — в ``out_path``."""
+    """``nohup``-фоновый headless Cline (`-y --json`) на мост; вывод (включая SSE-ответ) — в ``out_path``.
+
+    Unified (P)-lifecycle: регистрирует drain-тред инъекции по explicit-root токену ``E2E_MID:<...>`` в
+    промпте (un-hashed inner ingress-MID) → teardown drain-барьер thread-scoped (корень -n12 churn-404)."""
+    _register_isomorph_drain_from_prompt(prompt)
     sut_exec(
         rt,
         f"rm -f {shlex.quote(out_path)}; nohup timeout {cli_timeout_sec} cline -y --json "
@@ -292,7 +329,11 @@ def bridge_post_json(
     Мост держит соединение, пока FSM не отработает и egress не запушит, затем возвращает финальный JSON
     (ветка ``_await_json``). Возвращает ``(http_status, response_text)``. Тело передаём base64 → ``base64 -d``
     → ``curl --data-binary @-`` (без хрупкого shell-эскейпинга JSON); auth-заголовок per-surface
-    (Anthropic — ``x-api-key``, OpenAI — ``Authorization: Bearer``)."""
+    (Anthropic — ``x-api-key``, OpenAI — ``Authorization: Bearer``).
+
+    Unified (P)-lifecycle: регистрирует notmuch-тред этой инъекции (un-hashed inner ingress-MID) →
+    per-test teardown drain-барьер thread-scoped (корень -n12 churn-404, см. docs/E2E.md (B)/(P))."""
+    _register_isomorph_drain_for_body(surface, body)
     raw = json.dumps(body)
     b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
     auth = (
@@ -319,7 +360,11 @@ def bridge_post_sse(
     """``stream:true`` POST в мост ИЗНУТРИ SUT (loopback), читаем СЫРОЙ SSE-поток (``curl -N``).
 
     Возвращает сырой текст потока (event/data-кадры) для побайтовой проверки wire-схемы вендора —
-    независимо от толерантности реального Cline. Тело — base64 → ``curl --data-binary @-``."""
+    независимо от толерантности реального Cline. Тело — base64 → ``curl --data-binary @-``.
+
+    Unified (P)-lifecycle: регистрирует notmuch-тред инъекции (un-hashed inner ingress-MID) →
+    teardown drain-барьер thread-scoped (корень -n12 churn-404)."""
+    _register_isomorph_drain_for_body(surface, body)
     raw = json.dumps(body)
     b64 = base64.b64encode(raw.encode("utf-8")).decode("ascii")
     auth = (
@@ -365,7 +410,10 @@ def bridge_post_json_with_pushed_error(
     Мост резолвит held-запрос ОШИБКОЙ раньше, чем доедет FSM (~30c) → проверяем error-envelope (500 + тело
     ошибки вендора). ``corr`` — inner-форма ingress-MID (как мост: :func:`e2e_explicit_root_corr`); тело несёт
     тот же ``E2E_MID:<...>``, поэтому мост регистрирует pending именно под ``corr``. Один ``sut_exec``:
-    фоновый запрос → sleep → push → ``wait`` → печать ответа held-запроса."""
+    фоновый запрос → sleep → push → ``wait`` → печать ответа held-запроса.
+
+    Unified (P)-lifecycle: ``corr`` уже inner-форма ingress-MID → регистрируем drain-тред напрямую."""
+    _register_isomorph_drain_inner(corr)
     b64 = base64.b64encode(json.dumps(body).encode("utf-8")).decode("ascii")
     auth = (
         f"-H 'x-api-key: {api_key}'"

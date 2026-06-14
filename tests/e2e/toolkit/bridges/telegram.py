@@ -42,12 +42,42 @@ def e2e_telegram_thread_root_mid_for_message(
 
     Совпадает с :mod:`threlium.bridges.telegram` (``RfcMessageIdWire.from_native(TelegramNativeId(…))``).
     """
+    inner = _telegram_message_id_inner(
+        chat_id=chat_id, message_id=message_id, message_thread_id=message_thread_id
+    )
+    return thread_root_hash(inner.as_angle_bracket_header())
+
+
+def _telegram_message_id_inner(
+    *,
+    chat_id: int,
+    message_id: int,
+    message_thread_id: int | None,
+) -> NotmuchMessageIdInner:
     native = TelegramNativeId(
         v=1,
         chat_id=chat_id,
         message_id=message_id,
         message_thread_id=message_thread_id,
     )
-    mid_wire = RfcMessageIdWire.from_native(native)
-    inner = NotmuchMessageIdInner.from_present_wire(mid_wire)
-    return thread_root_hash(inner.as_angle_bracket_header())
+    return NotmuchMessageIdInner.from_present_wire(RfcMessageIdWire.from_native(native))
+
+
+def e2e_telegram_nm_inner_for_message(
+    *,
+    chat_id: int,
+    message_id: int,
+    message_thread_id: int | None,
+) -> str:
+    """UN-hashed inner ``Message-ID`` (``notmuch id:``-форма) корня telegram-треда.
+
+    Отличается от :func:`e2e_telegram_thread_root_mid_for_message`, который возвращает
+    ``thread_root_hash`` (sha256, = ``X-Threlium-Thread-Root`` / WireMock ``correlation_key``, для
+    гейтинга стабов). Здесь — то, по чему ``notmuch search id:`` находит входящее письмо после моста
+    (``RfcMessageIdWire.from_native(TelegramNativeId(…))`` → indexed inner). Нужен для регистрации
+    drain-треда (:func:`e2e_record_test_drain_thread`): по хэшу ``notmuch id:`` не резолвится → global
+    fallback. См. [[n12-stub-churn-404-worker-crash-root]] + docs/E2E.md (B)/(P) stub-lifecycle.
+    """
+    return _telegram_message_id_inner(
+        chat_id=chat_id, message_id=message_id, message_thread_id=message_thread_id
+    ).value

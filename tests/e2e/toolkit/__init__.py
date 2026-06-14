@@ -21,10 +21,12 @@ from .bridges.email import (
 )
 from .bridges.matrix import (
     e2e_matrix_generate_room_ids,
+    e2e_matrix_nm_inner_for_sync_event,
     e2e_matrix_thread_root_mid_for_sync_event,
 )
 from .bridges.telegram import (
     e2e_telegram_generate_update_bundle,
+    e2e_telegram_nm_inner_for_message,
     e2e_telegram_thread_root_mid_for_message,
 )
 from .cleanup import (
