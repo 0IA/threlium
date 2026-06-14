@@ -271,10 +271,16 @@ helper `state` (чтение текущего контекста). То есть
   `'lightrag_index' in call_sites` (заменил `docker exec stat` глобального faiss — тот под `-n2` голодал на
   конкуренции docker-exec, см. §9). Терминальные стадии без LLM (`egress_router`/`egress_email`/`archive`)
   подтверждаются **ответным письмом GreenMail**, а не стабом.
-- **Идеал (финальная фаза):** полный уход от `stub_tag` и `THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG`.
-  `id` запекается статически в каждый стаб; cold-reset `reset_non_bootstrap` оставляет по **множеству id
-  bootstrap-каталога** (а не по тегу); метаданные `stub_tag` исчезают вместе с journal-поиском. Итог: чистая
-  статика стабов + state-extension, изоляция только по thread-root, наружу — только GreenMail+WireMock.
+- **Идеал (финальная фаза) — РЕАЛИЗУЕТСЯ через §3.6.6, НЕ через наивный «снять префикс + грузить всё».**
+  ⚠ Прямой «drop `{stub_tag}::` + load-all-dirs» доказан ВНУТРЕННЕ ПРОТИВОРЕЧИВЫМ: один и тот же call-site
+  (напр. `075_chat_ingress_distill`) лежал в десятках каталогов, развязанных ТОЛЬКО композитным префиксом;
+  снять префикс + накопить → N-кратный match (предикат `hasContext` проверяет лишь существование контекста).
+  **Рабочий путь — слияние дублированных call-site в один статический generic-bootstrap-стаб с ПОЗИТИВНЫМ
+  гейтом `hasContext(thread-root)+property active==1` (§3.6.6).** По мере слияния call-site'ов исчезает
+  per-test churn (и его `404`-окно), а `stub_tag` ретайрится **инкрементально, где вытеснен generic'ом**
+  (контент-зависимые opt-out-стабы законно держат композитный `hasContext` — полный tag-free это далёкий
+  end-state, не big-bang). Итог-вектор тот же: статика стабов + state-extension, изоляция по thread-root,
+  наружу — только GreenMail+WireMock.
 
 ### 3.6.2. Проверка СОДЕРЖИМОГО — content-flags (а не журнал, не bodyPatterns+guard) ⭐
 
@@ -445,6 +451,53 @@ cold-reset следующего прогона стирает диагности
 - **Retrieval-параметры** (`settings.lightrag.query_*`, дефолты): `query_top_k=40`, `query_chunk_top_k=20`,
   `query_max_entity_tokens=6000`, `query_max_relation_tokens=8000`, `query_max_total_tokens=30000`,
   `query_mode=hybrid`, `query_api=aquery_llm` (включает финальный `generate_rag_answer`), `enable_rerank=True`.
+
+### 3.6.6. Слияние дублированного call-site в ОДИН generic-bootstrap-стаб (позитивная фильтрация) ⭐⭐
+
+**Проверенный шаблон детега (commit `7117065`, валидирован `-n4`).** Когда один и тот же call-site
+реализован **дублированными per-test стабами** с одинаковым (или boilerplate) ответом — это источник
+flake под нагрузкой. Пример: `ingress_distill` лежал в 51 каталоге; ответы структурно идентичны (различался
+лишь `user_intent`/`reply_language`, нигде не ассертится). Per-test стаб на ОБЩИЙ call-site означает, что
+каждый тест **ре-апсертит** (WireMock `editMapping` = remove+add окно) и per-test **выгружает** его; под
+`-n4` in-flight вызов соседа ловит окно отсутствия → `404` → краш воркера (`Restart=no`) → застряло
+`unread` → нет ответа GreenMail → reply-timeout. Это и был доказанный корень flake `lightrag_correlator`
+(3 теста делят `LIGHTRAG_INTEGRITY_SPEC`).
+
+**Решение — слить дубли в ОДИН статический стаб в `compose_bootstrap/`** (грузится однократно за сессию,
+никогда не churn'ится — как существующие generic 011/012/013/014/015). Развязка и изоляция — **строго
+позитивная**:
+
+- **Гейт стаба** = заголовок-контракт продукта `X-Threlium-Call-Site: <site>` + state-matcher
+  `hasContext({{request.headers.[X-Threlium-Thread-Root]}})` + `property { active: { equalTo: "1" } }`.
+- **`prepare_wiremock_scenario` сеет ЧИСТЫЙ thread-root** контекст (`active=1`) для **opt-in** сценариев.
+  Call-site recorder создаёт этот контекст лишь **во время обслуживания** (слишком поздно для матчера на
+  ПЕРВОМ вызове), поэтому выделенный флаг `active` (который recorder НЕ ставит) — чистый позитивный
+  дискриминатор «тест активен и хочет generic».
+- **Opt-out — АВТОМАТИЧЕСКИЙ, без per-test учёта:** каталог, несущий СВОЙ `*<site>*`-стаб, сам обслуживает
+  этот call-site и НЕ сеется `active=1` → generic-стаб остаётся инертным (нет double-match). Так
+  **контент-зависимые** ответы держат свой стаб: distill, чей `user_intent`/размер реально рулит контуром —
+  summarize (filler→overflow), fsm (initial+recovery), context-trim (warmup/turn2), live-маршруты
+  cli/subagent/memory/reflect/hitl (`user_intent` выбирает спец-маршрут), а также isomorph/telegram/matrix
+  (свой prepare-path, `active=1` не сеют). `recordState` пишет call-site в thread-root контекст как и
+  раньше → `call_sites`-ассерты не меняются.
+
+**HARD-ПРАВИЛА развязки (почему именно так, а не иначе) — нормативны:**
+1. **НЕТ `priority` нигде** (включая `compose_bootstrap/`): порядок-по-числу ≠ disjoint-state, делает
+   параллельный матчинг непредсказуемым (см. §3.3). Инвариант: `rg '"priority"' tests/e2e/wiremock_stubs` → пусто.
+2. **НЕТ `hasNotProperty`** для развязки generic↔спец-стаб: ведёт к **комбинаторному взрыву** (generic
+   пришлось бы перечислять КАЖДЫЙ спец-случай). Только позитивный opt-in (`property active==1`).
+3. **НЕТ cross-test `doesNotContain`** (допустим лишь между фазами ОДНОГО сценария, §3.3).
+4. **НЕ матчить по jinja2-генерируемым частям тела** запроса (промпт меняется при правках продукта → хрупко,
+   §3.6.2). Матчить только по тому, что **контролирует тест** (письма, тела LLM-ответов, засеянный state) +
+   заголовок-контракт `X-Threlium-Call-Site`.
+5. **Файлы стабов статические, БЕЗ jinja2-генерации** файлов. Но WireMock `response-template` (Handlebars
+   ВНУТРИ статического стаба) — **разрешён и ключевой** (echo/`state`/`regexExtract`), это не генерация файла.
+
+**Окно `404` бьёт ТОЛЬКО по shared+churn'енным стабам.** Уникальный per-test стаб безопасен: per-test
+drain-барьер (§3.6.1 / conftest) дожидается простоя контура ПЕРЕД выгрузкой. Поэтому generic-merge —
+структурное **снятие кросс-тестового шаринга** дублированных call-site; «load-once + no per-test unload»
+нужен лишь как остаточный fallback для genuinely-shared-non-generic стабов (если такие переживут слияние),
+а НЕ как глобальный флип.
 
 ---
 
