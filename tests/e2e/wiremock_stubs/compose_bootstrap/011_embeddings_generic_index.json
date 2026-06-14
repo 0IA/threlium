@@ -8,6 +8,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "lightrag_index"
+      },
+      "X-Threlium-Thread-Root": {
+        "absent": true
       }
     }
   },

@@ -1,5 +1,4 @@
 {
-  "priority": 1,
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/embeddings|/embeddings)$",
@@ -28,6 +27,15 @@
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
           }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "e2e-bootstrap",
+        "state": {
+          "saw_match": "1"
         }
       }
     }

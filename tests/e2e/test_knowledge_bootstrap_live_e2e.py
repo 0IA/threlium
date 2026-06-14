@@ -122,10 +122,11 @@ def test_bootstrap_knowledge_called_wiremock(e2e_runtime: E2EComposeRuntime) -> 
     """B1: WireMock served the bootstrap embedding requests (thread-root e2e-bootstrap).
 
     State-assert (docs/E2E.md §3.6), NOT a journal scan. The session cold-reset bootstrap
-    reindex drives embeddings tagged ``X-Threlium-Thread-Root: e2e-bootstrap``; the generic
-    index embedding stub (011) records ``saw_match`` into the context keyed PURELY by that
-    thread-root on every serve, so the property's mere presence proves WireMock received a
-    bootstrap embedding. Unlike the cumulative request journal — a 2500-entry ring buffer that
+    reindex drives embeddings tagged ``X-Threlium-Thread-Root: e2e-bootstrap``; the bootstrap
+    embedding stub (``compose_bootstrap/006``, ``priority:1`` so it wins over the generic index
+    stub 011 for the e2e-bootstrap thread-root) records ``saw_match`` into the context keyed
+    PURELY by that thread-root on every serve, so the property's mere presence proves WireMock
+    received a bootstrap embedding. Unlike the cumulative request journal — a 2500-entry ring buffer that
     evicts the session-start bootstrap requests long before this test runs late under ``-n2`` —
     the state survives the whole session and is isolated by the unique ``e2e-bootstrap``
     correlator (§2/§3.6), so this no longer depends on journal capacity/eviction.
