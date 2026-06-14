@@ -19,9 +19,6 @@ from .diag import (
     mailflow_wait_fsm_maildir_activity,
     reset_maildrop_debug_log,
 )
-from .wiremock_assert import (
-    assert_wiremock_mailflow_zero_unmatched,
-)
 from .fixtures import (
     e2e_dense_threlium_ctx_body,
     e2e_oversized_context_trim_body,
@@ -468,9 +465,11 @@ def assert_full_mailflow_pipeline(
     mailflow_log_phase(
         f"{spec.label}: lifecycle OK via state ({len(call_sites)} call-sites, +{time.monotonic() - t0:.1f}s)"
     )
-
-    # 3. Контроль целостности WireMock (unmatched-guard, §5) — не lifecycle-assert, остаётся.
-    assert_wiremock_mailflow_zero_unmatched(
-        project, anchor_message_id=nm_inner, repo_root=REPO_ROOT
-    )
+    # УДАЛЁН per-test in-body GLOBAL unmatched-guard (assert_wiremock_mailflow_zero_unmatched): он
+    # ГЛОБАЛЕН по инстансу, но звался в КАЖДОМ mailflow-тесте mid-run → под xdist ловил ТРАНЗИЕНТНЫЙ
+    # unmatched СОСЕДНЕГО теста → ложный per-test FAIL (кросс-контаминация; correlator/cozo флак под -n4).
+    # Избыточен: (1) per-test drain-барьер в teardown — стаб-дыра, ломающая контур, не даёт письму дойти
+    # до archive → drained=False ловит per-test; (2) sessionfinish — ЕДИНЫЙ глобальный zero-unmatched gate
+    # (любой остаточный unmatched → прогон FAIL, даже если все тесты прошли). Покрытие сохранено, gate жив.
+    # См. [[e5e39eb-teardown-global-journal-xdist-regression]], [[per-test-triage-drain-barrier]].
     mailflow_log_phase(f"{spec.label}: pipeline checks OK (+{time.monotonic() - t0:.1f}s)")
