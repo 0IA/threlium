@@ -91,6 +91,7 @@ from .toolkit import (
     E2E_REPLY_BODY_SNIPPET,
     e2e_dense_threlium_ctx_body,
     e2e_greenmail_mailbox_address,
+    e2e_record_test_drain_thread,
     e2e_thread_root_mid_for_message_id,
     poll_until,
     rfc_first_message_id_in_in_reply_to_header,
@@ -370,6 +371,14 @@ def _pytest_inbox_rows(
 
 
 def _smtp_send(host: str, port: int, msg: EmailMessage) -> None:
+    # Unified (P)-lifecycle: register THIS injection's notmuch thread so the per-test teardown drain
+    # barrier (e2e_wait_fsm_and_index_drained) is THREAD-SCOPED and waits for this test's OWN pipeline to
+    # finish BEFORE unloading its (P) stubs — never a global best-effort early unload (the -n12 churn-404 →
+    # worker-crash root). nm_inner == the injected Message-ID inner (notmuch indexes the ingress mail by it).
+    # See docs/E2E.md (B)/(P) stub-lifecycle API + [[n12-stub-churn-404-worker-crash-root]].
+    mid = (msg.get("Message-ID") or "").strip().strip("<>").strip()
+    if mid:
+        e2e_record_test_drain_thread(mid)
     e2e_smtp_send(host, port, msg, timeout=float(TIMEOUT_POLL_SHORT))
 
 

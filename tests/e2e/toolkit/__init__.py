@@ -124,6 +124,7 @@ from .wiremock_assert import (
 )
 from .workers import (
     e2e_fsm_pending_diag,
+    e2e_record_test_drain_thread,
     e2e_wait_fsm_and_index_drained,
     wait_for_sut_threlium_user_workers_idle,
 )

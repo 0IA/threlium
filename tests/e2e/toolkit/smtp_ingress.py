@@ -14,6 +14,7 @@ from tests.e2e.sut_user_systemd import (
 from .constants import E2E_REMOTE_POSIX_HOME, REPO_ROOT, TIMEOUT_POLL_SHORT
 from .greenmail import wait_for_greenmail_ready
 from .poll import _diag
+from .workers import e2e_record_test_drain_thread
 
 def smtp_inject_inbound(
     project_name: str,
@@ -25,8 +26,17 @@ def smtp_inject_inbound(
     body: str | None = None,
     in_reply_to: str | None = None,
 ) -> None:
-    """Отправляет письмо в GreenMail по SMTP с хоста pytest (localhost:mapped_port)."""
+    """Отправляет письмо в GreenMail по SMTP с хоста pytest (localhost:mapped_port).
+
+    Unified (P)-lifecycle: регистрирует notmuch-тред этой инъекции (``message_id`` inner), чтобы per-test
+    teardown drain-барьер был THREAD-SCOPED и ждал завершения СВОЕГО пайплайна ПЕРЕД выгрузкой (P)-стабов
+    теста — не глобальный best-effort с ранней выгрузкой (корень -n12 churn-404 → краш воркера). См.
+    docs/E2E.md (B)/(P) stub-lifecycle + [[n12-stub-churn-404-worker-crash-root]].
+    """
     del checkout
+    inner = (message_id or "").strip().strip("<>").strip()
+    if inner:
+        e2e_record_test_drain_thread(inner)
     started = time.monotonic()
     _diag("smtp inject start")
     root = repo_root or REPO_ROOT
