@@ -435,6 +435,61 @@ def wiremock_state_thread_root_call_sites(
     return [str(x) for x in cs] if isinstance(cs, list) else []
 
 
+def wiremock_state_all_context_names(
+    public_base: str, *, timeout: float = TIMEOUT_POLL_SHORT
+) -> list[str]:
+    """ВСЕ имена контекстов State-extension на инстансе (Admin ``GET /state-extension/contexts``).
+
+    Диагностика для ассертов state (видно: существует ли ожидаемый контекст вообще, не снесён ли
+    кросс-тестом, какие соседние контексты живут). Имена возвращаются без значений — безопасно при
+    спецсимволах thread-root (в отличие от ``GET /contexts/{name}``, см. §3.5)."""
+    root = _normalize_wiremock_public_root(public_base)
+    url = f"{root}/__admin/state-extension/contexts"
+    try:
+        r = _wm_session().get(url, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+    except (ValueError, AttributeError, OSError) as exc:  # noqa: BLE001
+        log.warning("wiremock_state_contexts_list_failed", err=repr(exc))
+        return []
+    if isinstance(data, list):
+        return [str(x) for x in data]
+    if isinstance(data, dict):
+        return [str(x) for x in (data.get("contexts") or data.keys())]
+    return []
+
+
+def wiremock_state_dump_contexts(
+    public_base: str, *, max_contexts: int = 60, timeout: float = TIMEOUT_POLL_SHORT
+) -> dict[str, dict[str, Any]]:
+    """Снимок ВСЕХ контекстов State-extension: ``{name: {"properties": {...}, "list_len": N}}``.
+
+    Диагностика эфемерного стаб-состояния на падении drain-барьера: properties = **липкие флаги**
+    (``saw_match`` и пр.), ``list_len`` = длина append-only списка (call-sites/hits). Видно, создан ли
+    ожидаемый контекст, какие флаги выставлены, не снесён/не перетёрт ли кросс-тестом. Best-effort: Admin
+    ``GET /contexts/{name}`` ломается на спецсимволах имени (``::``/``<``/``>``/``@``, §3.5) — такие
+    контексты пропускаем (``_err``). НЕ для ассертов — только для diag."""
+    root = _normalize_wiremock_public_root(public_base)
+    out: dict[str, dict[str, Any]] = {}
+    for name in wiremock_state_all_context_names(public_base, timeout=timeout)[:max_contexts]:
+        try:
+            from urllib.parse import quote  # noqa: PLC0415
+
+            r = _wm_session().get(
+                f"{root}/__admin/state-extension/contexts/{quote(name, safe='')}", timeout=timeout
+            )
+            r.raise_for_status()
+            d = r.json()
+            lst = d.get("list")
+            out[name] = {
+                "properties": d.get("properties") or {},
+                "list_len": len(lst) if isinstance(lst, list) else 0,
+            }
+        except (ValueError, AttributeError, OSError) as exc:  # noqa: BLE001
+            out[name] = {"_err": repr(exc)[:80]}
+    return out
+
+
 def wiremock_state_thread_root_reply_targets(
     public_base: str, correlation_key: str, *, timeout: float = TIMEOUT_POLL_SHORT
 ) -> list[int]:

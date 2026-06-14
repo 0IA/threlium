@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tests.e2e.log import clip_log_body, log
 from tests.e2e.sut_user_systemd import (
+    E2E_THRELIUM_USER,
     e2e_sut_threlium_user_workers_idle_probe_bash,
     e2e_sut_threlium_user_workers_stall_diag_bash,
 )
@@ -251,7 +252,11 @@ def e2e_fsm_pending_diag(project_name: str, *, repo_root: Path | None = None) ->
       • ``X-Threlium-Route`` / ``X-Threlium-Thread-Root`` / ``X-Threlium-Irt-Hash`` (корреляторы);
       • строки тела с маркером теста (``e2e …`` / ``E2E_MID:`` / ``MARKER``) — прямой указатель на сценарий.
     Это «что застряло» из отчёта о падении teardown-барьера (см. conftest ``_e2e_autouse_runtime``)."""
+    from threlium.lightrag_drain_query import lightrag_drain_pending_search  # noqa: PLC0415
+
     root = repo_root or REPO_ROOT
+    pending_index_q = lightrag_drain_pending_search()
+    u = E2E_THRELIUM_USER
     script = (
         f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; "
         'Q="tag:unread AND NOT folder:archive/Maildir"; '
@@ -261,7 +266,16 @@ def e2e_fsm_pending_diag(project_name: str, *, repo_root: Path | None = None) ->
         'notmuch show --body=true --format=text "$Q" 2>/dev/null '
         '| grep -aiE "^(Subject|From|To|Message-ID|In-Reply-To|X-Threlium-Route|'
         'X-Threlium-Thread-Root|X-Threlium-Irt-Hash):|e2e[ _:-]|E2E_MID|marker" '
-        '| head -50'
+        '| head -50; '
+        # Эфемерное (idx-сторона drain): какие письма ещё НЕ слиты индексатором (lightrag pending).
+        f'echo "-- lightrag index-pending (count + summary) --"; '
+        f'notmuch count {shlex.quote(pending_index_q)} 2>/dev/null; '
+        f'notmuch search --output=summary --format=text {shlex.quote(pending_index_q)} 2>/dev/null | head -10; '
+        # Эфемерное: упавшие work@/sweep@ (краш стадии FSM = главная причина застревания tag:unread).
+        'echo "-- failed work@/sweep@ units --"; '
+        f'uid=$(id -u {u}); '
+        f'runuser -u {u} -- env XDG_RUNTIME_DIR=/run/user/$uid systemctl --user list-units '
+        "'threlium-work@*' 'threlium-sweep@*' --state=failed --no-legend 2>/dev/null | head -20"
     )
     try:
         r = service_exec(

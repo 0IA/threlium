@@ -42,6 +42,7 @@ from .toolkit import (
 from .toolkit.constants import TIMEOUT_POLL_SHORT
 from .wiremock_client import (
     wiremock_public_base,
+    wiremock_state_all_context_names,
     wiremock_state_thread_root_call_sites,
 )
 
@@ -130,10 +131,15 @@ def _assert_lightrag_call_sites_correlated(
     except TimeoutError:
         present = set(wiremock_state_thread_root_call_sites(wm_base, correlation_key))
         missing = want - present
+        # Диагностика: ВСЕ контексты state — видно, существует ли целевой контекст вообще (не снесён ли
+        # кросс-тестом / не пустой ли append-only global), какие соседние живут. Без этого «missing» неотличим
+        # от «контекст не создан».
+        all_ctx = wiremock_state_all_context_names(wm_base)
         raise AssertionError(
             "LightRAG call-sites missing from thread-root state (correlator lost/scrambled "
             f"through wrapper): {sorted(missing)}. present={sorted(present)}; "
-            f"correlation_key={correlation_key!r}"
+            f"correlation_key={correlation_key!r}; context_exists={correlation_key in all_ctx}; "
+            f"all_state_contexts({len(all_ctx)})={sorted(all_ctx)}"
         ) from None
     log.info("lightrag_correlator_integrity_ok", present=sorted(present))
 

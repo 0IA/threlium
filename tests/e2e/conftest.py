@@ -106,6 +106,7 @@ from .wiremock_client import (
     reset_request_journal,
     upsert_wiremock_compose_bootstrap_stubs,
     wiremock_public_base,
+    wiremock_state_dump_contexts,
     wiremock_unmatched_request_entries,
 )
 
@@ -357,6 +358,16 @@ def _e2e_finalize_diag(
     if not drained:
         parts.append("  [STUCK — FSM/index did not drain in time]:")
         parts.append("    " + e2e_fsm_pending_diag(project_name).replace("\n", "\n    "))
+        # Дамп ВСЕХ контекстов State-extension + их properties (липкие флаги saw_*) + list_len (call-sites/
+        # hits): видно, какие стаб-состояния живут (создан ли ожидаемый контекст, какие флаги, не снесён/не
+        # перетёрт ли кросс-тестом) — частая причина «не слилось» = дыра/гонка в стабах, а не нагрузка.
+        try:
+            ctx = wiremock_state_dump_contexts(wm)
+            parts.append(f"    [STATE contexts ({len(ctx)})]:")
+            for name in sorted(ctx):
+                parts.append(f"      {name}: {ctx[name]}")
+        except Exception as exc:  # noqa: BLE001
+            parts.append(f"    [STATE contexts: dump failed: {exc!r}]")
     if unmatched:
         parts.append(f"  [UNMATCHED — {len(unmatched)} request(s) matched no stub = stub gap]:")
         parts.extend(_e2e_unmatched_diag_lines(unmatched))
