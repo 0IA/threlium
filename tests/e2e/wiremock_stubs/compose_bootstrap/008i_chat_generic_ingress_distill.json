@@ -1,4 +1,7 @@
 {
+  "metadata": {
+    "threlium_stub_tag": "generic-ingress-distill"
+  },
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
@@ -7,21 +10,15 @@
         "equalTo": "ingress_distill"
       }
     },
-    "bodyPatterns": [
-      {
-        "matches": "(?s).*(openai/threlium_e2e_l0|threlium_e2e_l0).*"
-      },
-      {
-        "contains": "\"tools\""
-      },
-      {
-        "contains": "ingress_distill"
-      }
-    ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-formal-reason-query-01::{{request.headers.[X-Threlium-Thread-Root]}}"
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "property": {
+          "active": {
+            "equalTo": "1"
+          }
+        }
       }
     }
   },
@@ -31,7 +28,7 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-formal_reason_query-ingress-distill",
+      "id": "chatcmpl-e2e-generic-ingress-distill",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -44,11 +41,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_ingress_distill_formal_reason_query",
+                "id": "call_ingress_distill_e2e_generic",
                 "type": "function",
                 "function": {
                   "name": "ingress_distill",
-                  "arguments": "{\"user_intent\": \"E2E-FORMAL-REASON-QUERY-BODY: execute formal_reason queries.\", \"user_reply_language\": \"Russian\", \"open_gaps\": [], \"step_back_notes\": [\"Ingress distill for stub-formal-reason-query-01.\"]}"
+                  "arguments": "{\"user_intent\":\"e2e generic ingress distill: process the incoming message and continue the thread.\",\"user_reply_language\":\"Russian\",\"open_gaps\":[],\"step_back_notes\":[\"Generic e2e ingress distill; standalone thread.\"]}"
                 }
               }
             ]

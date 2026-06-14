@@ -1865,6 +1865,19 @@ def prepare_wiremock_scenario(
                 public_base, ctx_key, timeout=timeout
             )
         wiremock_state_seed_context(public_base, ctx_key, timeout=timeout)
+        # Seed the PURE thread-root context (key == X-Threlium-Thread-Root, no stub_tag prefix)
+        # with property ``active=1`` — the POSITIVE opt-in gate for generic bootstrap stubs
+        # (detag migration, docs §3.6.1). A generic stub gates ``hasContext({{thread-root}}) +
+        # property active==1``; the call-site recorder later creates the same pure context (list
+        # only, no ``active``), so the dedicated ``active`` flag is what distinguishes opt-in from
+        # opt-out — a clean positive discriminator, never hasNotProperty.
+        #
+        # Opt-out is automatic: a scenario that ships its OWN ``*ingress_distill*`` stub (e.g.
+        # multi-turn context-trim) self-serves that call-site and must NOT be seeded, else the
+        # generic stub would double-match its per-turn distill stubs. Such a dir is skipped here;
+        # its per-test stubs (hasContext composite) serve, generic stays inert (no ``active``).
+        if correlation_key != ctx_key and not any(stub_dir.glob("*ingress_distill*.json")):
+            wiremock_state_seed_context(public_base, correlation_key, timeout=timeout)
 
 
 def teardown_wiremock_scenario(
