@@ -26,10 +26,13 @@ from .toolkit import (
     E2E_BOOTSTRAP_THREAD_ROOT,
     E2E_KNOWLEDGE_PROBE_FILENAME,
     REPO_ROOT,
+    TIMEOUT_POLL_SHORT,
+    poll_until,
     service_exec,
 )
 from .wiremock_client import (
     wiremock_public_base,
+    wiremock_state_thread_root_call_sites,
     wiremock_state_thread_root_property,
 )
 
@@ -80,27 +83,30 @@ def test_knowledge_files_deployed(e2e_runtime: E2EComposeRuntime) -> None:
 
 
 def test_knowledge_docs_indexed_in_lightrag(e2e_runtime: E2EComposeRuntime) -> None:
-    """LightRAG ``doc_status`` содержит probe-документ после bootstrap.
+    """Bootstrap probe прошёл LightRAG-индексацию — state-assert по WireMock (docs/E2E.md §3.6.1), без docker-exec.
 
-    LightRAG KV/doc-status хранится в **Redis** (не в ``kv_store_doc_status.json`` — файла нет),
-    поэтому читаем значения ключей ``doc_status:*`` через ``redis-cli``: в content_summary каждой
-    записи лежит ``Subject: <filename>``.
+    Прежняя версия читала redis ``doc_status:*`` через ``service_exec`` (docker-exec ``redis-cli``); под ``-n12``
+    12 конкурентных docker-exec голодают и ``--scan`` отдаёт пусто → ложный провал (антипоттерн
+    [[no-docker-exec-journalctl-in-tests]]). Сигнал индексации, наблюдаемый снаружи: bootstrap-reindex гонит
+    embedding с ``X-Threlium-Call-Site: lightrag_index`` (детерминированный корпус = РОВНО probe), а стаб
+    ``compose_bootstrap/006`` статически пишет этот call-site в list контекста ``e2e-bootstrap``. Читаем его
+    probe-стабом ``/state/call_sites`` (HTTP, изоляция по thread-root) — ``lightrag_index`` присутствует ⟺
+    индексатор отработал probe. State (TTL 1ч) переживает позднюю проверку под ``-n12``, в отличие от
+    журнала/redis-scan.
     """
-    # Read-only: bootstrap reindex сделан в session cold-reset (conftest), здесь только читаем redis.
-    project = e2e_runtime.project_name
-    cmd = [
-        "bash",
-        "-lc",
-        "for k in $(redis-cli --scan --pattern 'doc_status:*' 2>/dev/null); do "
-        "redis-cli get \"$k\" 2>/dev/null; done",
-    ]
-    r = service_exec(project, "sut", cmd, repo_root=REPO_ROOT, timeout=30)
-    text = (r.stdout or "") + (r.stderr or "")
-    assert r.returncode == 0, f"redis doc_status unreadable: {text[:400]!r}"
-    assert E2E_KNOWLEDGE_PROBE_FILENAME in text, (
-        f"expected {E2E_KNOWLEDGE_PROBE_FILENAME!r} in redis doc_status:*; snippet={text[:500]!r}"
+    wm_base = wiremock_public_base(e2e_runtime.wiremock_host, e2e_runtime.wiremock_port)
+
+    def _indexed() -> bool | None:
+        cs = wiremock_state_thread_root_call_sites(wm_base, E2E_BOOTSTRAP_THREAD_ROOT)
+        return True if "lightrag_index" in cs else None
+
+    poll_until(
+        _indexed,
+        timeout=TIMEOUT_POLL_SHORT,
+        interval=2.0,
+        desc=f"bootstrap lightrag_index call-site in state context {E2E_BOOTSTRAP_THREAD_ROOT!r}",
     )
-    log.info("knowledge_docs_in_doc_status", doc=E2E_KNOWLEDGE_PROBE_FILENAME)
+    log.info("knowledge_docs_indexed_state", doc=E2E_KNOWLEDGE_PROBE_FILENAME)
 
 
 def test_knowledge_prompts_deployed(e2e_runtime: E2EComposeRuntime) -> None:
