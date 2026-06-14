@@ -79,31 +79,33 @@ def e2e_wait_engine_active(
     poll_until(_check, timeout=timeout, interval=2.0, desc="threlium-engine.service active")
 
 
-def bootstrap_embedding_entries(wm_base: str) -> list[dict]:
-    """WireMock journal: bootstrap embedding requests (``X-Threlium-Thread-Root: e2e-bootstrap``)."""
+def bootstrap_embedding_hit_count(wm_base: str) -> int:
+    """Сколько bootstrap-embed'ов обслужил WireMock — по **state**, без журнала и без ``stub_tag``.
+
+    Стаб ``compose_bootstrap/006_embeddings_bootstrap_knowledge`` (матчит
+    ``X-Threlium-Thread-Root: e2e-bootstrap``) статически пишет ``recordState → list.addLast`` в
+    выделенный контекст ``e2e-bootstrap`` на каждый матч (docs §3.6.1/§3.6.3 append-only: единственный
+    писатель в этот контекст → concurrency-safe, нужен лишь ``>0``). Читаем ``listSize`` probe-стабом.
+    Заменило прежний скан журнала по ``THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG`` — у смонтированных
+    ``compose_bootstrap/`` стабов нет ``threlium_e2e_stub_tag``, поэтому journal-by-tag после чистого
+    рестарта WireMock возвращал пусто → детерминированный barrier-timeout (миграция stub_tag→state).
+    """
     from tests.e2e.wiremock_client import (  # noqa: PLC0415
-        THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG,
-        journal_entries_for_stub_tag_with_header,
+        wiremock_state_thread_root_list_size,
     )
 
-    return journal_entries_for_stub_tag_with_header(
-        wm_base,
-        stub_tag=THRELIUM_WIREMOCK_COMPOSE_BOOTSTRAP_STUB_TAG,
-        header_name="X-Threlium-Thread-Root",
-        header_value=E2E_BOOTSTRAP_THREAD_ROOT,
-        url_contains="/embeddings",
-    )
+    return wiremock_state_thread_root_list_size(wm_base, E2E_BOOTSTRAP_THREAD_ROOT)
 
 
 def _wait_bootstrap_embeddings_in_wiremock(wm_base: str) -> None:
     def _seen() -> bool | None:
-        return True if bootstrap_embedding_entries(wm_base) else None
+        return True if bootstrap_embedding_hit_count(wm_base) > 0 else None
 
     poll_until(
         _seen,
         timeout=TIMEOUT_POLL_SHORT,
         interval=2.0,
-        desc=f"bootstrap embeddings (X-Threlium-Thread-Root={E2E_BOOTSTRAP_THREAD_ROOT!r})",
+        desc=f"bootstrap embeddings (state context={E2E_BOOTSTRAP_THREAD_ROOT!r})",
     )
 
 

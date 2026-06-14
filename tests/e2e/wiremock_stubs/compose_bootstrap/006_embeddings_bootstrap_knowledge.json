@@ -1,4 +1,5 @@
 {
+  "priority": 1,
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/embeddings|/embeddings)$",
@@ -17,5 +18,18 @@
       "response-template"
     ],
     "body": "{{parseJson request.body 'r'}}{\"object\":\"list\",\"model\":\"openai/threlium_e2e_embed\",\"usage\":{\"prompt_tokens\":1,\"total_tokens\":1},\"data\":[{{#each r.input as |txt|}}{{#unless @first}},{{/unless}}{\"object\":\"embedding\",\"index\":{{@index}},\"embedding\":[{{#arrayJoin ',' (range 0 1535) as |d|}}0.02{{/arrayJoin}}]}{{/each}}]}"
-  }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "e2e-bootstrap",
+        "list": {
+          "addLast": {
+            "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+          }
+        }
+      }
+    }
+  ]
 }

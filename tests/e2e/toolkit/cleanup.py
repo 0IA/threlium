@@ -97,8 +97,10 @@ fi
 # notmuch Xapian index — stale thread IDs interfere with isolation; recreated by `notmuch new`.
 rm -rf "$TH/stages/.notmuch" 2>/dev/null || true
 # LightRAG KV/doc-status теперь в Redis (localhost) — чистим вместе с файловым lightrag-каталогом,
-# иначе индекс/кэш прошлой сессии переживёт wipe и сломает изоляцию прогона.
-redis-cli flushall >/dev/null 2>&1 || true
+# иначе индекс/кэш прошлой сессии переживёт wipe и сломает изоляцию прогона. dbsize after = guard:
+# >0 = стор не очистился (engine жив / чужой redis) → caller увидит в логе sut_maildir_flush_diag.
+redis-cli flushall 2>&1 || echo "[e2e] WARN redis flushall FAILED"
+echo "[e2e] COLDRESET redis_dbsize_after=$(redis-cli dbsize 2>&1)"
 su - {E2E_THRELIUM_USER} -s /bin/bash -c {su_wrap} </dev/null || true
 echo "[e2e] SUT flushed: Maildir + lightrag(files+redis) + notmuch DB wiped, notmuch new done"
 """
@@ -108,6 +110,14 @@ echo "[e2e] SUT flushed: Maildir + lightrag(files+redis) + notmuch DB wiped, not
         ["bash", "-lc", script],
         repo_root=rt.repo_root,
         timeout=int(TIMEOUT_POLL_SHORT),
+    )
+    # COLDRESET_DIAG: всегда логируем stdout — diag о dbsize/doc_status до и после flushall (root-cause
+    # 533-doc-survives-wipe). Без этого diag тонет в captured-выводе pytest при passed-тесте.
+    log.info(
+        "sut_maildir_flush_diag",
+        rc=completed.returncode,
+        stdout=(completed.stdout or "").strip(),
+        stderr=(completed.stderr or "").strip(),
     )
     if completed.returncode != 0:
         log.warning(
