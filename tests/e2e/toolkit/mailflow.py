@@ -37,6 +37,7 @@ from .greenmail import (
 from .poll import mailflow_log_phase, poll_until
 from .runtime import discover_runtime
 from .smtp_ingress import smtp_inject_inbound
+from .workers import e2e_record_test_drain_thread
 
 @dataclass(frozen=True)
 class MailflowScenarioSpec:
@@ -115,6 +116,10 @@ def mailflow_inject_and_wait(
     if not needs_prior_thread_turn:
         correlation_key = e2e_thread_root_mid_for_message_id(raw_id)
     nm_inner = email_ingress_notmuch_id_inner(raw_id)
+    # Зарегистрировать тред письма → per-test teardown-drain ждёт слива ИМЕННО его (scoped), а не
+    # глобального notmuch — иначе под -n12 барьер недостижим, стабы выгружаются mid-pipeline → шторм
+    # unmatched (см. e2e_record_test_drain_thread / [[per-test-triage-drain-barrier]]).
+    e2e_record_test_drain_thread(nm_inner)
     canonical_id = canonical_external_msgid(raw_id)
     t0 = time.monotonic()
     mailflow_log_phase(

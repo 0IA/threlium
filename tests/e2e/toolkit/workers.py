@@ -98,6 +98,47 @@ def wait_for_sut_threlium_user_workers_idle(
         raise
 
 
+def _e2e_drain_thread_registry_path() -> str:
+    """Per-PROCESS файл inner Message-ID писем текущего теста (скоуп teardown-drain по их тредам)."""
+    return f"/tmp/e2e_drain_threads_{os.getpid()}.txt"
+
+
+def e2e_record_test_drain_thread(nm_inner: str) -> None:
+    """Зарегистрировать inner Message-ID письма теста → per-test teardown-drain ждёт слива ТОЛЬКО его
+    notmuch-треда, а не глобального ``tag:unread``.
+
+    Зачем: под ``-n>=2`` общий notmuch всегда держит ``unread`` соседних тестов, поэтому ГЛОБАЛЬНЫЙ
+    drain-барьер недостижим → проходил best-effort за 12s БЕЗ слива → стабы теста выгружались
+    mid-pipeline → следующий LLM-вызов не матчится → 500 → re-dispatch → шторм ``unmatched`` (см.
+    [[residual-triage-retry-storm-finding]], [[per-test-triage-drain-barrier]]). Скоуп по треду делает
+    барьер per-test-ДОСТИЖИМЫМ и под xdist (своё письмо доходит до ``archive``). Файл per-PID — как
+    scenario-stub-реестр (:func:`tests.e2e.wiremock_client._e2e_record_scenario_stub_ids`): регистратор
+    и teardown-дренер могут оказаться в разных module-объектах под pytest."""
+    inner = (nm_inner or "").strip()
+    if not inner:
+        return
+    try:
+        with open(_e2e_drain_thread_registry_path(), "a") as f:
+            f.write(inner + "\n")
+    except OSError as exc:  # pragma: no cover
+        log.warning("drain_thread_record_failed", err=repr(exc))
+
+
+def _e2e_take_drain_threads() -> list[str]:
+    """Прочитать+очистить per-test реестр inner-MID (teardown-дренер зовёт РОВНО раз за тест)."""
+    path = _e2e_drain_thread_registry_path()
+    try:
+        with open(path) as f:
+            inners = [ln.strip() for ln in f.read().splitlines() if ln.strip()]
+    except FileNotFoundError:
+        return []
+    try:
+        os.remove(path)
+    except OSError:  # pragma: no cover
+        pass
+    return inners
+
+
 def e2e_wait_fsm_and_index_drained(
     project_name: str,
     *,
@@ -134,12 +175,31 @@ def e2e_wait_fsm_and_index_drained(
 
     root = repo_root or REPO_ROOT
     pending_index_q = lightrag_drain_pending_search()
-    script = (
-        f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; "
-        'fsm=$(notmuch count "tag:unread AND NOT folder:archive/Maildir"); '
-        f"idx=$(notmuch count {shlex.quote(pending_index_q)}); "
-        'echo "$fsm $idx"'
-    )
+    scope_inners = _e2e_take_drain_threads()
+    fsm_q = "tag:unread AND NOT folder:archive/Maildir"
+    if scope_inners:
+        # THREAD-SCOPED: резолвим notmuch-тред каждого inner-MID теста → ограничиваем ОБА запроса этими
+        # тредами. Достижимо и под xdist (своё письмо доходит до archive), в отличие от глобального unread.
+        ids_csv = " ".join(shlex.quote(f"id:{i}") for i in scope_inners)
+        script = (
+            f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; "
+            f"fq={shlex.quote(fsm_q)}; pq={shlex.quote(pending_index_q)}; "
+            f"scope=''; for q in {ids_csv}; do "
+            'tid=$(notmuch search --output=threads "$q" 2>/dev/null | head -1); '
+            '[ -n "$tid" ] && scope="$scope${scope:+ or }$tid"; done; '
+            'if [ -n "$scope" ]; then sc=" and ( $scope )"; else sc=""; fi; '
+            'fsm=$(notmuch count "$fq$sc"); idx=$(notmuch count "$pq$sc"); '
+            'echo "$fsm $idx"'
+        )
+        scoped = True
+    else:
+        script = (
+            f"{E2E_SUT_NOTMUCH_BASH_EXPORT}; "
+            f"fsm=$(notmuch count {shlex.quote(fsm_q)}); "
+            f"idx=$(notmuch count {shlex.quote(pending_index_q)}); "
+            'echo "$fsm $idx"'
+        )
+        scoped = False
 
     def _probe() -> bool | None:
         r = service_exec(
@@ -155,7 +215,10 @@ def e2e_wait_fsm_and_index_drained(
         return True if (fsm == 0 and idx == 0) else None
 
     under_xdist = bool(os.environ.get("PYTEST_XDIST_WORKER"))
-    effective_timeout = min(timeout, 12.0) if under_xdist else timeout
+    # Scoped-drain ограничен ТРЕДОМ этого теста → достижим и под xdist (полный таймаут, реальный исход).
+    # Только НЕ-scoped (тест не зарегистрировал тред) под xdist остаётся best-effort: глобальный unread
+    # держат соседи, его не дождаться. Регистрируй тред (e2e_record_test_drain_thread), чтобы барьер работал.
+    effective_timeout = timeout if scoped else (min(timeout, 12.0) if under_xdist else timeout)
     try:
         poll_until_backoff(
             _probe,
@@ -164,8 +227,8 @@ def e2e_wait_fsm_and_index_drained(
         )
         return True
     except TimeoutError:
-        if under_xdist:
-            # Под xdist глобальный слив недостижим (соседний тест занят) → не гейтим, best-effort.
+        if under_xdist and not scoped:
+            # Под xdist БЕЗ скоупа глобальный слив недостижим (соседний тест занят) → не гейтим, best-effort.
             log.warning(
                 "fsm_index_drain_wait_best_effort_xdist",
                 note="global drain unreachable under -n>=2 (concurrent test busy); proceeding",
