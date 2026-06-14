@@ -14,6 +14,18 @@ threlium_log_level: "DEBUG"
 # а cold-reset переподнимает движок). См. defaults: threlium_systemd_*_restart.
 threlium_systemd_worker_restart: "no"
 
+# E2E: БЫСТРЫЙ КОНСТАНТНЫЙ restart-backoff для engine/bridge@ (стратегию Restart= НЕ убираем — она
+# принята в проекте и работает в проде; правим только cadence ТЕСТ-контура). Прод-дефолт эскалирует
+# RestartSec 1s → RestartMaxDelaySec 5min за RestartSteps=10 и НЕ сбрасывает счётчик
+# (StartLimitIntervalSec=0). cold-reset рестартует greenmail на КАЖДОЙ сессии → email-мост ловит
+# SSLEOFError на IDLE-сокете → падает → systemd-рестарт; за ~10 cold-reset'ов backoff упирается в
+# 5min → мост лежит минутами → инжектнутое письмо не забирается → mailflow flake («inbox message
+# gone»). Ставим max == min (без эскалации) и маленьким → рестарт всегда ~1s, мост переподнимается
+# в пределах окна теста. Прод не трогаем (дефолты в роли). См. [[fsm-worker-crashloop-poison]].
+threlium_systemd_restart_sec: 1s
+threlium_systemd_restart_steps: 1
+threlium_systemd_restart_max_delay_sec: 1s
+
 threlium_bundle_enabled: false
 threlium_ssh_hardening_enabled: false
 threlium_agent_login_password: "threlium"
