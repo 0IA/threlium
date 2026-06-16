@@ -143,23 +143,19 @@ def mailflow_inject_and_wait(
         wiremock_seed_reasoning_phases(wm_base, correlation_key, spec.reasoning_phases)
     if spec.length_recovery_e2e:
         from tests.e2e.wiremock_client import (  # noqa: PLC0415
-            composite_context_key,
             wiremock_state_length_recovery_enable,
         )
 
-        # Composite (these dirs not yet converted; stubs gate the composite context).
-        wiremock_state_length_recovery_enable(
-            wm_base, composite_context_key(spec.stub_tag, correlation_key)
-        )
+        # Detag: reasoning_litellm_mock конвертирован → стабы гейтятся по ЧИСТОМУ thread-root;
+        # фаза-сид length-recovery идёт в тот же pure контекст (098/099/100 после swap читают pure).
+        wiremock_state_length_recovery_enable(wm_base, correlation_key)
     elif spec.stub_tag == "stub-reasoning-litellm-live-01":
         from tests.e2e.wiremock_client import (  # noqa: PLC0415
-            composite_context_key,
             wiremock_state_standard_tasks_ledger_enable,
         )
 
-        wiremock_state_standard_tasks_ledger_enable(
-            wm_base, composite_context_key(spec.stub_tag, correlation_key)
-        )
+        # Detag: pure thread-root (см. выше).
+        wiremock_state_standard_tasks_ledger_enable(wm_base, correlation_key)
 
     # RAG-warmup убран: тесты больше НЕ зависят от тёплой vdb (rerank не ассертится в mailflow;
     # покрытие корреляторов lightrag — в выделенном тесте test_lightrag_correlator_integrity).
