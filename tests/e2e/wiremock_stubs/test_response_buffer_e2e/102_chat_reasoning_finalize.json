@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-response-buffer-e2e-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_append_2_ledger_done"
       }
     }

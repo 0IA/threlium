@@ -71,7 +71,7 @@ def _assert_l1_finalize_fired(wm: str, *, stub_tag: str, correlation_key: str) -
     """Specific L1-finalize barrier: ``113_l1_finalize`` recorded ``l1_finalize_seen`` into its phase
     context. Replaces the ``>=20 chat call-sites`` proxy (which passes before — or independently of —
     the L1 finalize record). State is append-only → immune to journal eviction under ``-n12``."""
-    phase_ctx = f"{stub_tag}::{correlation_key}"
+    phase_ctx = correlation_key  # detag: pure thread-root (stubs record to {{tr}}, not composite)
     seen = wiremock_state_thread_root_property(wm, phase_ctx, "l1_finalize_seen")
     assert seen == "1", (
         f"L1 finalize hop did not record (l1_finalize_seen={seen!r}, ctx={phase_ctx!r}) — "
@@ -103,7 +103,7 @@ def test_subagent_response_buffer_frame_isolation(e2e_runtime: E2EComposeRuntime
             wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
             # Direct read after the GreenMail reply barrier (happens-after L1 finalize). §3.6.2.
             _assert_l1_finalize_fired(wm, stub_tag=stub_tag, correlation_key=correlation_key)
-            phase_ctx = f"{stub_tag}::{correlation_key}"
+            phase_ctx = correlation_key  # detag: pure thread-root (stubs record to {{tr}}, not composite)
             leaked = wiremock_state_thread_root_property(wm, phase_ctx, "l1_l0_leaked")
             assert leaked == "0", (
                 "L0 response_append buffer leaked into L1 frame reasoning prompt "
@@ -147,7 +147,7 @@ def test_subagent_task_ledger_frame_isolation(e2e_runtime: E2EComposeRuntime) ->
             # If it leaked, the L1 finalize gate would see L0's open subtask and block. The L1 finalize
             # stub computes the content-flag from its own body (single-writer, append-only state) — same
             # idiom as the response-buffer leak check above. (113 fires once: hasNotProperty phase_l1_done.)
-            phase_ctx = f"{stub_tag}::{correlation_key}"
+            phase_ctx = correlation_key  # detag: pure thread-root (stubs record to {{tr}}, not composite)
             leaked = wiremock_state_thread_root_property(wm, phase_ctx, "l1_l0_ledger_leaked")
             assert leaked == "0", (
                 "L0 parent-frame open subtask leaked into L1 frame ledger / finalize prompt — frame "

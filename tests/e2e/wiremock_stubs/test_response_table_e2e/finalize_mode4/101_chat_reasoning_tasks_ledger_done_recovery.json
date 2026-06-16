@@ -21,7 +21,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-resp-fin-mode4-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_mode4",
         "hasNotProperty": "phase_mode4_ledger_done"
       }
@@ -63,7 +63,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-resp-fin-mode4-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_mode4_ledger_done": "1"
         }

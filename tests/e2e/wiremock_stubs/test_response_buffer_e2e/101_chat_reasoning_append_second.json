@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-response-buffer-e2e-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_append_1",
         "hasNotProperty": "phase_append_2"
       }
@@ -66,7 +66,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-response-buffer-e2e-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_append_2": "1"
         }

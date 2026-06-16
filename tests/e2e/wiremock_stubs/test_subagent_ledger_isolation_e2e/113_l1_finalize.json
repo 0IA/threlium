@@ -21,7 +21,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-subagent-ledger-iso-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_l1_tasks_ledger_done",
         "hasNotProperty": "phase_l1_done"
       }
@@ -63,7 +63,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-subagent-ledger-iso-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_l1_done": "1",
           "l1_finalize_seen": "1",
