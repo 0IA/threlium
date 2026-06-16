@@ -44,6 +44,27 @@ from .wiremock_client import (
 _STUB_DIR = Path(__file__).resolve().parent / "wiremock_stubs" / "test_cozo_graph_adapter_e2e"
 _STUB_TAG = "stub-cozo-graph-adapter-01"
 
+# Detag (§3.6.8): generic reasoning, 2 линейные фазы (tasks_upsert → finalize) на одиночный ход.
+# Оба хода (INDEX A, QUERY B) — отдельные mailflow на СВОИХ thread-root → seed на каждый spec.
+_COZO_REASONING_PHASES = [
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    (
+        "response_finalize",
+        {
+            "reasoning": "e2e: finalizing response with verified content",
+            "subject": "e2e reply",
+            "verification_summary": "e2e: direct answer, content verified",
+            "content": "ok from llm-mock",
+        },
+    ),
+]
+
 INDEX_SPEC = MailflowScenarioSpec(
     label="cozo_graph_index",
     raw_id_prefix="cozo-graph-idx-",
@@ -53,7 +74,7 @@ INDEX_SPEC = MailflowScenarioSpec(
     min_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
-    wiremock_journal_ready_needle="call_e2e_tasks_ledger_phase_tasks_ledger_done",
+    reasoning_phases=_COZO_REASONING_PHASES,
 )
 
 QUERY_SPEC = MailflowScenarioSpec(
@@ -65,7 +86,7 @@ QUERY_SPEC = MailflowScenarioSpec(
     min_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
-    wiremock_journal_ready_needle="call_e2e_tasks_ledger_phase_tasks_ledger_done",
+    reasoning_phases=_COZO_REASONING_PHASES,
 )
 
 

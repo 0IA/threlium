@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-formal-reason-technical-gate-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_tech_ledger_done"
       }
     }
@@ -70,6 +70,18 @@
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
           }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "state": {
+          "saw_gate_active": "{{#if (contains request.body 'Gate retry counter:')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_gate_active' default='0'}}{{/if}}",
+          "saw_query_error": "{{#if (contains request.body 'QUERY ERROR')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_query_error' default='0'}}{{/if}}",
+          "saw_query_result": "{{#if (contains request.body 'query_result:')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_query_result' default='0'}}{{/if}}",
+          "gated_has_finalize": "{{#if (contains request.body 'Gate retry counter:')}}{{#if (contains (jsonPath request.body '$.tools') 'response_finalize')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='gated_has_finalize' default='0'}}{{/if}}{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='gated_has_finalize' default='0'}}{{/if}}"
         }
       }
     }

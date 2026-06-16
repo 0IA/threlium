@@ -32,6 +32,37 @@ from .wiremock_client import (
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 
+# Detag (§3.6.8): generic reasoning. Спека общая для ОБОИХ тестов (prior_turns=1), фаза-счётчик идёт
+# по ОДНОМУ pure thread-root через все ходы. Перечисляем ВСЕ reasoning-вызовы:
+#   overflow:    prior(tasks_upsert, finalize) + main(finalize, наследует ledger) = p0,p1,p2.
+#   idempotent:  prior+main как выше (p0,p1,p2) + второе письмо (тредится на ответ агента → ledger
+#                наследуется → finalize-only) = p3 (и далее).
+# Первый ход КАЖДОГО треда делает tasks_upsert (seed ledger); все последующие хопы того же thread-root
+# наследуют ledger → finalize. Даём запас finalize-фаз — лишние инертны (тест overflow до них не доходит).
+_FINALIZE_PHASE = (
+    "response_finalize",
+    {
+        "reasoning": "e2e: finalizing response with verified content",
+        "subject": "e2e reply",
+        "verification_summary": "e2e: direct answer, content verified",
+        "content": "ok from llm-mock",
+    },
+)
+_SUMMARIZE_REASONING_PHASES = [
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    _FINALIZE_PHASE,
+    _FINALIZE_PHASE,
+    _FINALIZE_PHASE,
+    _FINALIZE_PHASE,
+    _FINALIZE_PHASE,
+]
+
 SUMMARIZE_CONTEXT_SPEC = MailflowScenarioSpec(
     label="summarize_context_e2e",
     raw_id_prefix="e2e-summarize-ctx-",
@@ -45,7 +76,7 @@ SUMMARIZE_CONTEXT_SPEC = MailflowScenarioSpec(
     min_chat_completion_posts=2,
     min_embedding_posts=1,
     min_rerank_posts=0,
-    wiremock_journal_ready_needle="call_e2e_tasks_ledger_phase_tasks_ledger_done",
+    reasoning_phases=_SUMMARIZE_REASONING_PHASES,
 )
 
 

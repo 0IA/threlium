@@ -365,6 +365,34 @@ def wiremock_state_seed_context(
         r.raise_for_status()
 
 
+def wiremock_seed_reasoning_phases(
+    public_base: str,
+    correlation_key: str,
+    phases: Sequence[tuple[str, dict[str, Any]]],
+    *,
+    timeout: float = TIMEOUT_POLL_SHORT,
+) -> None:
+    """Seed per-phase generic-reasoning responses for the PURE thread-root context (detag, §3.6.8).
+
+    ``phases`` = ordered ``[(tool_name, args_dict), …]``. Phase ``i`` → state ``p{i}_tool`` +
+    ``p{i}_args``; the generic reasoning stubs (``compose_bootstrap/20{i}_chat_generic_reasoning_phase_{i}``)
+    gate ``property phase==i`` and emit ``tool_calls[0].function = {name: p{i}_tool, arguments: p{i}_args}``,
+    advancing ``phase:=i+1``. So ONE generic reasoning stub-set plays ANY test's scripted multi-step flow;
+    per-test reasoning JSON disappear. ``args`` is JSON-escaped once so the raw triple-stache emit yields a
+    valid ``arguments`` string (verified on live WireMock). The setup seed (``active``/``phase=0``) is sent
+    separately by :func:`prepare_wiremock_scenario`; this only adds the per-phase responses.
+    """
+    body: dict[str, str] = {"correlation_key": correlation_key}
+    for i, (tool, args) in enumerate(phases):
+        body[f"p{i}_tool"] = tool
+        body[f"p{i}_args"] = json.dumps(json.dumps(args))[1:-1]
+    root = _normalize_wiremock_public_root(public_base)
+    url = f"{root}/__threlium/e2e/reasoning/phases_seed"
+    with _wiremock_admin_api_exclusive(timeout=timeout):
+        r = _wm_session().post(url, json=body, timeout=timeout)
+        r.raise_for_status()
+
+
 def wiremock_state_thread_root_list_size(
     public_base: str, correlation_key: str, *, timeout: float = TIMEOUT_POLL_SHORT
 ) -> int:
@@ -1862,8 +1890,6 @@ def prepare_wiremock_scenario(
     однократно на СТАРТЕ сессии (``_e2e_wiremock_journal_reset_once`` под IPC-локом); ``pytest_sessionfinish``
     данные **не** трогает (пост-mortem). См. ``docs/E2E.md``.
     """
-    ctx_key = composite_context_key(stub_tag, correlation_key)
-
     # НЕ чистим SUT-сообщения прошлых прогонов per-test. ``correlation_key`` динамичен (``uuid4`` в
     # mailflow ``raw_id``), поэтому новый прогон/соседний тест НЕ пересекается со старыми сообщениями —
     # изоляция уже обеспечена уникальным коррелятором. Прежний ``e2e_clean_sut_messages_for_test`` делал
@@ -1884,24 +1910,18 @@ def prepare_wiremock_scenario(
         # стабов tag совпадает у параллельных тестов, и remove-by-tag стирал бы их matched-записи
         # под -n2 (ложные «0» в journal-ассертах). Чистим только СВОЙ тред.
         remove_wiremock_journal_by_thread_root(public_base, correlation_key, timeout=timeout)
+        # MIGRATION (per-dir detag in progress): seed BOTH the composite ``{stub_tag}::tr`` context (for
+        # NOT-yet-converted dirs whose stubs still gate composite) AND the PURE thread-root context (for
+        # CONVERTED dirs: generic call-site stubs ``hasContext({{tr}})`` + the positive phase-counter
+        # reasoning machine, docs §3.6.7/§3.6.8). ``active`` + ``phase=0`` on both. Reset formal-reason
+        # phase latches on the composite context (formal_reason dirs still gate composite until converted).
+        ctx_key = composite_context_key(stub_tag, correlation_key)
         if (stub_dir / "008_e2e_state_reset_formal_reason_phases.json").is_file():
             wiremock_state_reset_formal_reason_phases(
                 public_base, ctx_key, timeout=timeout
             )
         wiremock_state_seed_context(public_base, ctx_key, timeout=timeout)
-        # Seed the PURE thread-root context (key == X-Threlium-Thread-Root, no stub_tag prefix)
-        # with property ``active=1`` — the POSITIVE opt-in gate for generic bootstrap stubs
-        # (detag migration, docs §3.6.1). A generic stub gates ``hasContext({{thread-root}}) +
-        # property active==1``; the call-site recorder later creates the same pure context (list
-        # only, no ``active``), so the dedicated ``active`` flag is what distinguishes opt-in from
-        # opt-out — a clean positive discriminator, never hasNotProperty.
-        #
-        # Opt-out is automatic: a scenario that ships its OWN ``*ingress_distill*`` stub (e.g.
-        # multi-turn context-trim) self-serves that call-site and must NOT be seeded, else the
-        # generic stub would double-match its per-turn distill stubs. Such a dir is skipped here;
-        # its per-test stubs (hasContext composite) serve, generic stays inert (no ``active``).
-        if correlation_key != ctx_key and not any(stub_dir.glob("*ingress_distill*.json")):
-            wiremock_state_seed_context(public_base, correlation_key, timeout=timeout)
+        wiremock_state_seed_context(public_base, correlation_key, timeout=timeout)
 
 
 def teardown_wiremock_scenario(
@@ -2120,7 +2140,12 @@ def register_wiremock_mapping_directory(
         merged_meta = {**merged_meta, **stub_metadata}
     d = directory.resolve()
     if not d.is_dir():
-        raise FileNotFoundError(f"WireMock stubs directory not found: {d}")
+        # Detag end-state: a FULLY-converted scenario has NO per-test stubs (everything served by
+        # compose_bootstrap generics + generic reasoning, §3.6.6/§3.6.8), so its stub_dir is empty and
+        # git drops it. Expected — no mappings to upsert, no-op. Behaviour comes from the seeded
+        # thread-root context (active/phase + reasoning_phases) + the shared generics.
+        log.info("wiremock_mapping_directory_absent_noop", directory=str(d))
+        return []
     skip = frozenset(str(x) for x in exclude_names)
     paths = sorted(d.glob(pattern))
     ids_out: list[str] = []
@@ -2184,7 +2209,12 @@ def upsert_wiremock_mapping_directory(
         merged_meta = {**merged_meta, **stub_metadata}
     d = directory.resolve()
     if not d.is_dir():
-        raise FileNotFoundError(f"WireMock stubs directory not found: {d}")
+        # Detag end-state: a FULLY-converted scenario has NO per-test stubs (everything served by
+        # compose_bootstrap generics + generic reasoning, §3.6.6/§3.6.8), so its stub_dir is empty and
+        # git drops it. Expected — no mappings to upsert, no-op. Behaviour comes from the seeded
+        # thread-root context (active/phase + reasoning_phases) + the shared generics.
+        log.info("wiremock_mapping_directory_absent_noop", directory=str(d))
+        return []
     skip = frozenset(str(x) for x in exclude_names)
     paths = sorted(d.glob(pattern))
     ids_out: list[str] = []

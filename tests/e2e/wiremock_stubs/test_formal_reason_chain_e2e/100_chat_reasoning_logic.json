@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-formal-reason-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "active",
         "hasNotProperty": "phase_formal_reason_done"
       }
@@ -69,7 +69,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-formal-reason-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_formal_reason_done": "1"
         }

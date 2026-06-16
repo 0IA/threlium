@@ -62,12 +62,35 @@ from .wiremock_client import (
     wiremock_matrix_register_room,
     wiremock_matrix_unregister_room,
     wiremock_public_base,
+    wiremock_seed_reasoning_phases,
     wiremock_state_thread_root_list_size,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 MATRIX_WIREMOCK_STUB_TAG = "stub-matrix-wiremock-live-e2e-01"
 MATRIX_WIREMOCK_STUB_DIR = _WIREMOCK_STUBS_ROOT / "test_matrix_wiremock_live_e2e"
+
+# Detag (§3.6.8): generic reasoning. finalize.content несёт маркер ответа агента, который egress-стаб
+# 040_matrix_room_send ищет (`contains 'ok matrix wiremock live e2e'`) → saw_egress_edit. Сид после
+# prepare_wiremock_scenario (он ставит active/phase=0, но НЕ gen_reasoning — его ставит 019).
+_MATRIX_PHASES = [
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    (
+        "response_finalize",
+        {
+            "reasoning": "e2e: finalizing response with verified content",
+            "subject": "e2e matrix reply",
+            "verification_summary": "e2e: direct answer, content verified",
+            "content": "ok matrix wiremock live e2e",
+        },
+    ),
+]
 
 
 @contextmanager
@@ -121,6 +144,7 @@ def test_live_matrix_wiremock_full_contour_on_running_stack(
             stub_tag=test_id,
             correlation_key=correlation_key,
         )
+        wiremock_seed_reasoning_phases(base, correlation_key, _MATRIX_PHASES)
 
         wiremock_matrix_register_room(
             base,
@@ -194,6 +218,7 @@ def test_live_matrix_bridge_duplicate_skip_on_running_stack(
                 stub_tag=test_id,
                 correlation_key=correlation_key,
             )
+            wiremock_seed_reasoning_phases(base, correlation_key, _MATRIX_PHASES)
             wiremock_matrix_register_room(
                 base,
                 room_id=room_id,

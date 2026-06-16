@@ -29,8 +29,8 @@ from .toolkit import (
     REPO_ROOT,
 )
 from .wiremock_client import (
-    find_wiremock_requests_by_body_contains,
     wiremock_public_base,
+    wiremock_state_thread_root_list_size,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -47,34 +47,57 @@ MEMORY_QUERY_SPEC = MailflowScenarioSpec(
     min_embedding_posts=1,
     min_rerank_posts=0,
     reply_body_needle="e2e-memory-query-verified-answer",
+    # Detag (§3.6.8): scripted reasoning via the SHARED generic reasoning stub-set (no per-test
+    # reasoning JSON). Phase 0 memory_query (carries the marker → embed → state flag), phase 1
+    # tasks_upsert, phase 2 response_finalize.
+    reasoning_phases=[
+        (
+            "memory_query",
+            {
+                "reasoning": "e2e: retrieving domain knowledge from the graph",
+                "query": "E2E-MEMORY-QUERY-MARKER SHACL sh:sparql constraint",
+            },
+        ),
+        (
+            "tasks_upsert",
+            {
+                "reasoning": "e2e: record task completion before finalize",
+                "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+            },
+        ),
+        (
+            "response_finalize",
+            {
+                "reasoning": "e2e: finalizing after memory query verification",
+                "subject": "Re: e2e reply",
+                "verification_summary": "e2e: knowledge retrieved and verified via memory_query",
+                "content": "e2e-memory-query-verified-answer",
+            },
+        ),
+    ],
 )
 
 
-def _assert_embedding_contains_query_marker(project: str, stub_tag: str) -> None:
-    """Verify that at least one embedding request contains the query marker text.
+def _assert_embedding_contains_query_marker(project: str) -> None:
+    """Verify that at least one embedding request carried the query marker text.
 
-    This proves the data round-trip: stub tool_call -> handler parse ->
-    rag.aquery(payload.query) -> embedding API with the expected query text.
+    Proves the data round-trip: stub tool_call -> handler parse -> rag.aquery(payload.query) ->
+    embedding API with the expected query text. Read from WireMock **state**, not the journal: the
+    embeddings stub APPEND-ONLY records a ``hit`` into the fixed context ``saw-memory-query-marker``
+    whenever an embed body contains ``E2E-MEMORY-QUERY-MARKER`` (the marker is globally unique to this
+    single-instance test, so a fixed context is collision-free; append-only is concurrency-safe — no
+    read-modify-write). Journal-independent (docs/E2E.md §3.6.7); the marker bypasses the unreliable
+    thread-root header on lightrag embeds (§3.6.3).
     """
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    matches = find_wiremock_requests_by_body_contains(
-        wm_base, E2E_MEMORY_QUERY_MARKER, stub_tag=stub_tag
-    )
-    embedding_matches = [
-        e for e in matches
-        if "/embeddings" in (e.get("request", {}).get("url") or "")
-    ]
-    assert embedding_matches, (
-        f"No embedding requests contain query marker {E2E_MEMORY_QUERY_MARKER!r} "
-        f"(found {len(matches)} total matches in journal for stub_tag={stub_tag!r}). "
+    hits = wiremock_state_thread_root_list_size(wm_base, "saw-memory-query-marker")
+    assert hits >= 1, (
+        f"No embedding request carried query marker {E2E_MEMORY_QUERY_MARKER!r} "
+        f"(state list_size(saw-memory-query-marker)={hits}). "
         "This means memory_query did not pass the expected query text to LightRAG."
     )
-    log.info(
-        "roundtrip_embedding_marker_verified",
-        marker=E2E_MEMORY_QUERY_MARKER,
-        embedding_hits=len(embedding_matches),
-    )
+    log.info("roundtrip_embedding_marker_verified", marker=E2E_MEMORY_QUERY_MARKER, hits=hits)
 
 
 def test_memory_query_full_pipeline(e2e_runtime: E2EComposeRuntime) -> None:
@@ -96,7 +119,7 @@ def test_memory_query_full_pipeline(e2e_runtime: E2EComposeRuntime) -> None:
                 stub_tag=stub_tag,
                 correlation_key=correlation_key,
             )
-            _assert_embedding_contains_query_marker(project, stub_tag)
+            _assert_embedding_contains_query_marker(project)
         except Exception:
             log.debug(
                 "failure_artifacts",

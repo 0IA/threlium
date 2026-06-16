@@ -20,7 +20,8 @@
         "context": "{{jsonPath request.body '$.correlation_key'}}",
         "state": {
           "active": "1",
-          "search_for": "{{jsonPath request.body '$.search_for' default='__NO_SEARCH__'}}"
+          "search_for": "{{jsonPath request.body '$.search_for' default='__NO_SEARCH__'}}",
+          "phase": "0"
         }
       }
     }

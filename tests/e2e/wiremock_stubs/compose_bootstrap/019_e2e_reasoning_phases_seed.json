@@ -1,0 +1,47 @@
+{
+  "metadata": {
+    "threlium_stub_tag": "generic-reasoning-phases-seed"
+  },
+  "request": {
+    "method": "POST",
+    "urlPath": "/__threlium/e2e/reasoning/phases_seed"
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "jsonBody": {
+      "ok": true,
+      "context": "{{jsonPath request.body '$.correlation_key'}}"
+    }
+  },
+  "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{jsonPath request.body '$.correlation_key'}}",
+        "state": {
+          "phase": "0",
+          "gen_reasoning": "1",
+          "p0_tool": "{{jsonPath request.body '$.p0_tool' default=''}}",
+          "p0_args": "{{jsonPath request.body '$.p0_args' default=''}}",
+          "p1_tool": "{{jsonPath request.body '$.p1_tool' default=''}}",
+          "p1_args": "{{jsonPath request.body '$.p1_args' default=''}}",
+          "p2_tool": "{{jsonPath request.body '$.p2_tool' default=''}}",
+          "p2_args": "{{jsonPath request.body '$.p2_args' default=''}}",
+          "p3_tool": "{{jsonPath request.body '$.p3_tool' default=''}}",
+          "p3_args": "{{jsonPath request.body '$.p3_args' default=''}}",
+          "p4_tool": "{{jsonPath request.body '$.p4_tool' default=''}}",
+          "p4_args": "{{jsonPath request.body '$.p4_args' default=''}}",
+          "p5_tool": "{{jsonPath request.body '$.p5_tool' default=''}}",
+          "p5_args": "{{jsonPath request.body '$.p5_args' default=''}}",
+          "p6_tool": "{{jsonPath request.body '$.p6_tool' default=''}}",
+          "p6_args": "{{jsonPath request.body '$.p6_args' default=''}}",
+          "p7_tool": "{{jsonPath request.body '$.p7_tool' default=''}}",
+          "p7_args": "{{jsonPath request.body '$.p7_args' default=''}}"
+        }
+      }
+    }
+  ]
+}

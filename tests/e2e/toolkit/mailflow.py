@@ -77,6 +77,12 @@ class MailflowScenarioSpec:
     warmup_body_extra: str = ""
     reply_subject_needle: str | None = None
     reply_body_needle: str | None = None
+    # Detag (§3.6.8): ordered per-phase reasoning responses ``[(tool_name, args_dict), …]``. When set,
+    # the test uses the SHARED generic reasoning stub-set (compose_bootstrap 200..207) instead of per-test
+    # reasoning JSON: prepare seeds these into the pure thread-root context; phase ``i`` echoes
+    # ``(p{i}_tool, p{i}_args)`` and advances ``phase:=i+1``. Kills intra-dir churn (no per-test reasoning
+    # stubs to re-upsert/unload) and is fully tag-free. None → legacy per-test reasoning stubs.
+    reasoning_phases: "Sequence[tuple[str, dict[str, Any]]] | None" = None
     # Длинные multi-hop: poll только reasoning POST (не все chat/LightRAG) до needle/GreenMail.
     min_reasoning_chat_completion_posts: int | None = None
     # Poll журнала WireMock (request/response) до GreenMail после reasoning-порога выше.
@@ -131,15 +137,19 @@ def mailflow_inject_and_wait(
         stub_tag=spec.stub_tag,
         correlation_key=correlation_key,
     )
+    if spec.reasoning_phases:
+        from tests.e2e.wiremock_client import wiremock_seed_reasoning_phases  # noqa: PLC0415
+
+        wiremock_seed_reasoning_phases(wm_base, correlation_key, spec.reasoning_phases)
     if spec.length_recovery_e2e:
         from tests.e2e.wiremock_client import (  # noqa: PLC0415
             composite_context_key,
             wiremock_state_length_recovery_enable,
         )
 
+        # Composite (these dirs not yet converted; stubs gate the composite context).
         wiremock_state_length_recovery_enable(
-            wm_base,
-            composite_context_key(spec.stub_tag, correlation_key),
+            wm_base, composite_context_key(spec.stub_tag, correlation_key)
         )
     elif spec.stub_tag == "stub-reasoning-litellm-live-01":
         from tests.e2e.wiremock_client import (  # noqa: PLC0415
@@ -148,8 +158,7 @@ def mailflow_inject_and_wait(
         )
 
         wiremock_state_standard_tasks_ledger_enable(
-            wm_base,
-            composite_context_key(spec.stub_tag, correlation_key),
+            wm_base, composite_context_key(spec.stub_tag, correlation_key)
         )
 
     # RAG-warmup убран: тесты больше НЕ зависят от тёплой vdb (rerank не ассертится в mailflow;
@@ -220,12 +229,10 @@ def mailflow_inject_and_wait(
                 rt.greenmail_imap_port,
                 message_id=cur_seed_id,
             )
-            _mailflow_wait_wiremock_journal_ready_if_configured(
-                spec,
-                project=project_name,
-                stub_tag=spec.stub_tag,
-                correlation_key=correlation_key,
-            )
+            # Detag (enabler A): the journal readiness-needle barrier was REMOVED here. It polled the
+            # WireMock journal by stub_tag for a mid-pipeline call-id — journal-dependent (unreliable,
+            # being retired) AND redundant: the agent's GreenMail reply below is a STRICTLY STRONGER
+            # prior-turn barrier (full ingress→…→egress completed). See docs/E2E.md §3.6.7.
             # Барьер прошлого хода = ОТВЕТ агента в GreenMail (единственный внешний выход:
             # ingress→enrich→reasoning→…→egress_email пройдены). Внутренние notmuch/maildir
             # docker-exec защёлки (FSM-activity, notmuch-indexed, fully_in_stages) сняты —
@@ -260,15 +267,34 @@ def mailflow_inject_and_wait(
                 cs = wiremock_state_thread_root_call_sites(wm_base, "lightrag_kg_calls")
                 return True if "extract_knowledge_graph" in cs else None
 
-            poll_until(
-                _kg_seeded,
-                timeout=TIMEOUT_POLL_SHORT,
-                interval=2.0,
-                desc="seed turn KG-extracted (entities_vdb populated for query-turn retrieval)",
-            )
-            mailflow_log_phase(
-                f"{spec.label}: seed KG-extraction barrier passed (+{time.monotonic() - t0:.1f}s)"
-            )
+            # BEST-EFFORT (not a hard barrier): the seed's chunk index (the `_seed_indexed` barrier
+            # below, keyed by the per-test E2E-INDEX-CORR marker) is the load-bearing readiness for the
+            # query turn — chunks_vdb is what hybrid retrieval reads. This KG-extraction wait was a SECOND
+            # readiness crutch on the GLOBAL multi-writer ``lightrag_kg_calls`` context; under -n12 it
+            # timed out and CASCADED all three integrity facets into errors. Evidence (live state after a
+            # full -n12): lightrag_index_calls=529 but lightrag_kg_calls=0 across all 671 contexts — i.e.
+            # extract_knowledge_graph did not fire AT ALL under that load (not lost, not interfered: 012 is
+            # the only stub that would serve real KG and recorded nothing; 008 is bootstrap-only; cozo
+            # needs ZZRELMARKER). Whether the SUT genuinely skips entity-extraction under -n12 is its own
+            # dig; it must NOT block index/query readiness. So we wait opportunistically and proceed on
+            # timeout — the kg-extraction FACET asserts KG firing independently (test_lightrag_kg_extraction
+            # _correlators reads lightrag_kg_calls), so this relaxation removes the cascade WITHOUT weakening
+            # any check.
+            try:
+                poll_until(
+                    _kg_seeded,
+                    timeout=TIMEOUT_POLL_SHORT,
+                    interval=2.0,
+                    desc="seed turn KG-extracted (entities_vdb populated for query-turn retrieval)",
+                )
+                mailflow_log_phase(
+                    f"{spec.label}: seed KG-extraction barrier passed (+{time.monotonic() - t0:.1f}s)"
+                )
+            except TimeoutError as exc:
+                mailflow_log_phase(
+                    f"{spec.label}: seed KG-extraction wait best-effort — proceeding on chunk-index "
+                    f"readiness; KG not seen in lightrag_kg_calls (+{time.monotonic() - t0:.1f}s): {exc!r}"
+                )
 
             if spec.rag_seed_index_wait_marker:
                 # Happens-before barrier for the index facet: wait until the seed's OWN chunk index has
@@ -372,32 +398,6 @@ def _mailflow_wait_reasoning_chat_posts_if_configured(
         stub_tag=stub_tag,
         anchor_needle=correlation_key,
         min_posts=min_r,
-    )
-
-
-def _mailflow_wait_wiremock_journal_ready_if_configured(
-    spec: MailflowScenarioSpec,
-    *,
-    project: str,
-    stub_tag: str,
-    correlation_key: str,
-) -> None:
-    needle = spec.wiremock_journal_ready_needle
-    if not needle:
-        return
-    from tests.e2e.wiremock_client import (  # noqa: PLC0415
-        wait_for_wiremock_stub_journal_contains,
-        wiremock_public_base,
-    )
-
-    rt = discover_runtime(project, repo_root=REPO_ROOT)
-    wm = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-    mailflow_log_phase(f"{spec.label}: wait wiremock journal needle={needle!r}")
-    wait_for_wiremock_stub_journal_contains(
-        wm,
-        stub_tag=stub_tag,
-        needle=needle,
-        anchor_needle=correlation_key,
     )
 
 

@@ -104,6 +104,41 @@ TASK_LEDGER_SPECS: tuple[MailflowScenarioSpec, ...] = (
 )
 
 
+_TASK_LEDGER_PHASES = {
+    'task_ledger_bypass': [
+        ('tasks_upsert', {'reasoning': 'e2e: A done, B blocked externally — allow finalize with blocker', 'subtask_updates': [{'content_id': 'e4a7f48a17f1', 'status': 'done'}], 'blockers': 'e2e external dependency unavailable for subtask B', 'allow_finalize_with_blocker': True}),
+        ('response_finalize', {'reasoning': 'e2e: finalize with open B allowed via allow_finalize_with_blocker', 'subject': 'Re: e2e reply', 'verification_summary': 'e2e: bypass gate — A done, B blocked but finalize permitted', 'content': 'e2e-task-ledger-bypass-verified'}),
+    ],
+    'task_ledger_empty_blocked': [
+        ('response_finalize', {'reasoning': 'e2e: finalize attempt on an empty ledger', 'subject': 'Re: e2e reply', 'verification_summary': 'e2e: should be blocked by the fail-closed empty-ledger gate', 'content': 'e2e-empty-blocked-attempt'}),
+        ('tasks_upsert', {'reasoning': 'e2e: trivial answer, record one subtask as done', 'new_subtasks': [{'text': 'Answer the user question about the task ledger', 'status': 'done'}], 'subtask_updates': [{'content_id': '481a8275734a', 'status': 'done'}]}),
+        ('response_finalize', {'reasoning': 'e2e: one subtask done, gate passes', 'subject': 'Re: e2e reply', 'verification_summary': 'e2e: ledger now records one done subtask', 'content': 'e2e-task-ledger-empty-verified'}),
+    ],
+    'task_ledger_all_cancelled': [
+        ('tasks_upsert', {'reasoning': 'e2e: cancel both subtasks (scope dropped)', 'subtask_updates': [{'content_id': '8a1ea957bf2b', 'status': 'cancelled'}, {'content_id': 'a132885eea74', 'status': 'cancelled'}]}),
+        ('response_finalize', {'reasoning': 'e2e: finalize attempt with everything cancelled and nothing done', 'subject': 'Re: e2e reply', 'verification_summary': 'e2e: should be blocked by the all-cancelled guard', 'content': 'e2e-allcancel-blocked-attempt'}),
+        ('tasks_upsert', {'reasoning': 'e2e: record the real completed answer as a done subtask', 'new_subtasks': [{'text': 'Answer the user question about the task ledger', 'status': 'done'}]}),
+        ('response_finalize', {'reasoning': 'e2e: one subtask done alongside cancelled ones, gate passes', 'subject': 'Re: e2e reply', 'verification_summary': 'e2e: ledger has a done subtask (cancelled no longer block)', 'content': 'e2e-task-ledger-all-cancelled-verified'}),
+    ],
+    'task_ledger_upsert_error': [
+        ('tasks_upsert', {'reasoning': 'e2e: update a non-existent content_id (should be rejected)', 'subtask_updates': [{'content_id': 'deadbeefdead', 'status': 'done'}]}),
+        ('tasks_upsert', {'reasoning': 'e2e: update the real seeded subtask to done', 'subtask_updates': [{'content_id': '9d9d077ccc56', 'status': 'done'}]}),
+        ('response_finalize', {'reasoning': 'e2e: seeded subtask done, gate passes', 'subject': 'Re: e2e reply', 'verification_summary': 'e2e: ledger closed after correcting the content_id', 'content': 'e2e-task-ledger-upsert-error-verified'}),
+    ],
+    'task_ledger_noop': [
+        ('tasks_upsert', {'reasoning': 'e2e: no-op tasks_upsert — only reasoning, no new_subtasks and no subtask_updates (must be guided back, not hard-errored)'}),
+        ('tasks_upsert', {'reasoning': 'e2e: update the real seeded subtask to done', 'subtask_updates': [{'content_id': '9d9d077ccc56', 'status': 'done'}]}),
+        ('response_finalize', {'reasoning': 'e2e: seeded subtask done, gate passes', 'subject': 'Re: e2e reply', 'verification_summary': 'e2e: ledger closed after correcting the content_id', 'content': 'e2e-task-ledger-noop-verified'}),
+    ],
+}
+import dataclasses as _dc  # noqa: E402
+TASK_LEDGER_SPECS = tuple(
+    _dc.replace(s, reasoning_phases=_TASK_LEDGER_PHASES[s.label])
+    if s.label in _TASK_LEDGER_PHASES else s
+    for s in TASK_LEDGER_SPECS
+)
+
+
 @pytest.mark.parametrize("spec", TASK_LEDGER_SPECS, ids=[s.label for s in TASK_LEDGER_SPECS])
 def test_task_ledger_variant_full_pipeline(
     e2e_runtime: E2EComposeRuntime,

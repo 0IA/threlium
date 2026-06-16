@@ -17,14 +17,7 @@ from pathlib import Path
 
 from tests.e2e.log import clip_log_body, log
 
-from .formal_reason_assertions import (
-    assert_journal_contains,
-    assert_ungated_reasoning_has_finalize,
-    assert_violation_reasoning_without_gate,
-)
 from .toolkit import (
-    E2EComposeRuntime,
-    E2EComposeRuntime,
     E2EComposeRuntime,
     MailflowScenarioSpec,
     assert_full_mailflow_pipeline,
@@ -33,10 +26,45 @@ from .toolkit import (
     mailflow_inject_and_wait,
     REPO_ROOT,
 )
-from .wiremock_client import wiremock_public_base
+from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_property
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_VIOLATION_BODY = "E2E-FORMAL-REASON-VIOLATION-BODY"
+
+# Detag (§3.6.8): generic reasoning, линейный formal_reason → tasks_upsert → response_finalize.
+# Гейт НЕ срабатывает (нарушение SHACL само по себе гейт не активирует), результат conforms:False/
+# violations: доходит до reasoning (content-flags на generic 200-207).
+_VIOLATION_PHASES = [
+    (
+        "formal_reason",
+        {
+            "reasoning": "e2e: SHACL check with intentionally invalid age",
+            "shapes_ttl": (
+                "@prefix sh: <http://www.w3.org/ns/shacl#> .\n@prefix ex: <http://example.org/> .\n\n"
+                "ex:PositiveAgeShape a sh:NodeShape ;\n  sh:targetClass ex:Person ;\n  sh:property [\n"
+                "    sh:path ex:age ;\n    sh:minInclusive 0 ;\n    sh:message \"Age must be non-negative\" ;\n  ] ."
+            ),
+            "facts_ttl": "@prefix ex: <http://example.org/> .\n\nex:alice a ex:Person ;\n  ex:age -1 .",
+        },
+    ),
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    (
+        "response_finalize",
+        {
+            "reasoning": "e2e: finalizing after SHACL violation observation relay",
+            "subject": "Re: e2e reply",
+            "verification_summary": "e2e: formal_reason reported conforms false",
+            "content": "e2e-formal-reason-violation-verified-answer",
+        },
+    ),
+]
+
 FORMAL_REASON_VIOLATION_SPEC = MailflowScenarioSpec(
     label="formal_reason_violation",
     raw_id_prefix="e2e-formal-reason-viol-",
@@ -50,6 +78,7 @@ FORMAL_REASON_VIOLATION_SPEC = MailflowScenarioSpec(
     min_embedding_posts=1,
     min_rerank_posts=0,
     reply_body_needle="e2e-formal-reason-violation-verified-answer",
+    reasoning_phases=_VIOLATION_PHASES,
 )
 
 
@@ -77,13 +106,21 @@ def test_formal_reason_violation_full_pipeline(
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            for needle in ("conforms: False", "violations:"):
-                assert_journal_contains(wm_base, stub_tag, needle)
-            assert_violation_reasoning_without_gate(wm_base, stub_tag)
-            assert_ungated_reasoning_has_finalize(
-                wm_base, stub_tag, needle="conforms: False"
+            # Detag (§3.6.2): без journal-скана и без stub_tag — по STATE (correlation_key = thread-root).
+            def _flag(name: str) -> str:
+                return wiremock_state_thread_root_property(wm_base, correlation_key, name)
+
+            assert _flag("saw_conforms_false") == "1", (
+                "formal_reason observation (conforms: False) must reach reasoning (state saw_conforms_false)"
             )
-            log.info("formal_reason_violation_observation_verified", stub_tag=stub_tag)
+            assert _flag("saw_violations") == "1", (
+                "formal_reason violations must reach reasoning (state saw_violations)"
+            )
+            # Нарушение SHACL само по себе НЕ активирует formal_reason-гейт.
+            assert _flag("saw_gate_active") == "0", (
+                "formal_reason gate must NOT activate on a plain SHACL violation (state saw_gate_active)"
+            )
+            log.info("formal_reason_violation_observation_verified", correlation_key=correlation_key)
         except Exception:
             log.debug(
                 "failure_artifacts",

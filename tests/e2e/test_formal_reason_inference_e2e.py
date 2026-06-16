@@ -13,7 +13,6 @@ from pathlib import Path
 
 from tests.e2e.log import clip_log_body, log
 
-from .formal_reason_assertions import assert_all_reasoning_gate_absent
 from .toolkit import (
     E2EComposeRuntime,
     MailflowScenarioSpec,
@@ -23,10 +22,49 @@ from .toolkit import (
     mailflow_inject_and_wait,
     REPO_ROOT,
 )
-from .wiremock_client import wiremock_public_base
+from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_property
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_INFERENCE_BODY = "E2E-FORMAL-REASON-INFERENCE-BODY"
+
+# Detag (§3.6.8): generic reasoning. RDFS-inference flow вызывает formal_reason дважды (logic + повторный
+# re-complete в том же _decide до прихода derived_triples), затем tasks_upsert → finalize (min_chat=4).
+# Гейт не активируется. Запас finalize-фаз + absorbing-207 покрывают возможный лишний re-complete.
+_FR_INFER = {
+    "reasoning": "e2e: RDFS subclass inference — read derived triples",
+    "inference": "rdfs",
+    "return_derived": True,
+    "ontology_ttl": (
+        "@prefix ex: <http://example.org/> .\n@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .\n\n"
+        "ex:Employee rdfs:subClassOf ex:Person .\n"
+    ),
+    "shapes_ttl": (
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .\n@prefix ex: <http://example.org/> .\n\n"
+        "ex:PersonShape a sh:NodeShape ;\n  sh:targetClass ex:Person ;\n"
+        "  sh:property [ sh:path ex:name ; sh:minCount 1 ] ."
+    ),
+    "facts_ttl": '@prefix ex: <http://example.org/> .\n\nex:alice a ex:Employee ;\n  ex:name "Alice" .\n',
+}
+_INFERENCE_PHASES = [
+    ("formal_reason", dict(_FR_INFER)),
+    ("formal_reason", dict(_FR_INFER)),
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    (
+        "response_finalize",
+        {
+            "reasoning": "e2e: finalizing after formal_reason with derived triples",
+            "subject": "Re: e2e reply",
+            "verification_summary": "e2e: formal_reason returned derived_triples from RDFS inference",
+            "content": "e2e-formal-reason-inference-verified-answer",
+        },
+    ),
+]
 
 FORMAL_REASON_INFERENCE_SPEC = MailflowScenarioSpec(
     label="formal_reason_inference",
@@ -39,10 +77,10 @@ FORMAL_REASON_INFERENCE_SPEC = MailflowScenarioSpec(
     ),
     min_chat_completion_posts=4,
     min_reasoning_chat_completion_posts=2,
-    wiremock_journal_ready_needle="call_e2e_tasks_ledger_phase_formal_reason_done_ledger_done",
     min_embedding_posts=1,
     min_rerank_posts=0,
     reply_body_needle="e2e-formal-reason-inference-verified-answer",
+    reasoning_phases=_INFERENCE_PHASES,
 )
 
 
@@ -68,7 +106,10 @@ def test_formal_reason_inference_full_pipeline(
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            assert_all_reasoning_gate_absent(wm_base, stub_tag)
+            # Detag (§3.6.2): без journal/stub_tag — гейт formal_reason не активировался (STATE).
+            assert (
+                wiremock_state_thread_root_property(wm_base, correlation_key, "saw_gate_active") == "0"
+            ), "formal_reason gate must NOT activate for valid RDFS inference (state saw_gate_active)"
         except Exception:
             log.debug(
                 "failure_artifacts",

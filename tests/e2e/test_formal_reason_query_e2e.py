@@ -3,10 +3,11 @@
 Сценарий: reasoning → formal_reason (conforms=true, query=SELECT) →
 enrich_fast → reasoning → response_finalize.
 
-Покрытие:
-- formal_reason возвращает query_result (SPARQL bindings) в observation-note
-- query без inference работает на combined (data+ont) графе
-- min 2 chat completion (formal_reason + finalize)
+Покрытие (detag §3.6.2/§3.6.8 — generic reasoning + STATE-флаги, без journal-скана):
+- formal_reason возвращает query_result (SPARQL bindings) в observation-note → reasoning видит
+  ``query_result:`` (content-flag ``saw_query_result``)
+- гейт formal_reason НЕ активируется (query без нарушений) → ``saw_gate_active == 0``
+- min 3 chat completion (formal_reason + tasks_upsert + finalize)
 """
 from __future__ import annotations
 
@@ -14,10 +15,6 @@ from pathlib import Path
 
 from tests.e2e.log import clip_log_body, log
 
-from .formal_reason_assertions import (
-    assert_all_reasoning_gate_absent,
-    assert_ungated_reasoning_has_finalize,
-)
 from .toolkit import (
     E2EComposeRuntime,
     E2EComposeRuntime,
@@ -28,10 +25,47 @@ from .toolkit import (
     mailflow_inject_and_wait,
     REPO_ROOT,
 )
-from .wiremock_client import wiremock_public_base
+from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_property
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_QUERY_BODY = "E2E-FORMAL-REASON-QUERY-BODY"
+
+# Detag (§3.6.8): generic reasoning, линейный цикл formal_reason → tasks_upsert → response_finalize.
+# Гейт formal_reason НЕ срабатывает (query без нарушений), поэтому фазы линейны.
+_QUERY_PHASES = [
+    (
+        "formal_reason",
+        {
+            "reasoning": "e2e: SPARQL SELECT over conforming facts — read query_result",
+            "query": "PREFIX ex: <http://example.org/>\nSELECT ?name WHERE { ?p ex:name ?name } ORDER BY ?name",
+            "shapes_ttl": (
+                "@prefix sh: <http://www.w3.org/ns/shacl#> .\n@prefix ex: <http://example.org/> .\n\n"
+                "ex:PersonShape a sh:NodeShape ;\n  sh:targetClass ex:Person ;\n"
+                "  sh:property [ sh:path ex:name ; sh:minCount 1 ] ."
+            ),
+            "facts_ttl": (
+                '@prefix ex: <http://example.org/> .\n\nex:alice a ex:Person ;\n  ex:name "Alice" .\n\n'
+                'ex:bob a ex:Person ;\n  ex:name "Bob" .\n'
+            ),
+        },
+    ),
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    (
+        "response_finalize",
+        {
+            "reasoning": "e2e: finalizing after formal_reason SPARQL query",
+            "subject": "Re: e2e reply",
+            "verification_summary": "e2e: formal_reason returned query_result bindings for ex:name",
+            "content": "e2e-formal-reason-query-verified-answer",
+        },
+    ),
+]
 
 FORMAL_REASON_QUERY_SPEC = MailflowScenarioSpec(
     label="formal_reason_query",
@@ -46,6 +80,7 @@ FORMAL_REASON_QUERY_SPEC = MailflowScenarioSpec(
     min_embedding_posts=1,
     min_rerank_posts=0,
     reply_body_needle="e2e-formal-reason-query-verified-answer",
+    reasoning_phases=_QUERY_PHASES,
 )
 
 
@@ -69,10 +104,14 @@ def test_formal_reason_query_full_pipeline(e2e_runtime: E2EComposeRuntime) -> No
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            assert_all_reasoning_gate_absent(wm_base, stub_tag)
-            assert_ungated_reasoning_has_finalize(
-                wm_base, stub_tag, needle="query_result:"
-            )
+            # Detag (§3.6.2): без journal-скана. Гейт formal_reason не активировался (нет 'Gate retry
+            # counter:' ни в одном reasoning-теле), а query_result дошёл до reasoning — оба по STATE.
+            assert (
+                wiremock_state_thread_root_property(wm_base, correlation_key, "saw_gate_active") == "0"
+            ), "formal_reason gate must NOT activate for a conforming SPARQL query (state saw_gate_active)"
+            assert (
+                wiremock_state_thread_root_property(wm_base, correlation_key, "saw_query_result") == "1"
+            ), "formal_reason query_result bindings must reach reasoning (state saw_query_result)"
         except Exception:
             log.debug(
                 "failure_artifacts",

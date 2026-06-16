@@ -40,9 +40,9 @@ from .toolkit.isomorph_cline import (
 )
 from .toolkit.workers import wait_for_sut_threlium_user_workers_idle
 from .wiremock_client import (
-    composite_context_key,
     upsert_wiremock_mapping_directory,
     wiremock_public_base,
+    wiremock_seed_reasoning_phases,
     wiremock_state_seed_context,
 )
 from threlium.types.litellm_correlation_header import thread_root_hash
@@ -71,6 +71,31 @@ def _thread_root() -> str:
     return e2e_explicit_root_mid(_MARKER)
 
 
+# Detag (§3.6.8): generic reasoning, 2 линейные фазы (tasks_upsert → finalize) на один ход. isomorph —
+# не mailflow → фазы сидим тест-сайдом по ЧИСТОМУ thread-root; повторный seed между ходами ставит phase=0.
+_ISO_FINALIZE = (
+    "response_finalize",
+    {
+        "reasoning": "e2e: finalizing response with verified content",
+        "subject": "e2e reply",
+        "verification_summary": "e2e: direct answer, content verified",
+        "content": _REPLY_MARKER,
+    },
+)
+# Реальный Cline-клиент — агентный (переменное число reasoning-хопов). Запас finalize-фаз p1..p7 +
+# absorbing 207 (phase «залипает» на 7 → finalize навсегда) воспроизводят старую защёлку «после
+# tasks_upsert всегда finalize», устойчиво к любому числу хопов/ходов на одном thread-root.
+_ISO_PHASES = [
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+] + [_ISO_FINALIZE] * 7
+
+
 @pytest.fixture()
 def isomorph_cline(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntime, None, None]:
     """Setup ДО guard'а unmatched: settle, scoped-чистка СВОИХ прошлых тредов, стабы, СИД thread-root, cline.
@@ -89,9 +114,9 @@ def isomorph_cline(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntim
     # clean_isomorph_test_threads делал конкурентный `notmuch new` при живом движке → риск
     # Xapian::DatabaseModifiedError SIGABRT (см. fix(notmuch) db._destroy + drop per-test reindex).
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
-    wiremock_state_seed_context(
-        wm_base, composite_context_key(_STUB_TAG, thread_root_hash(_thread_root()))
-    )
+    _tr = thread_root_hash(_thread_root())
+    wiremock_state_seed_context(wm_base, _tr)
+    wiremock_seed_reasoning_phases(wm_base, _tr, _ISO_PHASES)
     configure_cline(
         rt, provider=_PROVIDER, api_key=_API_KEY, model=_MODEL,
         base_url=f"http://127.0.0.1:{_ISO_PORT}/v1", data_dir=_CLINE_DATA, cwd=_CLINE_CWD,

@@ -5,7 +5,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-matrix-wiremock-live-e2e-01::{{request.headers.[X-Threlium-Thread-Root]}}"
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}"
       }
     }
   },

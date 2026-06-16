@@ -65,6 +65,28 @@ MAILFLOW_SPEC = MailflowScenarioSpec(
     min_chat_completion_posts=3,
     min_embedding_posts=5,
     reply_body_needle="ok from llm-mock",
+    # Detag (§3.6.8): scripted reasoning via the shared generic reasoning stub-set (no per-test stubs).
+    reasoning_phases=[
+        (
+            "tasks_upsert",
+            {
+                "reasoning": "e2e: close enrich_task_plan seed before finalize",
+                "new_subtasks": [
+                    {"text": "Summarize the user request for the mailflow smoke", "status": "done"},
+                    {"text": "Complete the user request", "status": "done"},
+                ],
+            },
+        ),
+        (
+            "response_finalize",
+            {
+                "reasoning": "e2e: finalizing response with verified content",
+                "subject": "e2e reply",
+                "verification_summary": "e2e: direct answer, content verified",
+                "content": "ok from llm-mock",
+            },
+        ),
+    ],
 )
 
 

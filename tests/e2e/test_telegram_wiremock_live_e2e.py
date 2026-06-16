@@ -36,6 +36,7 @@ from .wiremock_client import (
     prepare_wiremock_scenario,
     wiremock_journal_request_body,
     wiremock_public_base,
+    wiremock_seed_reasoning_phases,
     wiremock_state_reasoning_gate_release,
     wiremock_telegram_register_update,
     wiremock_telegram_unregister_update,
@@ -60,6 +61,31 @@ TELEGRAM_WIREMOCK_STUB_DIR_TAIL_307 = (
     _WIREMOCK_STUBS_ROOT / "test_telegram_wiremock_live_e2e_private_tail_307"
 )
 TELEGRAM_AGENT_REPLY_BODY_TAIL_307 = "ok telegram wiremock live e2e private tail 307"
+
+
+# Detag (§3.6.8): generic reasoning. finalize.content = маркер ответа агента, который egress-стаб
+# 041_telegram_edit_message_text ищет (`contains fd.text <reply_body>`) → saw_egress_edit. Сид после
+# prepare_wiremock_scenario (он НЕ ставит gen_reasoning — его ставит 019). Параметризуется reply-телом
+# (у private/forum своё). tail_307 (multiturn 307-mutex + динамические tok-флаги) НЕ конвертирован.
+def _tg_phases(reply_body: str) -> list[tuple[str, dict[str, object]]]:
+    return [
+        (
+            "tasks_upsert",
+            {
+                "reasoning": "e2e: record task completion before finalize",
+                "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+            },
+        ),
+        (
+            "response_finalize",
+            {
+                "reasoning": "e2e: finalizing response with verified content",
+                "subject": "e2e telegram reply",
+                "verification_summary": "e2e: direct answer, content verified",
+                "content": reply_body,
+            },
+        ),
+    ]
 
 
 @contextmanager
@@ -119,6 +145,9 @@ def test_live_telegram_wiremock_full_contour_private(
             stub_dir=TELEGRAM_WIREMOCK_STUB_DIR_PRIVATE,
             stub_tag=test_id,
             correlation_key=correlation_key,
+        )
+        wiremock_seed_reasoning_phases(
+            base, correlation_key, _tg_phases(TELEGRAM_AGENT_REPLY_BODY_PRIVATE)
         )
 
         wiremock_telegram_register_update(
@@ -180,6 +209,9 @@ def test_live_telegram_wiremock_full_contour_forum_topic(
             stub_dir=TELEGRAM_WIREMOCK_STUB_DIR_FORUM,
             stub_tag=test_id,
             correlation_key=correlation_key,
+        )
+        wiremock_seed_reasoning_phases(
+            base, correlation_key, _tg_phases(TELEGRAM_AGENT_REPLY_BODY_FORUM)
         )
 
         wiremock_telegram_register_update(
@@ -476,6 +508,9 @@ def test_live_telegram_bridge_duplicate_skip_on_running_stack(
                 stub_dir=TELEGRAM_WIREMOCK_STUB_DIR_PRIVATE,
                 stub_tag=test_id,
                 correlation_key=correlation_key,
+            )
+            wiremock_seed_reasoning_phases(
+                base, correlation_key, _tg_phases(TELEGRAM_AGENT_REPLY_BODY_PRIVATE)
             )
             wiremock_telegram_register_update(
                 base,

@@ -37,10 +37,9 @@ from .toolkit.isomorph_cline import (
 )
 from .toolkit.workers import wait_for_sut_threlium_user_workers_idle
 from .wiremock_client import (
-    composite_context_key,
     upsert_wiremock_mapping_directory,
     wiremock_public_base,
-    wiremock_state_reset_phase,
+    wiremock_seed_reasoning_phases,
     wiremock_state_seed_context,
 )
 from threlium.types.litellm_correlation_header import thread_root_hash
@@ -72,6 +71,28 @@ def _thread_root() -> str:
     return thread_root_from_body(_SURFACE, _BODY)
 
 
+# Detag (§3.6.8): generic reasoning, 2 линейные фазы (tasks_upsert → finalize) на один ход. isomorph —
+# не mailflow → фазы сидим тест-сайдом по ЧИСТОМУ thread-root; повторный seed между ходами ставит phase=0.
+_ISO_PHASES = [
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    (
+        "response_finalize",
+        {
+            "reasoning": "e2e: finalizing response with verified content",
+            "subject": "e2e reply",
+            "verification_summary": "e2e: direct answer, content verified",
+            "content": _REPLY_MARKER,
+        },
+    ),
+]
+
+
 @pytest.fixture()
 def isomorph_json(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntime, None, None]:
     """Setup ДО guard'а unmatched: settle, scoped-чистка СВОИХ прошлых тредов, стабы, СИД thread-root.
@@ -84,9 +105,9 @@ def isomorph_json(e2e_runtime: E2EComposeRuntime) -> Generator[E2EComposeRuntime
     wait_for_sut_threlium_user_workers_idle(rt.project_name, timeout=30.0)
     wait_bridge_health(rt, port=_ISO_PORT)  # мост мог ещё не подняться после сессионного cold-reset
     upsert_wiremock_mapping_directory(wm_base, _STUB_DIR, stub_tag=_STUB_TAG)
-    wiremock_state_seed_context(
-        wm_base, composite_context_key(_STUB_TAG, thread_root_hash(_thread_root()))
-    )
+    _tr = thread_root_hash(_thread_root())
+    wiremock_state_seed_context(wm_base, _tr)
+    wiremock_seed_reasoning_phases(wm_base, _tr, _ISO_PHASES)
     try:
         yield rt
     finally:
@@ -122,15 +143,16 @@ def test_isomorph_bridge_anthropic_json_multiturn_continuity(isomorph_json: E2EC
     # Своё тело хода-1 (свой _MARKER_MT) → свой content-addressed thread-root, НЕ коллизирующий с happy_path.
     # Сидим свой контекст (фикстура засидила happy_path-root, нам нужен свой); стабы templated по thread-root.
     body1: dict[str, object] = {**_BODY, "messages": [{"role": "user", "content": f"ping mt [{_MARKER_MT}]"}]}
-    ctx1 = composite_context_key(_STUB_TAG, thread_root_hash(thread_root_from_body(_SURFACE, body1)))
+    ctx1 = thread_root_hash(thread_root_from_body(_SURFACE, body1))
     wiremock_state_seed_context(wm, ctx1)
+    wiremock_seed_reasoning_phases(wm, ctx1, _ISO_PHASES)
     s1, r1 = bridge_post_json(rt, port=_ISO_PORT, path=_PATH, body=body1, api_key=_API_KEY, surface=_SURFACE)
     assert s1 == 200, r1
     reply1 = extract_reply_text(_SURFACE, r1)
     assert _REPLY_MARKER in reply1, r1
 
     # Сброс reasoning-защёлки между ходами (свой контекст треда): иначе ход-2 видит её от хода-1.
-    wiremock_state_reset_phase(wm, ctx1)
+    wiremock_seed_reasoning_phases(wm, ctx1, _ISO_PHASES)  # reset phase=0 for turn2
     # Ход-2: reply1 несёт невидимый водяной знак glue хода-1 → мост декодит → IRT (без notmuch). Пост идёт
     # напрямую — никакого ожидания индексации glue и никакого 409-ретрая (механизмы сняты вместе с voting).
     body2 = build_continuation_body(_SURFACE, body1, reply1, f"continue [{_MARKER_MT}]")

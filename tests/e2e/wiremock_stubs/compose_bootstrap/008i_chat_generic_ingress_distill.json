@@ -9,17 +9,6 @@
       "X-Threlium-Call-Site": {
         "equalTo": "ingress_distill"
       }
-    },
-    "customMatcher": {
-      "name": "state-matcher",
-      "parameters": {
-        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "property": {
-          "active": {
-            "equalTo": "1"
-          }
-        }
-      }
     }
   },
   "response": {

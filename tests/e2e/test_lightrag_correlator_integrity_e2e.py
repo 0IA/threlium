@@ -103,6 +103,40 @@ LIGHTRAG_INTEGRITY_SPEC = MailflowScenarioSpec(
     rag_seed_index_wait_marker=_INDEX_CORR_MARKER,
     min_chat_completion_posts=3,
     reply_body_needle="ok from llm-mock",
+    # Detag (§3.6.8): shared generic reasoning, no per-test reasoning JSON (kills the 3-function
+    # intra-dir churn — the canonical Bug#2 case). Phase counter spans seed+main turns (same pure
+    # thread-root): seed turn = phase 0 tasks_upsert → phase 1 finalize; main turn = phase 2 finalize
+    # (composite kept phase_tasks_ledger_done across turns; the counter does the same positively).
+    reasoning_phases=[
+        (
+            "tasks_upsert",
+            {
+                "reasoning": "e2e: close enrich_task_plan seed before finalize",
+                "new_subtasks": [
+                    {"text": "Summarize the user request for the mailflow smoke", "status": "done"},
+                    {"text": "Complete the user request", "status": "done"},
+                ],
+            },
+        ),
+        (
+            "response_finalize",
+            {
+                "reasoning": "e2e: finalizing response with verified content",
+                "subject": "e2e reply",
+                "verification_summary": "e2e: direct answer, content verified",
+                "content": "ok from llm-mock",
+            },
+        ),
+        (
+            "response_finalize",
+            {
+                "reasoning": "e2e: finalizing response with verified content",
+                "subject": "e2e reply",
+                "verification_summary": "e2e: direct answer, content verified",
+                "content": "ok from llm-mock",
+            },
+        ),
+    ],
 )
 
 

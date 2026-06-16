@@ -11,12 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from .formal_reason_assertions import (
-    assert_first_fsm_reasoning_gate_absent,
-    assert_gated_reasoning_calls,
-    assert_journal_contains,
-    assert_ungated_reasoning_has_finalize,
-)
 from .log import clip_log_body, log
 from .toolkit import (
     E2EComposeRuntime,
@@ -27,11 +21,17 @@ from .toolkit import (
     mailflow_inject_and_wait,
     REPO_ROOT,
 )
-from .wiremock_client import wiremock_public_base
+from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_property
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_TECH_GATE_BODY = "E2E-FORMAL-REASON-TECH-GATE-BODY"
 
+# Detag: gated formal_reason — PER-TEST latch reasoning-стабы (swap→pure, БЕЗ журнала, content-flags).
+# Слепой generic phase-counter НЕ моделирует гейт (под активным гейтом FSM отвергает finalize → ре-диспатч
+# → пере-хоп → краш). Latch-стабы (100/101/102/103) матчат по ТЕЛУ ('Gate retry counter:'/'QUERY ERROR'/
+# 'query_result:') + фазовым защёлкам на ЧИСТОМ thread-root → корректно следуют гейту, без слепого счётчика.
+# Проверки — по STATE-флагам (gate_at_phase0/saw_gate_active/saw_query_error/gated_has_finalize/
+# saw_query_result), которые пишут сами latch-стабы. Без journal, без stub_tag-гейтинга, без generic-фаз.
 FORMAL_REASON_TECH_GATE_SPEC = MailflowScenarioSpec(
     label="formal_reason_technical_gate",
     raw_id_prefix="e2e-formal-reason-tech-gate-",
@@ -46,8 +46,6 @@ FORMAL_REASON_TECH_GATE_SPEC = MailflowScenarioSpec(
     min_embedding_posts=1,
     min_rerank_posts=0,
     reply_body_needle="e2e-formal-reason-tech-gate-verified-answer",
-    # Длинный gate-контур: poll tasks_ledger в журнале до GreenMail (finalize+egress в его окне).
-    wiremock_journal_ready_needle="call_e2e_tasks_ledger_tech_gate",
 )
 
 
@@ -73,13 +71,26 @@ def test_formal_reason_technical_gate_full_pipeline(
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            assert_first_fsm_reasoning_gate_absent(
-                wm_base, stub_tag, E2E_FORMAL_REASON_TECH_GATE_BODY
+            # Detag (§3.6.2): без journal/stub_tag — детерминированный gate-цикл по STATE.
+            def _flag(name: str) -> str:
+                return wiremock_state_thread_root_property(wm_base, correlation_key, name)
+
+            # 1-й reasoning (фаза 0) — ДО активации гейта (гейт ещё не вставлен).
+            assert _flag("gate_at_phase0") == "0", (
+                "first FSM reasoning must be ungated (state gate_at_phase0)"
             )
-            assert_gated_reasoning_calls(wm_base, stub_tag)
-            assert_journal_contains(wm_base, stub_tag, "QUERY ERROR")
-            assert_ungated_reasoning_has_finalize(
-                wm_base, stub_tag, needle="query_result:"
+            # QUERY ERROR от невалидного SPARQL дошёл до reasoning И активировал гейт.
+            assert _flag("saw_query_error") == "1", "QUERY ERROR must reach reasoning (state saw_query_error)"
+            assert _flag("saw_gate_active") == "1", (
+                "QUERY ERROR must activate the formal_reason gate (state saw_gate_active)"
+            )
+            # Под активным гейтом finalize НЕ предлагается (owner-выбор: gated → нет finalize).
+            assert _flag("gated_has_finalize") == "0", (
+                "gated reasoning must NOT offer response_finalize (state gated_has_finalize)"
+            )
+            # Исправленный запрос вернул query_result → ungated finalize.
+            assert _flag("saw_query_result") == "1", (
+                "corrected formal_reason query_result must reach reasoning (state saw_query_result)"
             )
         except Exception:
             log.error(

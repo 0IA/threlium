@@ -1,31 +1,31 @@
 {
+  "metadata": {
+    "threlium_stub_tag": "generic-summarize-thread-context"
+  },
   "request": {
     "method": "POST",
     "urlPathPattern": "^(/v1/chat/completions|/chat/completions)$",
     "headers": {
       "X-Threlium-Call-Site": {
-        "equalTo": "enrich_task_plan"
+        "equalTo": "summarize_thread_context"
       }
     },
     "bodyPatterns": [
       {
         "contains": "\"tools\""
       }
-    ],
-    "customMatcher": {
-      "name": "state-matcher",
-      "parameters": {
-        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}"
-      }
-    }
+    ]
   },
   "response": {
     "status": 200,
     "headers": {
       "Content-Type": "application/json"
     },
+    "transformers": [
+      "response-template"
+    ],
     "jsonBody": {
-      "id": "chatcmpl-e2e-task-ledger-noop-enrich-task-plan",
+      "id": "chatcmpl-e2e-generic-summarize_thread_context",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
@@ -38,11 +38,11 @@
             "content": null,
             "tool_calls": [
               {
-                "id": "call_enrich_task_plan_e2e",
+                "id": "call_summarize_generic_thread_context",
                 "type": "function",
                 "function": {
-                  "name": "enrich_task_plan",
-                  "arguments": "{\"subtasks\": [\"Reproduce the tasks_upsert validation error\"]}"
+                  "name": "summarize_thread_context",
+                  "arguments": "{\"summary\": \"E2e generic thread-context summary (nonce {{randomValue length=16 type='ALPHANUMERIC'}}).\"}"
                 }
               }
             ]

@@ -48,6 +48,26 @@ from .sut_user_systemd import e2e_threlium_user_unit_journalctl_bash
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_IMAP_CHECKPOINT_BODY = "E2E-IMAP-CHECKPOINT-BODY"
 
+# Detag (§3.6.8): generic reasoning, 2 linear phases (tasks_upsert → finalize) per act/turn.
+_IMAP_REASONING_PHASES = [
+    (
+        "tasks_upsert",
+        {
+            "reasoning": "e2e: record task completion before finalize",
+            "new_subtasks": [{"text": "Complete the user request", "status": "done"}],
+        },
+    ),
+    (
+        "response_finalize",
+        {
+            "reasoning": "e2e: finalizing response with verified content",
+            "subject": "e2e reply",
+            "verification_summary": "e2e: direct answer, content verified",
+            "content": "ok from llm-mock",
+        },
+    ),
+]
+
 IMAP_CHECKPOINT_ACT1_SPEC = MailflowScenarioSpec(
     label="imap_checkpoint_act1",
     raw_id_prefix="e2e-imap-cp-a-",
@@ -57,6 +77,7 @@ IMAP_CHECKPOINT_ACT1_SPEC = MailflowScenarioSpec(
     min_chat_completion_posts=2,
     min_embedding_posts=5,
     min_rerank_posts=0,
+    reasoning_phases=_IMAP_REASONING_PHASES,
 )
 
 IMAP_CHECKPOINT_ACT3_SPEC = MailflowScenarioSpec(
@@ -68,6 +89,7 @@ IMAP_CHECKPOINT_ACT3_SPEC = MailflowScenarioSpec(
     min_chat_completion_posts=2,
     min_embedding_posts=5,
     min_rerank_posts=0,
+    reasoning_phases=_IMAP_REASONING_PHASES,
 )
 
 
