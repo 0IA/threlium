@@ -89,7 +89,9 @@ from .toolkit import (
     e2e_restart_compose_service,
     e2e_restart_threlium_engine_only,
     e2e_shared_compose_stack_is_healthy,
+    e2e_start_all_sut_services,
     e2e_start_threlium_user_pipeline_services,
+    e2e_stop_all_sut_services,
     e2e_stop_threlium_user_pipeline_services,
     e2e_wait_bootstrap_indexed,
     resolve_e2e_sut_image,
@@ -186,28 +188,25 @@ def _e2e_wiremock_journal_reset_once(
     параллельных тестов (поэтому это НЕ thrash — engine рестартует под локом, пока контуров ещё нет;
     см. [[n4-coldreset-thrash-rootcause]]):
 
-    1. ПАРАЛЛЕЛЬНО (3 потока, разные контейнеры): ``e2e_stop_threlium_user_pipeline_services`` (снять
-       engine + work@ + sweep@, мосты живут) ‖ ``e2e_restart_compose_service(wiremock)`` ‖
-       ``e2e_restart_compose_service(greenmail)``. Контейнер-рестарт = ЧИСТЫЙ инстанс БЕЗ API-чистки и
-       БЕЗ ``stub_tag``: WireMock грузит bootstrap из mounted ``mappings/`` файлами на старте (vendored
-       ``JsonFileMappingsSource.listFilesRecursively``), journal+State пусты; GreenMail in-memory → пустые
-       ящики. Мосты self-heal на рестарте backend (``StartLimitIntervalSec=0``). Settle НЕ нужен (чистый
-       State С НУЛЯ ⇒ нет leaked-inject). Барьер: ``_stop_fut.result()`` (смерть engine-процесса → release
-       FD) ПЕРЕД flush;
-    2. ``wait_for_wiremock_ready`` + ``wait_for_greenmail_ready`` — дождаться готовности backends;
-    3. ``e2e_flush_sut_fsm_maildirs`` (engine мёртв) — стереть Maildir + notmuch + **весь LightRAG**
-       (redis ``FLUSHALL`` + ``rm -rf lightrag``). КРИТИЧНО: в индекс LightRAG за прогон попадает не
-       только документ из ``knowledge/``, а КАЖДОЕ обработанное письмо → без этого wipe мусор писем
-       прошлого прогона переживёт сессию и исказит изоляцию;
-    4. ``e2e_install_deterministic_knowledge_corpus`` — заменить запечённый 27-доковый корпус ОДНИМ
-       маленьким probe-документом из тестовых ресурсов (``tests/e2e/fixtures``), чтобы reindex
-       проиндексировал ровно его;
-    5. ``e2e_start_threlium_user_pipeline_services`` — поднять engine на чистом сторе: bootstrap
-       индексирует ровно probe; ``e2e_wait_bootstrap_indexed`` — барьер (embedding в WireMock +
-       persist ``doc_status`` в redis), после которого индекс готов и тесты могут стартовать;
-    6. ``e2e_restart_threlium_engine_only`` — идемпотентный рестарт без wipe (LightRAG dedup →
+    ЕДИНОЕ API, фазы СТОП→ПОДГОТОВКА→СТАРТ (без гонок cold-reset↔backend-restart, см. ниже):
+
+    1. ``e2e_stop_all_sut_services`` — ПОСЛЕДОВАТЕЛЬНЫЙ барьер: снять ВСЕ сервисы (мосты + engine + work@ +
+       sweep@) с барьером смерти engine-процесса (release FD на ``lightrag/``). Раньше backends рестартовали
+       ПАРАЛЛЕЛЬНО под ЖИВЫМИ сервисами → две гонки: (a) ``rm -rf lightrag`` из-под живого FD движка
+       (воскрешённого ``Restart=always`` после SIGKILL) → torn lancedb/cozo-манифест ``Not found``;
+       (b) рестарт WireMock/GreenMail рвал persistent-коннект мостов (IMAP-IDLE/long-poll/SSE) → краш-сторм →
+       потерянные события → таймауты. Стоп-всех-первым снимает обе в корне;
+    2. ПОДГОТОВКА — ПАРАЛЛЕЛЬНО (сервисы мертвы ⇒ гонок нет; 3 изолированных таргета): ``wiremock`` рестарт+
+       ready ‖ ``greenmail`` рестарт+ready ‖ SUT-фс wipe (``e2e_flush_sut_fsm_maildirs``: Maildir+notmuch+весь
+       LightRAG = redis ``FLUSHALL``+``rm -rf lightrag``) + ``e2e_install_deterministic_knowledge_corpus``
+       (probe-корпус). Контейнер-рестарт = ЧИСТЫЙ инстанс БЕЗ API-чистки/``stub_tag`` (WireMock грузит
+       bootstrap из mounted ``mappings/``; GreenMail in-memory). КРИТИЧНО: wipe ОБЯЗАН быть ПОСЛЕ смерти всех
+       сервисов (FD сняты) — в индекс попадает каждое письмо, мусор прошлой сессии исказил бы изоляцию;
+    3. ``e2e_start_all_sut_services`` — поднять ВСЕ сервисы (мосты на ГОТОВЫХ backends — без гонки + engine);
+       ``e2e_wait_bootstrap_indexed`` — барьер (embedding в WireMock + persist ``doc_status`` в redis);
+    4. ``e2e_restart_threlium_engine_only`` — идемпотентный рестарт без wipe (LightRAG dedup →
        ``[DUPLICATE:filename]``, который читает ``test_bootstrap_idempotent_on_restart``);
-    7. idle + повторный ``reset_request_journal``.
+    5. idle + повторный ``reset_request_journal``.
 
     Между тестами pipeline **не** перезапускается и per-test чистки **нет**: корреляторы динамичны
     (uuid у mailflow/isomorph) → прогоны/соседи не пересекаются, изоляция = коррелятор
@@ -251,25 +250,44 @@ def _e2e_wiremock_journal_reset_once(
             # Poll-мосты (matrix/telegram/isomorph/email) переживают рестарт backend: в
             # ``threlium-bridge@.service`` ``StartLimitIntervalSec=0`` → self-heal-рестарт до готовности backend,
             # без permanent-fail. Settle НЕ нужен: чистый WireMock State (``matrix_rooms``/``telegram_updates``
-            # пусты С НУЛЯ) ⇒ никакого leaked-inject прошлой сессии. ИНВАРИАНТ (corruption-guard): flush
-            # Maildir/LightRAG (``rm -rf lightrag``) — ТОЛЬКО ПОСЛЕ полной смерти engine-процесса (иначе
-            # осиротевший inode под живым FD → битый lancedb-манифест ``Not found``). Поэтому ``join`` stop ДО flush.
+            # пусты С НУЛЯ) ⇒ никакого leaked-inject прошлой сессии.
+            #
+            # ЕДИНОЕ API, ПОЛНОСТЬЮ ПОСЛЕДОВАТЕЛЬНО (без ThreadPoolExecutor): СТОП всех сервисов → рестарт
+            # backends + wait + WIPE → СТАРТ всех сервисов (ниже, bootstrap-секция). Прежний ПАРАЛЛЕЛЬНЫЙ
+            # рестарт backend под живыми сервисами был источником гонок: (1) ``rm -rf lightrag`` из-под живого
+            # FD движ(воскрешённого Restart=always) → torn lancedb/cozo-манифест ``Not found``; (2) рестарт
+            # WireMock/GreenMail рвал persistent-коннект мостов (email IMAP-IDLE, telegram/matrix long-poll,
+            # isomorph SSE) → краш-сторм → потерянные события → таймауты. Последовательность это снимает в
+            # корне; бонус — engine-drain идёт против ЖИВОГО WireMock (рестартуем его ПОСЛЕ смерти движка).
+            # ИНВАРИАНТ: WIPE (``rm -rf lightrag``) — ТОЛЬКО когда ВСЕ сервисы мертвы (FD сняты), иначе порча.
+            e2e_stop_all_sut_services(rt)  # БАРЬЕР: мосты + engine/work/sweep мертвы (FD lightrag освобождены)
+
+            # PREP — теперь МОЖНО ПАРАЛЛЕЛЬНО: все сервисы мертвы, поэтому подготовки ничего НЕ гонят (в
+            # отличие от прежнего бага, где backend рестартовали под ЖИВЫМИ сервисами). Три независимых
+            # таргета: WireMock-контейнер ‖ GreenMail-контейнер ‖ SUT-фс (wipe lightrag/notmuch/maildir+redis
+            # → install probe-корпус). Каждый таргет изолирован → параллельность безопасна и экономит время.
+            def _prep_wiremock() -> None:
+                e2e_restart_compose_service(pn, "wiremock")
+                wait_for_wiremock_ready(pn, timeout=TIMEOUT_POLL_SHORT)
+
+            def _prep_greenmail() -> None:
+                e2e_restart_compose_service(pn, "greenmail")
+                wait_for_greenmail_ready(pn, timeout=TIMEOUT_POLL_SHORT)
+
+            def _prep_sut_store() -> None:
+                # SINK flush (все сервисы мертвы → FD/локи сняты, rm безопасен): Maildir + notmuch + ВЕСЬ
+                # LightRAG (redis FLUSHALL + rm lightrag — стор в SUT, не в backends), затем probe-корпус.
+                e2e_flush_sut_fsm_maildirs(rt)
+                e2e_install_deterministic_knowledge_corpus(rt)
+
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as _ex:
-                _stop_fut = _ex.submit(e2e_stop_threlium_user_pipeline_services, rt)
-                _wm_fut = _ex.submit(e2e_restart_compose_service, pn, "wiremock")
-                _gm_fut = _ex.submit(e2e_restart_compose_service, pn, "greenmail")
-                _stop_fut.result()  # БАРЬЕР: engine полностью мёртв (FD released) → flush безопасен.
-                _wm_fut.result()
-                _gm_fut.result()
-            # Backends подняты, bootstrap file-loaded — дождаться готовности (port+health) до flush/start.
-            wait_for_wiremock_ready(pn, timeout=TIMEOUT_POLL_SHORT)
-            wait_for_greenmail_ready(pn, timeout=TIMEOUT_POLL_SHORT)
-            # SINK flush (engine мёртв): Maildir + notmuch + ВЕСЬ LightRAG (redis FLUSHALL + rm lightrag —
-            # стор НЕ в wiremock/greenmail, а в SUT: lancedb-файлы $HOME/lightrag + Redis KV). Без wipe мусор
-            # писем прошлой сессии исказил бы изоляцию. Engine мёртв → cozo/lancedb FD+локи сняты, rm безопасен.
-            e2e_flush_sut_fsm_maildirs(rt)
-            # Детерминированный корпус: запечённые 27 playbook-доков → ОДИН probe из тестовых ресурсов.
-            e2e_install_deterministic_knowledge_corpus(rt)
+                _prep_futs = [
+                    _ex.submit(_prep_wiremock),
+                    _ex.submit(_prep_greenmail),
+                    _ex.submit(_prep_sut_store),
+                ]
+                for _f in _prep_futs:
+                    _f.result()  # пробросить ошибку любого таргета (retryable: marker НЕ ставим)
         except Exception as e:
             # До старта engine: стек ещё снят, ничего деструктивного для параллельных контуров не сделано
             # (их нет — мы под локом до тестов) → безопасно повторить на следующем тесте (marker НЕ ставим).
@@ -294,7 +312,10 @@ def _e2e_wiremock_journal_reset_once(
         # маскировка timeout — корневую причину чиним отдельно; здесь лишь защита общего стека.
         try:
             reset_request_journal(wm)
-            e2e_start_threlium_user_pipeline_services(rt)
+            # СТАРТ всех сервисов (единое API): мосты (на готовых backends — без гонки) + engine. Затем
+            # bootstrap-реиндекс probe + идемпотентный рестарт движка. reset_journal ДО старта — чтобы
+            # bootstrap-embeds движка легли в чистый журнал.
+            e2e_start_all_sut_services(rt)
             e2e_wait_bootstrap_indexed(rt)
             e2e_restart_threlium_engine_only(pn)
             wait_for_sut_threlium_user_workers_idle(pn, timeout=120.0)

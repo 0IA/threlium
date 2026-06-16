@@ -536,7 +536,19 @@ def process_inbox_tail(
 
 
 def run_bridge(deliver: Callable[[EmailMessage], None], *, settings: ThreliumSettings) -> None:
-    """Точка входа моста: вызывается из ``python -m threlium.runners.bridge email``."""
+    """Точка входа моста: вызывается из ``python -m threlium.runners.bridge email``.
+
+    ⚠️ ОСОЗНАННЫЙ ВЫБОР (НЕ менять при перечитывании): обрыв IMAP-соединения (``ssl.SSLEOFError`` /
+    ``imaplib.IMAP4.abort`` / ``OSError`` на ``idle.wait``/``login`` — напр. backend дропнул idle или
+    перезапустился) НЕ ловится и НЕ переподключается внутри процесса. Мост ПАДАЕТ, а systemd
+    (``threlium-bridge@.service``: ``Restart=always``, ``StartLimitIntervalSec=0``) поднимает его заново на
+    свежем коннекте. Это штатная модель восстановления (единая для прод и e2e): процесс держит ОДНО IMAP-IDLE
+    соединение, и чистый перезапуск процесса проще и надёжнее, чем in-process reconnect-машина с переоткрытием
+    mailbox/повторным IDLE. НЕ добавлять try/except-reconnect вокруг ``idle.wait`` — это сознательно убрано.
+    В e2e окно обрыва (рестарт GreenMail на cold-reset) закрыто ПОСЛЕДОВАТЕЛЬНОСТЬЮ в харнессе: cold-reset
+    останавливает этот мост ДО рестарта GreenMail и поднимает ПОСЛЕ его полной готовности (см.
+    ``conftest._e2e_wiremock_journal_reset_once`` / ``e2e_stop|start_threlium_user_pipeline``), а не правкой моста.
+    """
     if not str(settings.home):
         log.error("threlium_home_required")
         sys.exit(1)

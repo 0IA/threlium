@@ -33,6 +33,7 @@ from .cleanup import (
     e2e_flush_greenmail_inboxes,
     e2e_flush_sut_fsm_maildirs,
 )
+from .sut_fs_cleanup import e2e_sut_remove_paths
 from .compose_lifecycle import (
     cleanup_stale_bundle_archives,
     compose_down_project,
@@ -103,7 +104,11 @@ from .notmuch_assert import (
     poll_lightrag_indexed_positive,
 )
 from .pipeline import (
+    e2e_start_all_bridges,
+    e2e_start_all_sut_services,
     e2e_start_threlium_user_pipeline_services,
+    e2e_stop_all_bridges,
+    e2e_stop_all_sut_services,
     e2e_stop_threlium_user_pipeline_services,
     e2e_sut_threlium_user_journal_rotate_and_vacuum,
 )

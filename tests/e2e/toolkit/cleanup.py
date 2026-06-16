@@ -20,6 +20,7 @@ from .constants import (
 )
 from .greenmail import _greenmail_imap_expunge_folder
 from .runtime import E2EComposeRuntime, service_exec
+from .sut_fs_cleanup import e2e_sut_remove_paths
 
 
 def e2e_flush_greenmail_inboxes(rt: E2EComposeRuntime) -> None:
@@ -72,6 +73,19 @@ def e2e_flush_sut_fsm_maildirs(rt: E2EComposeRuntime) -> None:
     if str(raw).strip().lower() in ("1", "true", "yes", "on"):
         log.info("sut_maildir_flush_skipped", env=THRELIUM_E2E_SKIP_SUT_MAILDIR_FLUSH_ENV)
         return
+    # Файловые tree-удаления (LightRAG-стор + notmuch Xapian-индекс) — через ЕДИНЫЙ Python-метод с
+    # FD-диагностикой (``sut_fs_cleanup.e2e_sut_remove_paths``): он логирует, держит ли кто-то FD на
+    # каталог в момент сноса (cold-reset идёт перед тестами и обязан отдать чистый стор; если движок ещё
+    # жив и держит FD на ``lightrag/`` — lancedb стартует на огрызке → манифест ``Not found`` → порча
+    # тянется в прогон). Раньше это был ``rm -rf`` в bash без структурного лога и без проверки FD.
+    e2e_sut_remove_paths(
+        rt,
+        [
+            E2E_REMOTE_THRELIUM_HOME + "/lightrag",  # LightRAG-стор (lancedb+cozo); 173MB+ за прогон
+            E2E_REMOTE_THRELIUM_HOME + "/stages/.notmuch",  # notmuch Xapian (stale thread-ids)
+        ],
+        reason="cold_reset_flush",
+    )
     th = shlex.quote(E2E_REMOTE_THRELIUM_HOME)
     nm_cfg = shlex.quote(E2E_REMOTE_POSIX_HOME + "/.notmuch-config")
     home_q = shlex.quote(E2E_REMOTE_POSIX_HOME)
@@ -85,20 +99,9 @@ if [ -d "$TH/stages" ]; then
     -o -path '*/Maildir/tmp/*' \\) \\
     -type f ! -name '.*' -delete 2>/dev/null || true
 fi
-# LightRAG accumulates data across runs (173MB+); entity extraction slows to 60s+ per document.
-rm -rf "$TH/lightrag" 2>/dev/null || true
-# Проверка, что стор ДЕЙСТВИТЕЛЬНО снят (cold-reset идёт перед тестами и обязан отдать чистый стор):
-# если каталог пережил rm — обычно живой engine-процесс держит FD (см. process-death wait в
-# e2e_stop_threlium_user_pipeline_bash). НЕ глотаем молча — иначе lancedb стартует на огрызке стора
-# (манифест → удалённый data-файл) и порча тянется в прогон.
-if [ -e "$TH/lightrag" ]; then
-  echo "[e2e] WARN lightrag survived rm (engine FDs held?): $(ls -A "$TH/lightrag" 2>/dev/null | tr '\\n' ' ')" >&2
-fi
-# notmuch Xapian index — stale thread IDs interfere with isolation; recreated by `notmuch new`.
-rm -rf "$TH/stages/.notmuch" 2>/dev/null || true
-# LightRAG KV/doc-status теперь в Redis (localhost) — чистим вместе с файловым lightrag-каталогом,
-# иначе индекс/кэш прошлой сессии переживёт wipe и сломает изоляцию прогона. dbsize after = guard:
-# >0 = стор не очистился (engine жив / чужой redis) → caller увидит в логе sut_maildir_flush_diag.
+# LightRAG KV/doc-status теперь в Redis (localhost) — чистим вместе с файловым lightrag-каталогом (снят
+# выше через e2e_sut_remove_paths), иначе индекс/кэш прошлой сессии переживёт wipe и сломает изоляцию.
+# dbsize after = guard: >0 = стор не очистился (engine жив / чужой redis) → видно в sut_maildir_flush_diag.
 redis-cli flushall 2>&1 || echo "[e2e] WARN redis flushall FAILED"
 echo "[e2e] COLDRESET redis_dbsize_after=$(redis-cli dbsize 2>&1)"
 su - {E2E_THRELIUM_USER} -s /bin/bash -c {su_wrap} </dev/null || true

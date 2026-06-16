@@ -98,21 +98,25 @@ class CozoGraphStorage(BaseGraphStorage):
         from pycozo.client import Client  # noqa: PLC0415 — тяжёлый импорт только при реальном старте
 
         os.makedirs(os.path.dirname(self._db_path) or ".", exist_ok=True)
-        self._db = Client("rocksdb", self._db_path)
-        existing = {r.get("name") for r in _records(self._db.run("::relations"))}
-        if self._nodes not in existing:
-            self._db.run(f":create {self._nodes} {{id: String => data: Json}}")
-        if self._edges not in existing:
-            self._db.run(f":create {self._edges} {{src: String, tgt: String => data: Json}}")
-        if self._adj not in existing:
-            self._db.run(f":create {self._adj} {{node: String, neighbor: String}}")
-            # backfill from existing edges (both directions) — one-time index build for a pre-existing graph
-            # (no-op on a fresh db; keeps adj consistent if edges predate the index).
-            self._db.run(
-                f"?[node, neighbor] := *{self._edges}{{src: node, tgt: neighbor}}\n"
-                f"?[node, neighbor] := *{self._edges}{{src: neighbor, tgt: node}}\n"
-                f":put {self._adj} {{node, neighbor}}"
-            )
+        try:
+            self._db = Client("rocksdb", self._db_path)
+            existing = {r.get("name") for r in _records(self._db.run("::relations"))}
+            if self._nodes not in existing:
+                self._db.run(f":create {self._nodes} {{id: String => data: Json}}")
+            if self._edges not in existing:
+                self._db.run(f":create {self._edges} {{src: String, tgt: String => data: Json}}")
+            if self._adj not in existing:
+                self._db.run(f":create {self._adj} {{node: String, neighbor: String}}")
+                # backfill from existing edges (both directions) — one-time index build for a pre-existing
+                # graph (no-op on a fresh db; keeps adj consistent if edges predate the index).
+                self._db.run(
+                    f"?[node, neighbor] := *{self._edges}{{src: node, tgt: neighbor}}\n"
+                    f"?[node, neighbor] := *{self._edges}{{src: neighbor, tgt: node}}\n"
+                    f":put {self._adj} {{node, neighbor}}"
+                )
+        except Exception as e:  # лог + re-raise (не глотаем): init-сбой стора диагностируется сразу
+            log.error("cozo_init_failed", workspace=self.workspace, detail=_cozo_error_detail(e))
+            raise
         log.debug(
             "cozo_graph_ready",
             workspace=self.workspace,

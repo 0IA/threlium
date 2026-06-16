@@ -6,9 +6,16 @@
 (``connect_async``) НЕ блокирует event-loop (в отличие от синхронного gRPC Milvus, который морозил
 единственный rag-loop — см. память ``n4-rag-loop-stall-pyspy``).
 
-Lock-free: **никакого ``_storage_lock``** — конкуренцию арбитрит MVCC стора. Эмбеддинг — на upsert
-(без отложенного буфера и flush в ``index_done_callback``): запись LanceDB сразу durable+видима →
-read-your-writes бесплатно.
+Конкурентность — **lock-free MVCC** (главное преимущество LanceDB: конкурентные чтения И записи без
+сериализации; probe подтвердил — конкурентные ops на одном handle и с двух коннектов дают 0 ошибок).
+``-n12``-деградация с ``lance error: Not found ...chunks.lance/_versions`` оказалась **НЕ проблемой адаптера/
+MVCC**, а багом ТЕСТ-ХАРНЕССА: cold-reset ``rm -rf lightrag`` сносил каталог, пока живой движок (воскрешённый
+``Restart=always`` после SIGKILL барьера смерти) держал открытый FD на ``cozo_graph/data/LOG`` → осиротевший
+inode → торн-стор. Исправлено в харнессе (``tests/e2e/toolkit/sut_fs_cleanup.py`` добивает FD-холдеров перед
+rm), НЕ здесь. Поэтому адаптер — чистый lock-free, без ``read_consistency_interval``-override. Опциональный
+single-writer лок (``get_namespace_lock``) оставлен аварийным тумблером (``THRELIUM_LANCEDB_WRITE_LOCK=1``;
+**по умолчанию ВЫКЛ**). Эмбеддинг — durable на upsert. Все ошибки во всех операциях логируются и
+ПРОБРАСЫВАЮТСЯ (пропуска ``Not found`` нет — всплывёт, если возникнет). См. ``lancedb-concurrent-purge-notfound-bug``.
 
 Реестр lightrag-стора (имя→модуль + allowlist) регистрируется в рантайме из threlium-кода
 (``_construction._register_lancedb_storage``), без патча вендора.
@@ -22,6 +29,7 @@ lightrag не менялось.
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from dataclasses import dataclass
@@ -31,6 +39,7 @@ import numpy as np
 import pyarrow as pa
 
 from lightrag.base import BaseVectorStorage
+from lightrag.kg.shared_storage import get_namespace_lock
 from lightrag.utils import compute_mdhash_id
 
 from threlium.logutil import logger
@@ -61,6 +70,11 @@ class LanceDBVectorDBStorage(BaseVectorStorage):
         self._meta_cols = sorted(self.meta_fields)
         self._db: Any = None
         self._tbl: Any = None
+        # ОПЦИОНАЛЬНЫЙ single-writer лок мутаций — по умолчанию ВЫКЛ (lock-free MVCC, главное преимущество
+        # LanceDB). -n12-деградация была багом тест-харнесса (снос lightrag из-под живого FD движка), не
+        # адаптера — чинится в харнессе. Лок оставлен лишь аварийным тумблером ``THRELIUM_LANCEDB_WRITE_LOCK=1``.
+        self._serialize_writes: bool = os.environ.get("THRELIUM_LANCEDB_WRITE_LOCK", "0") == "1"
+        self._storage_lock: Any = None
 
     def _schema(self) -> pa.Schema:
         fields = [
@@ -75,12 +89,25 @@ class LanceDBVectorDBStorage(BaseVectorStorage):
         import lancedb  # noqa: PLC0415 — тяжёлый импорт только при реальном старте стора
 
         os.makedirs(self._uri, exist_ok=True)
-        self._db = await lancedb.connect_async(self._uri)
-        names = await self._db.table_names()
-        if self._table_name in names:
-            self._tbl = await self._db.open_table(self._table_name)
-        else:
-            self._tbl = await self._db.create_table(self._table_name, schema=self._schema())
+        try:
+            self._db = await lancedb.connect_async(self._uri)
+            names = await self._db.table_names()
+            if self._table_name in names:
+                self._tbl = await self._db.open_table(self._table_name)
+            else:
+                self._tbl = await self._db.create_table(self._table_name, schema=self._schema())
+        except Exception as e:
+            log.error(
+                "lancedb_init_failed",
+                workspace=self.workspace,
+                table=self._table_name,
+                uri=self._uri,
+                error=repr(e),
+            )
+            raise
+        if self._serialize_writes:
+            # опционально: single-writer лок (как faiss/nano) — сериализует мутации namespace в процессе.
+            self._storage_lock = get_namespace_lock(self.namespace, workspace=self.workspace)
         log.debug(
             "lancedb_table_ready",
             workspace=self.workspace,
@@ -112,6 +139,12 @@ class LanceDBVectorDBStorage(BaseVectorStorage):
             )
             raise
 
+    def _write_guard(self) -> Any:
+        """Контекст для мутаций: single-writer лок, если включён настройкой; иначе no-op (lock-free MVCC)."""
+        if self._serialize_writes and self._storage_lock is not None:
+            return self._storage_lock
+        return contextlib.nullcontext()
+
     async def index_done_callback(self) -> None:
         # No-op: LanceDB персистит каждую запись (merge_insert) сразу (MVCC, durable) — отложенного
         # буфера/flush нет (в отличие от faiss/nano, которые материализуют индекс здесь).
@@ -142,15 +175,17 @@ class LanceDBVectorDBStorage(BaseVectorStorage):
             )
         rows = [self._row(doc_id, embeddings[i], data[doc_id]) for i, doc_id in enumerate(ids)]
         # merge_insert по ``id`` = upsert (update существующего / insert нового). MVCC: запись
-        # сразу durable+видима, без index_done flush.
-        await self._io(
-            "upsert",
-            self._tbl.merge_insert("id")
-            .when_matched_update_all()
-            .when_not_matched_insert_all()
-            .execute(rows),
-            n=len(rows),
-        )
+        # сразу durable+видима, без index_done flush. Эмбеддинг выше — ВНЕ лока (он bottleneck,
+        # держим конкурентным); под локом только КОММИТ версии (single-writer → нет CommitConflict).
+        async with self._write_guard():
+            await self._io(
+                "upsert",
+                self._tbl.merge_insert("id")
+                .when_matched_update_all()
+                .when_not_matched_insert_all()
+                .execute(rows),
+                n=len(rows),
+            )
 
     # ---- read ----
     def _format(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -225,8 +260,13 @@ class LanceDBVectorDBStorage(BaseVectorStorage):
     async def delete(self, ids: list[str]) -> None:
         if not ids or self._tbl is None:
             return
-        in_list = ", ".join(_sql_str(i) for i in ids)
-        await self._io("delete", self._tbl.delete(f"id IN ({in_list})"), n=len(ids))
+        where = f"id IN ({', '.join(_sql_str(i) for i in ids)})"
+        # delete = логическая запись (deletion vectors), коммит версии ``v+1``. Под single-writer локом
+        # конкурентной компакции во время delete нет → гонки версий (``Not found``) быть не должно. Поэтому
+        # отдельного пропуска ``Not found`` больше НЕТ: любая ошибка логируется (``_io``) и ПРОБРАСЫВАЕТСЯ —
+        # если ``Not found`` всё же возникнет, упадём и увидим (проверка достаточности лока).
+        async with self._write_guard():
+            await self._io("delete", self._tbl.delete(where), n=len(ids))
 
     async def delete_entity(self, entity_name: str) -> None:
         await self.delete([compute_mdhash_id(entity_name, prefix="ent-")])
@@ -238,11 +278,13 @@ class LanceDBVectorDBStorage(BaseVectorStorage):
         ):
             return
         name = _sql_str(entity_name)
-        await self._io(
-            "delete_entity_relation",
-            self._tbl.delete(f"src_id = {name} OR tgt_id = {name}"),
-            entity=entity_name,
-        )
+        # тоже writer (delete по src/tgt) → под single-writer локом, как upsert/delete.
+        async with self._write_guard():
+            await self._io(
+                "delete_entity_relation",
+                self._tbl.delete(f"src_id = {name} OR tgt_id = {name}"),
+                entity=entity_name,
+            )
 
     async def drop(self) -> dict[str, str]:
         try:

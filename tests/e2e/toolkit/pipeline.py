@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from tests.e2e.log import clip_log_body, log
 from tests.e2e.sut_user_systemd import (
+    e2e_start_all_bridges_bash,
     e2e_start_threlium_user_pipeline_bash,
+    e2e_stop_all_bridges_bash,
     e2e_stop_threlium_user_pipeline_bash,
     e2e_sut_threlium_user_journal_rotate_vacuum_bash,
 )
@@ -30,6 +32,60 @@ def e2e_stop_threlium_user_pipeline_services(rt: E2EComposeRuntime) -> None:
             rc=completed.returncode,
             stdout_snippet=(completed.stdout or "")[:800],
         )
+
+
+def e2e_stop_all_bridges(rt: E2EComposeRuntime) -> None:
+    """Остановить ВСЕ мосты на SUT ДО рестарта backends (WireMock/GreenMail) в cold-reset (последовательность)."""
+    completed = service_exec(
+        rt.project_name,
+        "sut",
+        ["bash", "-lc", e2e_stop_all_bridges_bash()],
+        repo_root=rt.repo_root,
+        timeout=int(TIMEOUT_POLL_SHORT),
+    )
+    log.info("bridges_stopped", detail=(completed.stdout or "").strip()[:600])
+    if completed.returncode != 0:
+        log.warning("bridges_stop_warning", rc=completed.returncode,
+                    stdout_snippet=(completed.stdout or "")[:400])
+
+
+def e2e_start_all_bridges(rt: E2EComposeRuntime) -> None:
+    """Поднять ВСЕ мосты на SUT ПОСЛЕ полной готовности backends + wipe (cold-reset)."""
+    completed = service_exec(
+        rt.project_name,
+        "sut",
+        ["bash", "-lc", e2e_start_all_bridges_bash()],
+        repo_root=rt.repo_root,
+        timeout=int(TIMEOUT_POLL_SHORT),
+    )
+    log.info("bridges_started", detail=(completed.stdout or "").strip()[:600])
+    if completed.returncode != 0:
+        log.warning("bridges_start_warning", rc=completed.returncode,
+                    stdout_snippet=(completed.stdout or "")[:400])
+
+
+def e2e_stop_all_sut_services(rt: E2EComposeRuntime) -> None:
+    """ЕДИНОЕ API: остановить ВСЕ user-systemd сервисы SUT перед backend-restart/wipe (cold-reset).
+
+    Последовательно (НЕ параллельно — параллельный рестарт backend под живыми сервисами был источником
+    гонок: torn lancedb-стор из-под FD движка + краш-сторм мостов на обрыве коннекта):
+      1) мосты (``threlium-bridge@*``) — consumers backend'ов, глушим первыми, чтобы не дрались с рестартом;
+      2) engine + ``work@`` + ``sweep@`` с барьером смерти (FD на ``lightrag/`` освобождены, Restart подавлен).
+    После этого backends можно безопасно рестартовать и делать wipe. Парный старт — :func:`e2e_start_all_sut_services`.
+    """
+    e2e_stop_all_bridges(rt)
+    e2e_stop_threlium_user_pipeline_services(rt)
+
+
+def e2e_start_all_sut_services(rt: E2EComposeRuntime) -> None:
+    """ЕДИНОЕ API: поднять ВСЕ user-systemd сервисы SUT ПОСЛЕ готовности backends + wipe (cold-reset).
+
+    Сначала мосты (не зависят от движка; не падаем, если мост не встал — лог), затем engine (его старт
+    обязателен — бросает при сбое). Bootstrap-реиндекс (wait_indexed + идемпотентный restart движка) —
+    отдельные шаги ПОСЛЕ этого вызова. Пара к :func:`e2e_stop_all_sut_services`.
+    """
+    e2e_start_all_bridges(rt)
+    e2e_start_threlium_user_pipeline_services(rt)
 
 
 def e2e_sut_threlium_user_journal_rotate_and_vacuum(rt: E2EComposeRuntime) -> None:

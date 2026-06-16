@@ -103,6 +103,22 @@ for i in $(seq 1 30); do
   runuser -u {u} -- systemctl --user kill -s SIGKILL threlium-engine.service 2>/dev/null || true
   sleep 0.5
 done
+# КРИТИЧНО (root-fix воскрешения движка): ``systemctl kill -s SIGKILL`` выше = смерть по сигналу → systemd
+# видит сбой → ``Restart=always``/``RestartSec=1s`` ПЛАНИРУЕТ рестарт → движок ВОСКРЕСНЕТ через ~1s и снова
+# откроет FD на ``lightrag/`` (cozo_graph/data/LOG) ровно когда вызывающий делает ``rm -rf lightrag`` → снос
+# из-под живого FD → торн lancedb/cozo-манифест (``Not found ..._versions/data``), порча тянется в прогон
+# (подтверждено: journal ``SIGKILL→status=9/KILL→Scheduled restart`` + /proc holder = сам engine). Поэтому
+# ОТМЕНЯЕМ запланированный рестарт: ``systemctl stop`` переводит юнит в inactive и снимает pending restart-job
+# — движок остаётся МЁРТВ до НАМЕРЕННОГО старта (cold-reset стартует его сам после wipe). Цикл переживает
+# гонку «restart выстрелил между kill и stop»: stop → ждём >RestartSec → если воскрес, добиваем и повторяем.
+for i in $(seq 1 20); do
+  runuser -u {u} -- systemctl --user stop threlium-engine.service 2>/dev/null || true
+  runuser -u {u} -- systemctl --user reset-failed threlium-engine.service 2>/dev/null || true
+  sleep 1.5
+  pids=$(runuser -u {u} -- pgrep -u "$uid" -f 'python -m threlium.runners.engine$' 2>/dev/null || true)
+  [ -z "$pids" ] && break
+  runuser -u {u} -- systemctl --user kill -s SIGKILL threlium-engine.service 2>/dev/null || true
+done
 for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-work@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
   runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
   runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
@@ -201,6 +217,53 @@ done
 st=$(runuser -u {u} -- systemctl --user is-active threlium-engine.service || true)
 echo "[e2e] SUT threlium-engine.service is-active: ${{st}}"
 test "$st" = active
+"""
+
+
+def e2e_stop_all_bridges_bash() -> str:
+    """Bash: остановить ВСЕ ``threlium-bridge@*`` (user systemd) на время cold-reset.
+
+    КАЖДЫЙ мост держит persistent-соединение к backend, который cold-reset РЕСТАРТУЕТ: email → IMAP-IDLE к
+    GreenMail (``ssl.SSLEOFError`` при рестарте); telegram → HTTP long-poll ``getUpdates`` к WireMock
+    (``httpx.RemoteProtocolError: Server disconnected`` → ``NetworkError``); matrix → ``/sync`` long-poll;
+    isomorph → SSE long-hold — все к WireMock. Рестарт backend под живым мостом рвёт коннект → краш +
+    ``Restart=always`` краш-сторм в окне рестарта → потерянные события/письма → таймауты тестов. Поэтому
+    ПОСЛЕДОВАТЕЛЬНО (как FD-wipe движка): глушим ВСЕ мосты ДО рестарта backends и поднимаем ПОСЛЕ их полной
+    готовности+wipe (``e2e_start_all_bridges_bash``). ``systemctl stop`` подавляет ``Restart=always`` → мосты
+    остаются мертвы в окне. Краш+рестарт моста сам по себе штатен (см. ``bridges/*.py:run_bridge`` docstrings)
+    — здесь лишь убираем e2e-специфичное окно гонки cold-reset↔backend-restart (раньше мосты «оставляли жить»).
+    """
+    u = E2E_THRELIUM_USER
+    return f"""set +e
+uid=$(id -u {u})
+export XDG_RUNTIME_DIR=/run/user/$uid
+for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-bridge@*' --no-legend 2>/dev/null | awk '{{print $1}}'); do
+  runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
+  runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
+  echo "[e2e] bridge stopped (cold-reset: before backend restart): $unit"
+done
+exit 0
+"""
+
+
+def e2e_start_all_bridges_bash() -> str:
+    """Bash: поднять ВСЕ enabled ``threlium-bridge@*`` ПОСЛЕ полной готовности backends + wipe (cold-reset).
+
+    Пара к :func:`e2e_stop_all_bridges_bash`: мосты оживают на УЖЕ ГОТОВЫХ backends, без гонки с рестартом
+    WireMock/GreenMail/wipe. Список — из enabled unit-files (переживает ``stop``, в отличие от list-units),
+    исключая bare-шаблон ``threlium-bridge@.service``.
+    """
+    u = E2E_THRELIUM_USER
+    return f"""set +e
+uid=$(id -u {u})
+export XDG_RUNTIME_DIR=/run/user/$uid
+for unit in $(runuser -u {u} -- systemctl --user list-unit-files 'threlium-bridge@*' --no-legend 2>/dev/null | awk '{{print $1}}' | grep -v '@\\.service$'); do
+  runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
+  runuser -u {u} -- systemctl --user start "$unit" 2>/dev/null || true
+  st=$(runuser -u {u} -- systemctl --user is-active "$unit" 2>/dev/null || true)
+  echo "[e2e] bridge start: $unit is-active=${{st}}"
+done
+exit 0
 """
 
 

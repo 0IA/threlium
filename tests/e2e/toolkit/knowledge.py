@@ -17,6 +17,7 @@ from .constants import (
 )
 from .poll import poll_until
 from .runtime import E2EComposeRuntime, service_exec
+from .sut_fs_cleanup import e2e_sut_remove_paths
 
 def e2e_install_deterministic_knowledge_corpus(rt: E2EComposeRuntime) -> None:
     """Заменить knowledge/ на SUT одним детерминированным probe-документом (e2e-среда, навсегда).
@@ -26,11 +27,15 @@ def e2e_install_deterministic_knowledge_corpus(rt: E2EComposeRuntime) -> None:
     Бэкапа/возврата нет — это только тестовая среда; настоящий корпус возвращается лишь полным
     rebake образа.
     """
+    # Снос старого knowledge/ — через единый Python-метод с FD-логом (как и lightrag-wipe), затем
+    # mkdir+probe в bash. Корпус сносится в cold-reset до старта engine (FD держаться не должны).
+    e2e_sut_remove_paths(
+        rt, [E2E_REMOTE_THRELIUM_HOME + "/knowledge"], reason="install_knowledge_corpus"
+    )
     th = shlex.quote(E2E_REMOTE_THRELIUM_HOME)
     script = f"""set -eu
 TH={th}
 KN="$TH/knowledge"
-rm -rf "$KN"
 mkdir -p "$KN"
 cat > "$KN/{E2E_KNOWLEDGE_PROBE_FILENAME}" <<'PROBE'
 {_E2E_KNOWLEDGE_PROBE_CONTENT}PROBE
