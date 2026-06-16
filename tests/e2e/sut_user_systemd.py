@@ -119,14 +119,17 @@ for i in $(seq 1 20); do
   [ -z "$pids" ] && break
   runuser -u {u} -- systemctl --user kill -s SIGKILL threlium-engine.service 2>/dev/null || true
 done
-for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-work@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
-  runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
-  runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
-done
-for unit in $(runuser -u {u} -- systemctl --user list-units --all 'threlium-sweep@*.service' --no-legend 2>/dev/null | awk '{{print $1}}' || true); do
-  runuser -u {u} -- systemctl --user reset-failed "$unit" 2>/dev/null || true
-  runuser -u {u} -- systemctl --user stop "$unit" 2>/dev/null || true
-done
+# reset-failed + stop ВСЕХ инстансов work@/sweep@ ОДНИМ glob-вызовом (НЕ через list-units|awk).
+# КРИТИЧНО: у FAILED-юнитов `systemctl list-units` первым столбцом печатает маркер '●', поэтому
+# awk по первому столбцу давал '●' (а имя юнита — во втором столбце) → `reset-failed ●` = no-op → FAILED
+# work@-инстансы НИКОГДА не сбрасывались. При e2e StartLimitIntervalSec их start-rate-limit счётчик
+# копился МЕЖДУ сессиями на долгоживущем контейнере → в итоге `systemctl start` отклонялся ("Start
+# request repeated too quickly") → reasoning-воркер не запускался → письмо застревало unread → нет
+# ответа (флак mock_live). `reset-failed <glob>` сбрасывает failed-состояние И start-limit счётчик у
+# ВСЕХ загруженных инстансов разом; `stop <glob>` добивает живые перед wipe. (Проверено на SUT:
+# 15 failed → 0, reasoning:NN → inactive/NRestarts=0.)
+runuser -u {u} -- systemctl --user reset-failed 'threlium-work@*.service' 'threlium-sweep@*.service' 2>/dev/null || true
+runuser -u {u} -- systemctl --user stop 'threlium-work@*.service' 'threlium-sweep@*.service' 2>/dev/null || true
 echo "[e2e] SUT user-scope pipeline stopped (engine + work + sweep; bridges left running)"
 """
 
