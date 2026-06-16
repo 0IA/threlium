@@ -11,7 +11,8 @@ PartOf=threlium-work.slice
 After=network-online.target
 After=threlium-engine.service
 BindsTo=threlium-engine.service
-StartLimitIntervalSec=0
+StartLimitIntervalSec={{ threlium_systemd_worker_start_limit_interval_sec }}
+StartLimitBurst={{ threlium_systemd_worker_start_limit_burst }}
 OnSuccess=threlium-sweep@%i.service
 
 [Service]

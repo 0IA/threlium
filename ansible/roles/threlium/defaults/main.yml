@@ -117,12 +117,23 @@ threlium_systemd_restart_steps: 10
 threlium_systemd_restart_max_delay_sec: 5min
 
 # Политика Restart= по сервису (настраиваемая). Прод: воркеры/мосты перезапускаются при падении,
-# движок — всегда. E2E может выставить "no" (см. group_vars/e2e.yml), чтобы упавший воркер на
-# «отравленном» сообщении не уходил в бесконечный крэш-луп (systemd auto-restart), а падал один раз —
-# тест сразу видит проблему, стек не отравляется, прогон быстрее. См. [[fsm-worker-crashloop-poison]].
+# движок — всегда. E2E переопределяет воркер (см. group_vars/e2e.yml). См. [[fsm-worker-crashloop-poison]].
 threlium_systemd_worker_restart: on-failure
 threlium_systemd_bridge_restart: on-failure
 threlium_systemd_engine_restart: always
+
+# Гибкая стратегия рестарта воркера: start-rate-limit «N рестартов, потом сразу failed».
+# Прод: interval=0 → systemd ОТКЛЮЧАЕТ rate-limiting (StartLimitBurst игнорируется) →
+# неограниченные рестарты, эскалация RestartSec лишь СНИЖАЕТ их частоту (storm на permanent-poison
+# = принятое прод-поведение). `threlium-dispatch.sh` НЕ делает `reset-failed` → в проде
+# backoff-эскалация переживает повторные dispatch'и (частота падает).
+# E2E: interval>0 (длинное, не-несущее) + burst=2 → ровно 1 рестарт. Детерминированный сброс
+# счётчика — per-session cold-reset (`reset-failed` всех work@/sweep@ при остановке pipeline), а НЕ
+# истечение окна. reasoning-хопы старты НЕ множат: handler крутит LLM-цикл ВНУТРИ одного `work@`
+# (states/reasoning.py `_decide` while-loop) → старт на ОДНО входящее reasoning-письмо, не на хоп.
+# См. group_vars/e2e.yml.
+threlium_systemd_worker_start_limit_interval_sec: 0
+threlium_systemd_worker_start_limit_burst: 5
 
 # systemd user units (списки для loop в site.yml / refresh.yml).
 threlium_engine_units: ['threlium-engine.service']

@@ -683,14 +683,21 @@
       register: threlium_restartable_service_slurp
       tags: [deploy, refresh]
 
-    - name: Acceptance — restart backoff and StartLimitIntervalSec=0 in FSM services
+    - name: Acceptance — restart backoff and StartLimit policy in FSM services
       ansible.builtin.assert:
         that:
           - (item.content | b64decode | regex_search('(?m)^RestartSec=' ~ threlium_systemd_restart_sec ~ '$')) is not none
           - (item.content | b64decode | regex_search('(?m)^RestartSteps=' ~ (threlium_systemd_restart_steps | string) ~ '$')) is not none
           - (item.content | b64decode | regex_search('(?m)^RestartMaxDelaySec=' ~ threlium_systemd_restart_max_delay_sec ~ '$')) is not none
-          - (item.content | b64decode | regex_search('(?m)^StartLimitIntervalSec=0$')) is not none
-        fail_msg: "В {{ item.item }} нет ожидаемых Restart* / StartLimitIntervalSec=0"
+          # work@ — настраиваемый start-rate-limit (e2e: окно>0 + burst=2 → «1 рестарт»; прод: 0 = без потолка);
+          # engine/bridge — по-прежнему StartLimitIntervalSec=0 (хардкод в их шаблонах).
+          - >-
+            (item.content | b64decode | regex_search('(?m)^StartLimitIntervalSec=' ~
+            ((threlium_systemd_worker_start_limit_interval_sec | string) if ('work@' in item.item) else '0') ~ '$')) is not none
+          - >-
+            ('work@' not in item.item) or
+            ((item.content | b64decode | regex_search('(?m)^StartLimitBurst=' ~ (threlium_systemd_worker_start_limit_burst | string) ~ '$')) is not none)
+        fail_msg: "В {{ item.item }} нет ожидаемых Restart* / StartLimit*"
       loop: "{{ threlium_restartable_service_slurp.results }}"
       loop_control:
         label: "{{ item.item }}"

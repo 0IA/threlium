@@ -5,14 +5,26 @@ ansible_user: root
 # SUT: подробные structlog/journald при отладке e2e (см. threlium.yaml + env/threlium.env).
 threlium_log_level: "DEBUG"
 
-# E2E: воркеры НЕ перезапускаются при падении. На «отравленном» сообщении (детерминированная
-# ошибка стадии — напр. 404 от WireMock из-за пробела в стабах) прод-политика Restart=on-failure
-# уводит work@ в бесконечный крэш-луп: воркер не идёт в idle, последующие тесты падают каскадом,
-# время прогона раздувается. С "no" воркер падает один раз — тест сразу видит проблему, стек не
-# отравляется, прогон быстрее. Затрагивает только путь ОШИБКИ (успех идёт через OnSuccess→sweep,
-# не через Restart). Движок/мосты оставляем на дефолтной политике (их крэш-луп — не наша проблема,
-# а cold-reset переподнимает движок). См. defaults: threlium_systemd_*_restart.
-threlium_systemd_worker_restart: "no"
+# E2E: воркеру разрешён РОВНО 1 рестарт при падении (Restart=on-failure + StartLimitBurst=2 +
+# короткое StartLimitIntervalSec). Зачем 1, а не 0/∞:
+#  - 0 (прежнее "no"): на стадии, чей продукт-путь восстанавливается на РЕТРАЕ (fsm_handler: 1-й
+#    reasoning → 500 громко + латч phase_failure_seen в state; РЕТРАЙ → стаб 099 отдаёт 200 recovery
+#    → nm_settle → письмо сливается), без рестарта ретрай не происходит → poison навсегда unread →
+#    per-test teardown-drain-барьер таймаутит. 1 рестарт включает штатный recovery-путь.
+#  - ∞ (прод on-failure без потолка): genuinely-broken стаб (404-опечатка, без recovery) уходит в
+#    бесконечный крэш-луп → каскад (исходная причина "no"). Потолок burst=2 = initial+1 рестарт,
+#    3-й старт сразу в failed — без шторма.
+# Окно ДЛИННОЕ — не несущее (детерминированный сброс даёт cold-reset, НЕ истечение окна). Граница
+# сброса счётчика: per-session cold-reset (`e2e_stop_threlium_user_pipeline_bash`) делает
+# `reset-failed` ВСЕХ `threlium-work@*`/`threlium-sweep@*` при остановке pipeline → каждая сессия
+# стартует с чистым счётчиком; внутри сессии инстанс `work@<stage>:<thread>` уникален одному тред-у
+# теста (notmuch thread_id), поэтому burst=2 = «1 рестарт на этот тред». `threlium-dispatch.sh` НЕ
+# делает reset-failed (иначе сбрасывал бы потолок на каждый dispatch). reasoning-хопы старты НЕ
+# множат (LLM-цикл внутри одного work@, states/reasoning.py `_decide`) → нормальный тест = 1-2
+# старта < burst. Движок/мосты — на дефолтной политике (cold-reset переподнимает).
+threlium_systemd_worker_restart: "on-failure"
+threlium_systemd_worker_start_limit_interval_sec: "10y"
+threlium_systemd_worker_start_limit_burst: 2
 
 # E2E: БЫСТРЫЙ КОНСТАНТНЫЙ restart-backoff для engine/bridge@ (стратегию Restart= НЕ убираем — она
 # принята в проекте и работает в проде; правим только cadence ТЕСТ-контура). Прод-дефолт эскалирует
