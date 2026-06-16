@@ -21,7 +21,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "stub-mailflow-live-two-turn-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasNotProperty": "phase_turn1_tasks_ledger_done"
       }
     }
@@ -62,7 +62,7 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "stub-mailflow-live-two-turn-01::{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
           "phase_turn1_tasks_ledger_done": "1"
         }
