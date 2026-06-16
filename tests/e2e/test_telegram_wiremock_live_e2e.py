@@ -30,7 +30,6 @@ from .wiremock_client import (
     assert_wiremock_transport_egress_via_state,
     wiremock_state_thread_root_property,
     wiremock_state_thread_root_reply_targets,
-    composite_context_key,
     find_wiremock_requests_by_body_contains,
     log_wiremock_correlation_journal,
     prepare_wiremock_scenario,
@@ -314,7 +313,9 @@ def test_live_telegram_wiremock_private_tail_307_second_message(
         )
 
         registered_update_ids: list[int] = []
-        ctx_key = composite_context_key(test_id, correlation_key)
+        # Detag: 307-gate release пишет `reasoning_release` в ЧИСТЫЙ thread-root контекст (стабы
+        # 098/100 после swap гейтятся по pure {{tr}}; prepare сеет его active+phase=0).
+        ctx_key = correlation_key
         try:
             wiremock_telegram_register_update(
                 base,
