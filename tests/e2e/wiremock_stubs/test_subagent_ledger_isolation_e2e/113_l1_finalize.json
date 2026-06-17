@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "12"
       }
     },
     "bodyPatterns": [
@@ -22,8 +25,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "phase_l1_tasks_ledger_done",
-        "hasNotProperty": "phase_l1_done"
+        "hasProperty": "active"
       }
     }
   },
@@ -65,7 +67,6 @@
       "parameters": {
         "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "state": {
-          "phase_l1_done": "1",
           "l1_finalize_seen": "1",
           "l1_l0_ledger_leaked": "{{#if (contains request.body 'L0 parent ledger must not block L1 finalize')}}1{{else}}0{{/if}}"
         }
