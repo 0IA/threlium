@@ -78,60 +78,132 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "saw_summary": "{{#if (contains request.body 'E2E-SUM-CONTEXT-MARKER')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_summary' default='0'}}{{/if}}",
-          "saw_raw_pad": "{{#if (contains request.body 'PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_raw_pad' default='0'}}{{/if}}"
+        "context": "{{#if (contains request.body 'E2E-SUM-CONTEXT-MARKER')}}saw-summary-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_summary{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "saw_alpha": "{{#if (contains request.body 'ZZNODEALPHA')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_alpha' default='0'}}{{/if}}",
-          "saw_beta": "{{#if (contains request.body 'ZZNODEBETA')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_beta' default='0'}}{{/if}}",
-          "saw_rel": "{{#if (contains request.body 'ZZRELMARKER')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_rel' default='0'}}{{/if}}"
+        "context": "{{#if (contains request.body 'PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP')}}saw-raw-pad-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_raw_pad{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "saw_gate_active": "{{#if (contains request.body 'Gate retry counter:')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_gate_active' default='0'}}{{/if}}",
-          "saw_query_result": "{{#if (contains request.body 'query_result:')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_query_result' default='0'}}{{/if}}"
+        "context": "{{#if (contains request.body 'ZZNODEALPHA')}}saw-alpha-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_alpha{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "saw_conforms_false": "{{#if (contains request.body 'conforms: False')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_conforms_false' default='0'}}{{/if}}",
-          "saw_violations": "{{#if (contains request.body 'violations:')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_violations' default='0'}}{{/if}}"
+        "context": "{{#if (contains request.body 'ZZNODEBETA')}}saw-beta-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_beta{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "saw_query_error": "{{#if (contains request.body 'QUERY ERROR')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_query_error' default='0'}}{{/if}}",
-          "gated_has_finalize": "{{#if (contains request.body 'Gate retry counter:')}}{{#if (contains (jsonPath request.body '$.tools') 'response_finalize')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='gated_has_finalize' default='0'}}{{/if}}{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='gated_has_finalize' default='0'}}{{/if}}"
+        "context": "{{#if (contains request.body 'ZZRELMARKER')}}saw-rel-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_rel{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "gate_at_phase0": "{{#if (contains request.body 'Gate retry counter:')}}1{{else}}0{{/if}}"
+        "context": "{{#if (contains request.body 'Gate retry counter:')}}saw-gate-active-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_gate_active{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'query_result:')}}saw-query-result-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_query_result{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'conforms: False')}}saw-conforms-false-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_conforms_false{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'violations:')}}saw-violations-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_violations{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'QUERY ERROR')}}saw-query-error-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_query_error{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'Gate retry counter:')}}{{#if (contains (jsonPath request.body '$.tools') 'response_finalize')}}gated-has-finalize-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_gated_has_finalize{{/if}}{{else}}_no_gated_has_finalize{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'Gate retry counter:')}}gate-at-phase0-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_gate_at_phase0{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     }

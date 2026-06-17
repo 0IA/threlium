@@ -38,7 +38,6 @@ from .toolkit import (
 from .wiremock_client import (
     wiremock_public_base,
     wiremock_state_thread_root_list_size,
-    wiremock_state_thread_root_property,
 )
 
 _STUB_DIR = Path(__file__).resolve().parent / "wiremock_stubs" / "test_cozo_graph_adapter_e2e"
@@ -161,16 +160,18 @@ def test_cozo_graph_adapter_structure(e2e_runtime: E2EComposeRuntime) -> None:
             )
             wm = _wm(project)
 
-            def _flag(name: str) -> str:
-                return wiremock_state_thread_root_property(wm, corr_b, name)
+            def _seen(name: str) -> int:
+                # Detag §3.6.8: additive presence — стаб делает addLast в контекст
+                # `<kebab>-<thread-root>`, когда маркер виден в reasoning-теле; читаем размер списка.
+                return wiremock_state_thread_root_list_size(wm, f"{name.replace('_', '-')}-{corr_b}")
 
-            assert _flag("saw_alpha") == "1", (
+            assert _seen("saw_alpha") >= 1, (
                 "ZZNODEALPHA node did not reach reasoning — cozo upsert_node/get/traversal broken"
             )
-            assert _flag("saw_beta") == "1", (
+            assert _seen("saw_beta") >= 1, (
                 "ZZNODEBETA node did not reach reasoning — cozo upsert_node/get/traversal broken"
             )
-            assert _flag("saw_rel") == "1", (
+            assert _seen("saw_rel") >= 1, (
                 "ZZRELMARKER edge did not reach reasoning — cozo upsert_edge/get_node_edges broken"
             )
         except Exception:

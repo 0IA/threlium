@@ -72,6 +72,8 @@ def test_formal_reason_technical_gate_full_pipeline(
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
             # Detag (§3.6.2): без journal/stub_tag — детерминированный gate-цикл по STATE.
+            # NB: гейт-хопы обслуживают ПЕР-ДИР стабы (100-103, sticky-property saw_*), ещё НЕ
+            # переведённые на additive presence — здесь читаем property; конверсия каталога отложена.
             def _flag(name: str) -> str:
                 return wiremock_state_thread_root_property(wm_base, correlation_key, name)
 

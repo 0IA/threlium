@@ -22,7 +22,7 @@ from .toolkit import (
     mailflow_inject_and_wait,
     REPO_ROOT,
 )
-from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_property
+from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_list_size
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_INFERENCE_BODY = "E2E-FORMAL-REASON-INFERENCE-BODY"
@@ -106,9 +106,10 @@ def test_formal_reason_inference_full_pipeline(
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            # Detag (§3.6.2): без journal/stub_tag — гейт formal_reason не активировался (STATE).
+            # Detag (§3.6.8): additive presence — гейт formal_reason не активировался ⇒ маркер
+            # 'Gate retry counter:' ни разу не пришёл ⇒ контекст saw-gate-active-<tr> пуст (size 0).
             assert (
-                wiremock_state_thread_root_property(wm_base, correlation_key, "saw_gate_active") == "0"
+                wiremock_state_thread_root_list_size(wm_base, f"saw-gate-active-{correlation_key}") == 0
             ), "formal_reason gate must NOT activate for valid RDFS inference (state saw_gate_active)"
         except Exception:
             log.debug(

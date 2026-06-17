@@ -27,6 +27,7 @@ from .test_reasoning_litellm_mock_live import REASONING_E2E_BODY_MARKER
 from .wiremock_client import (
     wiremock_public_base,
     wiremock_state_thread_root_call_sites,
+    wiremock_state_thread_root_list_size,
     wiremock_state_thread_root_property,
 )
 
@@ -115,10 +116,16 @@ def _assert_summarize_pipeline_artifacts(
     def _flag(name: str) -> str:
         return wiremock_state_thread_root_property(wm_base, correlation_key, name)
 
-    assert _flag("saw_summary") == "1", (
+    def _seen(name: str) -> int:
+        # Detag §3.6.8: generic reasoning-стаб делает addLast в <kebab>-<thread-root>; читаем размер.
+        return wiremock_state_thread_root_list_size(
+            wm_base, f"{name.replace('_', '-')}-{correlation_key}"
+        )
+
+    assert _seen("saw_summary") >= 1, (
         "summary marker did not reach reasoning (state saw_summary)"
     )
-    assert _flag("saw_raw_pad") == "0", (
+    assert _seen("saw_raw_pad") == 0, (
         "summarized originals (raw PAD block) must not appear in reasoning (get_body regression)"
     )
     assert _flag("saw_distill") == "1", (
@@ -247,5 +254,5 @@ def test_summarize_idempotent_second_enrich(e2e_runtime: E2EComposeRuntime) -> N
         # (n_after_second ≥ n_after_first, выше) И summary присутствует в reasoning по STATE-флагу
         # (saw_summary, sticky per thread-root) — без скана журнала.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_summary") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-summary-{correlation_key}") >= 1
         ), "durable summary marker must persist in reasoning after the second enrich (state saw_summary)"
