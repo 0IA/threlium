@@ -21,8 +21,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasNotProperty": "live_hitl_h03_hitl_classified"
+        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}"
       }
     }
   },

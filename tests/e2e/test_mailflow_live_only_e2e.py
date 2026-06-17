@@ -102,7 +102,6 @@ from .wiremock_client import (
     wiremock_admin_base,
     wiremock_public_base,
     wiremock_state_thread_root_list_size,
-    wiremock_state_thread_root_property,
 )
 
 # Каталоги стабов и ``stub_tag`` этого модуля; корреляция LiteLLM — ``X-Threlium-Thread-Root``
@@ -1212,7 +1211,7 @@ def test_live_hitl_user_rejects_cli_on_running_stack(e2e_runtime: E2EComposeRunt
         # после decline-ответа GreenMail (выше) — time-independent; маршрут enforced фазовыми стабами +
         # unmatched-guard (route-wire в finally).
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_decline_notice") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-decline-notice-{correlation_key}") >= 1
         ), "HITL decline notice must reach reasoning prompt (state saw_decline_notice)"
     finally:
         assert_wiremock_zero_unmatched_requests(
