@@ -35,7 +35,7 @@ from .toolkit import (
 )
 from .wiremock_client import (
     wiremock_public_base,
-    wiremock_state_thread_root_property,
+    wiremock_state_thread_root_list_size,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -83,7 +83,7 @@ def _assert_cli_stdout_in_reasoning_state(
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     assert (
-        wiremock_state_thread_root_property(wm_base, correlation_key, "saw_cli_stdout") == "1"
+        wiremock_state_thread_root_list_size(wm_base, f"saw-cli-stdout-{correlation_key}") >= 1
     ), f"cli_exec stdout marker {E2E_CLI_DISCOVERY_STDOUT!r} must reach reasoning (state saw_cli_stdout)"
     log.info("cli_discovery_stdout_verified", correlation_key=correlation_key)
 
@@ -148,10 +148,10 @@ def _assert_route_collision_observation_in_state(
     rt = discover_runtime(project, repo_root=REPO_ROOT)
     wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
     assert (
-        wiremock_state_thread_root_property(
-            wm_base, correlation_key, "saw_route_collision_observation"
+        wiremock_state_thread_root_list_size(
+            wm_base, f"saw-route-collision-observation-{correlation_key}"
         )
-        == "1"
+        >= 1
     ), (
         f"route-collision observation {E2E_ROUTE_COLLISION_OBSERVATION!r} must reach reasoning "
         "(state saw_route_collision_observation)"
