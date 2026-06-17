@@ -7,7 +7,7 @@
         "equalTo": "reasoning"
       },
       "X-Threlium-Litellm-Req-Seq": {
-        "equalTo": "3"
+        "equalTo": "8"
       }
     },
     "bodyPatterns": [
@@ -35,18 +35,27 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-length-truncated",
+      "id": "chatcmpl-e2e-length-recovery-finalize",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
       "choices": [
         {
           "index": 0,
-          "finish_reason": "length",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "E2E-LENGTH-TRUNCATED-PARTIAL-OUTPUT",
-            "tool_calls": null
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_threlium_e2e_length_recovery_finalize",
+                "type": "function",
+                "function": {
+                  "name": "response_finalize",
+                  "arguments": "{\"reasoning\": \"e2e: tasks done, finalizing after length recovery\", \"subject\": \"e2e reply\", \"verification_summary\": \"e2e: concise answer after length recovery and tasks ledger\", \"content\": \"ok from llm-mock after length recovery\"}"
+                }
+              }
+            ]
           }
         }
       ]

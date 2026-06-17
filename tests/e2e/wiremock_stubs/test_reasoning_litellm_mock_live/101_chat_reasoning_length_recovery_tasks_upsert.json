@@ -7,7 +7,7 @@
         "equalTo": "reasoning"
       },
       "X-Threlium-Litellm-Req-Seq": {
-        "equalTo": "3"
+        "equalTo": "5"
       }
     },
     "bodyPatterns": [
@@ -35,18 +35,27 @@
       "Content-Type": "application/json"
     },
     "jsonBody": {
-      "id": "chatcmpl-e2e-length-truncated",
+      "id": "chatcmpl-e2e-length-recovery-tasks-upsert",
       "object": "chat.completion",
       "created": 0,
       "model": "gpt-4o-mini",
       "choices": [
         {
           "index": 0,
-          "finish_reason": "length",
+          "finish_reason": "tool_calls",
           "message": {
             "role": "assistant",
-            "content": "E2E-LENGTH-TRUNCATED-PARTIAL-OUTPUT",
-            "tool_calls": null
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "call_e2e_tasks_ledger_length_retry",
+                "type": "function",
+                "function": {
+                  "name": "tasks_upsert",
+                  "arguments": "{\"reasoning\": \"e2e: record task completion after length recovery\",\"new_subtasks\": [{\"text\": \"Complete the user request\",\"status\": \"done\"}]}"
+                }
+              }
+            ]
           }
         }
       ]
