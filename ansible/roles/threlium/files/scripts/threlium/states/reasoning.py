@@ -17,6 +17,7 @@ from threlium.litellm_tool_response import require_tool_calls_response
 from threlium.llm_wire import LlmAssistantMessage as Message
 
 from threlium.fsm_emit import build_fsm_step_to_stage, hop_budget_remaining
+from threlium.fsm_emit_semantic import emit_to_enrich_fast
 from threlium.logutil import clip_log_text, logger
 from threlium.mail import canonicalize_mime
 from threlium.nm import require_fsm_message_id
@@ -27,6 +28,7 @@ from threlium.states.reasoning_tool_spec import (
 )
 from threlium.settings import ThreliumSettings, resolve_llm_endpoint
 from threlium.types import (
+    EnrichCalleeHistoryText,
     FsmStage,
     FsmTransitionPlainBody,
     FsmTransitionPlainSubjectLine,
@@ -281,6 +283,17 @@ def main(
         route=decision.target.value,
         target=decision.target.rfc822_mailbox,
     )
+    if decision.target is FsmStage.ENRICH_FAST:
+        # Error relay (_decide bad outcome → enrich_fast): the notice MUST ride as a ``<history>`` part
+        # — that is the channel enrich_fast's delta window collects (``collect_unified_delta_msgs``
+        # keeps only messages with a ``<history>`` part). A ``<system>`` part on a reasoning-origin
+        # message is NOT collected, so the recovery hint would be silently dropped.
+        return emit_to_enrich_fast(
+            canonical,
+            stage,
+            settings=config,
+            history=EnrichCalleeHistoryText.parse(decision.body.value),
+        )
     decision_body = FsmTransitionPlainBody.parse(decision.body.value).value
     return build_fsm_step_to_stage(
         canonical,
