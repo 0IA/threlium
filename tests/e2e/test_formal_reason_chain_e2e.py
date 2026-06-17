@@ -53,7 +53,7 @@ from .wiremock_client import (
     _wiremock_headers_get_ci,
     find_wiremock_requests_by_body_contains,
     wiremock_public_base,
-    wiremock_state_thread_root_property,
+    wiremock_state_thread_root_list_size,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -95,7 +95,10 @@ def _assert_unified_delta_in_reasoning_state(project: str, correlation_key: str)
         ("saw_mq_shacl", E2E_MEMORY_QUERY_REASONING_MARKER),
     ):
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, flag) == "1"
+            wiremock_state_thread_root_list_size(
+                wm_base, f"{flag.replace('_', '-')}-{correlation_key}"
+            )
+            >= 1
         ), f"unified-delta needle {marker!r} must reach a reasoning prompt (state {flag})"
     log.info("formal_reason_chain_unified_delta_state_verified", correlation_key=correlation_key)
 

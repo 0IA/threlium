@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "9"
       }
     },
     "bodyPatterns": [
@@ -18,14 +21,14 @@
         "contains": "\"tools\""
       },
       {
-        "comment": "enrich_fast \u043d\u0430\u043a\u0430\u043f\u043b\u0438\u0432\u0430\u0435\u0442 relay-\u0447\u0430\u0441\u0442\u0438: observation \u043e\u0442 formal_reason (hop1) \u041d\u0415 \u0437\u0430\u0442\u0451\u0440\u0442\u0430 observation \u043e\u0442 memory_query (hop2). \u041e\u0431\u0430 \u043c\u0430\u0440\u043a\u0435\u0440\u0430 \u043e\u0431\u044f\u0437\u0430\u043d\u044b \u043f\u0440\u0438\u0441\u0443\u0442\u0441\u0442\u0432\u043e\u0432\u0430\u0442\u044c \u0432 \u043f\u0440\u043e\u043c\u043f\u0442\u0435 3-\u0433\u043e reasoning.",
+        "comment": "enrich_fast накапливает relay-части: observation от formal_reason (hop1) НЕ затёрта observation от memory_query (hop2). Оба маркера обязаны присутствовать в промпте 3-го reasoning.",
         "contains": "conforms: True"
       },
       {
         "contains": "SHACL-SPARQL reference after successful validation"
       },
       {
-        "comment": "unified-delta durability: \u0434\u0435\u043b\u044c\u0442\u0430 1-\u0433\u043e \u0446\u0438\u043a\u043b\u0430 (\u0432\u0445\u043e\u0434 formal_reason, ex:PositiveAgeShape) \u043f\u0435\u0440\u0435\u043d\u0435\u0441\u0435\u043d\u0430 \u0447\u0435\u0440\u0435\u0437 \u0447\u0430\u0441\u0442\u0438 \u043f\u0440\u043e\u0448\u043b\u044b\u0445 enrich_fast \u0438 \u0432\u0438\u0434\u043d\u0430 \u0432 \u043f\u0440\u043e\u043c\u043f\u0442\u0435 3-\u0433\u043e reasoning (tasks_upsert) \u0432\u043c\u0435\u0441\u0442\u0435 \u0441 \u0434\u0435\u043b\u044c\u0442\u043e\u0439 2-\u0433\u043e \u0446\u0438\u043a\u043b\u0430 (\u0432\u0445\u043e\u0434 memory_query).",
+        "comment": "unified-delta durability: дельта 1-го цикла (вход formal_reason, ex:PositiveAgeShape) перенесена через части прошлых enrich_fast и видна в промпте 3-го reasoning (tasks_upsert) вместе с дельтой 2-го цикла (вход memory_query).",
         "contains": "ex:PositiveAgeShape"
       }
     ],
@@ -33,8 +36,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "phase_query_done",
-        "hasNotProperty": "phase_query_done_ledger_done"
+        "hasProperty": "active"
       }
     }
   },
@@ -77,25 +79,33 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_query_done_ledger_done": "1"
+        "context": "{{#if (contains request.body '<conversation_delta>')}}saw-delta-section-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_delta_section{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{#if (contains request.body 'ex:PositiveAgeShape')}}saw-delta-shape-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_delta_shape{{/if}}",
         "list": {
           "addLast": {
-            "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+            "hit": "1"
           }
-        },
-        "state": {
-          "saw_delta_section": "{{#if (contains request.body '<conversation_delta>')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_delta_section' default='0'}}{{/if}}",
-          "saw_delta_shape": "{{#if (contains request.body 'ex:PositiveAgeShape')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_delta_shape' default='0'}}{{/if}}",
-          "saw_mq_shacl": "{{#if (contains request.body 'SHACL sh:sparql constraint SELECT variable binding')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_mq_shacl' default='0'}}{{/if}}"
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'SHACL sh:sparql constraint SELECT variable binding')}}saw-mq-shacl-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_mq_shacl{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     }

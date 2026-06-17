@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "3"
       }
     },
     "bodyPatterns": [
@@ -25,8 +28,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_formal_reason_done"
+        "hasProperty": "active"
       }
     }
   },
@@ -69,25 +71,33 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_formal_reason_done": "1"
+        "context": "{{#if (contains request.body '<conversation_delta>')}}saw-delta-section-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_delta_section{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{#if (contains request.body 'ex:PositiveAgeShape')}}saw-delta-shape-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_delta_shape{{/if}}",
         "list": {
           "addLast": {
-            "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+            "hit": "1"
           }
-        },
-        "state": {
-          "saw_delta_section": "{{#if (contains request.body '<conversation_delta>')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_delta_section' default='0'}}{{/if}}",
-          "saw_delta_shape": "{{#if (contains request.body 'ex:PositiveAgeShape')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_delta_shape' default='0'}}{{/if}}",
-          "saw_mq_shacl": "{{#if (contains request.body 'SHACL sh:sparql constraint SELECT variable binding')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_mq_shacl' default='0'}}{{/if}}"
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'SHACL sh:sparql constraint SELECT variable binding')}}saw-mq-shacl-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_mq_shacl{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     }
