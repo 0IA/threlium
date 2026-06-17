@@ -1012,7 +1012,7 @@ def test_live_subagent_hitl_matrix_full_cycle_on_running_stack(e2e_runtime: E2EC
         # маршрут SUBAGENT→CLI_INTENT→HITL_OUT→RESUME→CLI_EXEC→reasoning→egress enforced фазовыми стабами +
         # unmatched-guard; финальный IRT на письмо 'yes' проверен выше.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_hitl_cli_echo") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-hitl-cli-echo-{correlation_key}") >= 1
         ), "post-HITL cli_exec echo output must reach reasoning (state saw_hitl_cli_echo)"
     finally:
         # Контекст WM не удалять здесь — см. two_turn finally.

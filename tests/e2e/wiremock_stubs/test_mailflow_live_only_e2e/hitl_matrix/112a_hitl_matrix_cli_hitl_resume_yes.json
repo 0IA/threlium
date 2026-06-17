@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "confirm_cli_hitl"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "19"
       }
     },
     "bodyPatterns": [
@@ -22,8 +25,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "live_hitl_h03",
-        "hasNotProperty": "live_hitl_h03_hitl_classified"
+        "hasProperty": "active"
       }
     }
   },
@@ -60,15 +62,6 @@
     }
   },
   "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "live_hitl_h03_hitl_classified": "1"
-        }
-      }
-    },
     {
       "name": "recordState",
       "parameters": {
