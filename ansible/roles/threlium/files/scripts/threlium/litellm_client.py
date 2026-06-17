@@ -14,11 +14,10 @@
 from __future__ import annotations
 
 import json
-import threading
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Literal
+from typing import Any
 
 from threlium import openai_compatible_client
 
@@ -30,10 +29,7 @@ from threlium.litellm_route_context import (
     get_litellm_correlation_from_ctxvar,
 )
 from threlium.types import MailHeaderName
-from threlium.types.litellm_call_site import (
-    LIGHTRAG_INDEX_CALL_SITES,
-    LitellmCallSite,
-)
+from threlium.types.litellm_call_site import LitellmCallSite
 
 _REASONING_CALL_SITE = LitellmCallSite.REASONING.value
 from threlium.types.litellm_correlation_header import LitellmCorrelationHeader
@@ -42,27 +38,12 @@ _HDR_VALUE_MAX = 160
 
 log = logger.bind(stage="litellm")
 
-# Внутренние ключи в dict корреляции (ctxvar); не отправляются в HTTP ``extra_headers``.
-_SEQ_PREFIX = "__threlium_litellm_seq_"
-_SEQ_FSM_COMPLETION = f"{_SEQ_PREFIX}fsm_completion"
-_SEQ_FSM_EMBEDDING = f"{_SEQ_PREFIX}fsm_embedding"
-_SEQ_INDEXER_COMPLETION = f"{_SEQ_PREFIX}indexer_completion"
-_SEQ_INDEXER_EMBEDDING = f"{_SEQ_PREFIX}indexer_embedding"
-_SEQ_FSM_RERANK = f"{_SEQ_PREFIX}fsm_rerank"
-_SEQ_INDEXER_RERANK = f"{_SEQ_PREFIX}indexer_rerank"
-
-_litellm_seq_lock = threading.Lock()
-
-LitellmRequestKind = Literal["completion", "embedding", "rerank"]
-
-
-def _seq_storage_key(*, call_site_wire: str | None, kind: LitellmRequestKind) -> str:
-    indexer = call_site_wire in LIGHTRAG_INDEX_CALL_SITES
-    if kind == "rerank":
-        return _SEQ_INDEXER_RERANK if indexer else _SEQ_FSM_RERANK
-    if kind == "embedding":
-        return _SEQ_INDEXER_EMBEDDING if indexer else _SEQ_FSM_EMBEDDING
-    return _SEQ_INDEXER_COMPLETION if indexer else _SEQ_FSM_COMPLETION
+# Внутренние ключи в dict корреляции (ctxvar); не отправляются в HTTP ``extra_headers``
+# (фильтр — :func:`_is_internal_correlation_key` по этому префиксу).
+_INTERNAL_PREFIX = "__threlium_litellm_"
+# Сквозной номер вызова LLM в треде = длина IRT-цепочки на момент стадии (``thread_len``).
+# Выставляется ``runners/engine/fsm.py`` из кэш-материализованной цепочки (без notmuch-round-trip).
+LITELLM_THREAD_LEN_SLOT = f"{_INTERNAL_PREFIX}thread_len"
 
 
 def _parse_seq_cell(raw: object) -> int:
@@ -75,24 +56,23 @@ def _parse_seq_cell(raw: object) -> int:
         return 0
 
 
-def _assign_litellm_request_seq(
-    correlation: dict[str, str],
-    *,
-    kind: LitellmRequestKind,
-) -> int:
-    """Инкремент выбранной ячейки в dict корреляции; возвращает новое значение для wire-заголовка."""
+def _assign_litellm_request_seq(correlation: dict[str, str]) -> int:
+    """Сквозной номер вызова LLM в треде = ``thread_len`` (длина IRT-цепочки на момент стадии), из
+    internal-слота корреляции (выставлен в ``fsm._run_stage`` из кэш-материализованной цепочки). Идёт в
+    wire-заголовок ``X-Threlium-Litellm-Req-Seq``.
 
-    cs = correlation.get(LitellmCorrelationHeader.CALL_SITE.value)
-    slot = _seq_storage_key(call_site_wire=cs, kind=kind)
-    with _litellm_seq_lock:
-        cur = _parse_seq_cell(correlation.get(slot))
-        nxt = cur + 1
-        correlation[slot] = str(nxt)
-        return nxt
+    На стадию приходится ровно ОДИН stub-значимый completion (reasoning ``_decide`` без in-place-петли —
+    ошибки уходят в ``enrich_fast`` новым письмом → новый ``thread_len``), поэтому пара
+    ``(X-Threlium-Call-Site, thread_len)`` однозначно адресует вызов; внутристадийный ``req_delta`` не
+    нужен. Вне FSM-стадии (indexer) слот отсутствует → ``0`` (indexer-стабы по seq не матчатся).
+    Идемпотентно к ретраю: та же стадия → тот же ``thread_len`` (litellm повторяет HTTP теми же
+    ``extra_headers``; worker-restart переигрывает стадию с тем же ``thread_len``)."""
+
+    return _parse_seq_cell(correlation.get(LITELLM_THREAD_LEN_SLOT))
 
 
 def _is_internal_correlation_key(key: str) -> bool:
-    return key.startswith(_SEQ_PREFIX)
+    return key.startswith(_INTERNAL_PREFIX)
 
 
 def _clip_header_value(value: object) -> str:
@@ -208,20 +188,17 @@ def _log_e2e_litellm_correlation_outbound_and_wiremock_contexts(
 def _merge_litellm_extra_route_headers(
     kwargs: dict[str, Any],
     *,
-    litellm_request_kind: LitellmRequestKind = "completion",
     correlation_override: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Корреляция → ``extra_headers`` + счётчик ``LITELLM_REQUEST_SEQ``.
+    """Корреляция → ``extra_headers`` + сквозной номер вызова ``LITELLM_REQUEST_SEQ`` (= ``thread_len``).
 
     Источник корреляции (приоритет): ``correlation_override`` > ContextVar.
 
-    Четыре независимых счётчика живут в том же dict, что и источник, под ключами
-    ``__threlium_litellm_seq_*`` (не попадают в HTTP). В wire один заголовок
-    :attr:`MailHeaderName.LITELLM_REQUEST_SEQ`; ось счета —
-    ``X-Threlium-Call-Site`` (fsm vs ``lightrag_index``) × ``litellm_request_kind``.
+    В wire один заголовок :attr:`MailHeaderName.LITELLM_REQUEST_SEQ` = ``thread_len`` (см.
+    :func:`_assign_litellm_request_seq`). Internal-слоты (``__threlium_litellm_*``) в HTTP не попадают.
 
     Всегда работает с копией ``kwargs``. Существующие ``extra_headers`` сохраняются; ключи из
-    источника перекрывают совпадающие (кроме внутренних слотов seq).
+    источника перекрывают совпадающие (кроме внутренних слотов).
 
     Снаружи модуля не вызывать — только :func:`merge_litellm_call_kwargs_and_log`.
     """
@@ -237,7 +214,6 @@ def _merge_litellm_extra_route_headers(
         thread_root=thread_root,
         override_present=co is not None,
         ctxvar_present=cv is not None,
-        kind=litellm_request_kind,
     )
     out = dict(kwargs)
     raw_extra = out.get("extra_headers")
@@ -255,7 +231,7 @@ def _merge_litellm_extra_route_headers(
             if _is_internal_correlation_key(ks):
                 continue
             extra[ks] = str(v)
-        seq_val = _assign_litellm_request_seq(correlation, kind=litellm_request_kind)
+        seq_val = _assign_litellm_request_seq(correlation)
         extra[wire_seq_key] = str(seq_val)
     if not extra:
         return out
@@ -308,7 +284,6 @@ def merge_litellm_call_kwargs_and_log(
     *,
     settings: ThreliumSettings,
     kwargs: dict[str, Any],
-    litellm_request_kind: LitellmRequestKind,
     log_kind: str,
     stream: bool | None,
     correlation_override: dict[str, str] | None = None,
@@ -319,7 +294,6 @@ def merge_litellm_call_kwargs_and_log(
         return dict(kwargs)
     merged = _merge_litellm_extra_route_headers(
         dict(kwargs),
-        litellm_request_kind=litellm_request_kind,
         correlation_override=correlation_override,
     )
     _assert_single_tool_call_site(merged)
@@ -339,7 +313,6 @@ async def litellm_acompletion(
     merged = merge_litellm_call_kwargs_and_log(
         settings=settings,
         kwargs=dict(kwargs),
-        litellm_request_kind="completion",
         log_kind="acompletion",
         stream=stream,
         correlation_override=correlation_override,
@@ -356,7 +329,6 @@ async def litellm_aembedding(
     merged = merge_litellm_call_kwargs_and_log(
         settings=settings,
         kwargs=dict(kwargs),
-        litellm_request_kind="embedding",
         log_kind="aembedding",
         stream=None,
         correlation_override=correlation_override,
@@ -373,7 +345,6 @@ async def litellm_arerank(
     merged = merge_litellm_call_kwargs_and_log(
         settings=settings,
         kwargs=dict(kwargs),
-        litellm_request_kind="rerank",
         log_kind="arerank",
         stream=None,
         correlation_override=correlation_override,
@@ -391,7 +362,6 @@ def litellm_completion_sync(
     merged = merge_litellm_call_kwargs_and_log(
         settings=settings,
         kwargs=dict(kwargs),
-        litellm_request_kind="completion",
         log_kind="completion_sync",
         stream=stream,
         correlation_override=correlation_override,

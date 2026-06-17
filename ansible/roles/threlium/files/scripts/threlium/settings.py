@@ -88,15 +88,6 @@ class LlmEndpoint(BaseModel):
             "на tool_calls / content."
         ),
     )
-    length_recovery_max_attempts: int | None = Field(
-        default=None,
-        ge=1,
-        description=(
-            "Сколько раз вызывать completion при finish_reason=length (включая recovery с "
-            "системным hint); null — брать litellm.length_recovery_max_attempts. "
-            "Используется стадией reasoning."
-        ),
-    )
     max_retries: int | None = Field(
         default=None,
         ge=0,
@@ -368,14 +359,6 @@ class LitellmSettings(BaseModel):
         default=3,
         ge=0,
         description="Глобальный лимит ретраев LiteLLM/SDK (≥0). В e2e часто 0 для WireMock.",
-    )
-    length_recovery_max_attempts: int = Field(
-        default=2,
-        ge=1,
-        description=(
-            "Дефолт числа completion-попыток при finish_reason=length для reasoning "
-            "(первая + recovery); переопределяется на llm_endpoints[]."
-        ),
     )
     llm_endpoints: list[LlmEndpoint] = Field(
         default_factory=lambda: [LlmEndpoint()],

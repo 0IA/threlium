@@ -40,7 +40,6 @@ threlium_maildir_rel_paths: "{{ threlium_fsm_mailbox_stages | map(attribute='id'
 # Base values for combine() merge in site.yml: user overrides threlium_* partially.
 _threlium_litellm_base:
   max_retries: 3
-  length_recovery_max_attempts: 2
   llm_endpoints:
     - score: 0.0
       enabled: true

@@ -42,6 +42,7 @@ from threlium.types import (
     LiteLlmToolCallArgumentsWire,
     ReasoningToolFunctionName,
     MailHeaderName,
+    RfcSubjectWire,
     reasoning_assistant_message,
     reasoning_assistant_plain_text,
     reasoning_finish_reason,
@@ -51,8 +52,6 @@ from threlium.types import (
 _HDR = MailHeaderName
 
 log = logger.bind(stage="reasoning")
-
-_MAX_WRONG_TOOL_RETRIES = 12
 
 
 class ReasoningStageError(Exception):
@@ -146,6 +145,20 @@ def _mode_notices(
     return notices
 
 
+def _error_relay_to_enrich_fast(msg: EmailMessage, body: str) -> ReasoningRouteDecision:
+    """«Плохой» исход одного reasoning-completion (обрезка / нет tool_call / не тот tool) → быстрый цикл
+    через ``enrich_fast`` вместо in-place-повтора. Текст ошибки едет ``<system>``-дельтой; ``enrich_fast``
+    вплетает её в ``E_prev`` и возвращает в reasoning (или эскалирует в ``enrich`` при переполнении
+    токен-бюджета — там и summarize_context). Новое письмо → новый ``thread_len`` (детерминированная
+    нумерация вызовов), терминирование — по хоп-бюджету (``advance_hop_budget_for_simple_step`` на каждом
+    переходе), без отдельных capов. Subject сохраняем из входящего письма (тред)."""
+    subj_w = RfcSubjectWire.parse_present_from_email(msg, _HDR.SUBJECT)
+    subject = subj_w.value if subj_w is not None else ""
+    return ReasoningRouteDecision.from_rendered(
+        FsmStage.ENRICH_FAST, subject=subject, body=body
+    )
+
+
 def _decide(
     msg: EmailMessage,
     hop_budget: HopBudgetLine,
@@ -153,11 +166,6 @@ def _decide(
     config: ThreliumSettings,
 ) -> ReasoningRouteDecision:
     ep = resolve_llm_endpoint(config.litellm, LitellmRoutingSite.REASONING)
-    length_max_attempts = (
-        ep.length_recovery_max_attempts
-        if ep.length_recovery_max_attempts is not None
-        else config.litellm.length_recovery_max_attempts
-    )
     remaining = hop_budget_remaining(hop_budget, config)
     gate_active = formal_reason_gate_active(msg)
     log.info(
@@ -180,109 +188,75 @@ def _decide(
     ).strip()
     user_content = _render_user_prompt(msg, hop_budget)
 
-    wrong_tool_retries = 0
-    length_attempt = 0
-    length_recovery_extra: list[str] = []
+    # РОВНО ОДИН completion на заход в стадию (без in-place-петли). vLLM требует system В НАЧАЛЕ беседы:
+    # базовый system + mode-notices сливаем в ОДИН system-блок, затем user.
+    notices = _mode_notices(msg, remaining, 0)
+    system_blocks = [system, *notices]
+    merged_system = "\n\n".join(b for b in system_blocks if b and b.strip())
+    messages: list[LiteLlmChatMessage] = [
+        LiteLlmChatMessage(role="system", content=merged_system),
+        LiteLlmChatMessage(role="user", content=user_content),
+    ]
 
-    while True:
-        notices = _mode_notices(msg, remaining, wrong_tool_retries)
-        # vLLM требует system-сообщение В НАЧАЛЕ беседы: сливаем базовый system + length-recovery + notices
-        # в ОДИН system-блок, затем user. Иначе append'нутые system-notices после user → 400
-        # "System message must be at the beginning".
-        system_blocks = [system, *length_recovery_extra, *notices]
-        merged_system = "\n\n".join(b for b in system_blocks if b and b.strip())
-        messages: list[LiteLlmChatMessage] = [
-            LiteLlmChatMessage(role="system", content=merged_system),
-            LiteLlmChatMessage(role="user", content=user_content),
-        ]
+    call = build_site_call(
+        config,
+        LitellmRoutingSite.REASONING,
+        messages,
+        endpoint=ep,
+    )
 
-        call = build_site_call(
-            config,
-            LitellmRoutingSite.REASONING,
-            messages,
-            endpoint=ep,
+    correlation = None
+    if config.e2e.litellm_route_correlation:
+        correlation = correlation_with_call_site(
+            get_litellm_correlation_from_ctxvar(), call_site_wire
         )
+    resp = completion_required_tool_sync(
+        settings=config,
+        call=call,
+        tools=tools,
+        correlation_override=correlation,
+    )
 
-        correlation = None
-        if config.e2e.litellm_route_correlation:
-            correlation = correlation_with_call_site(
-                get_litellm_correlation_from_ctxvar(), call_site_wire
-            )
-        resp = completion_required_tool_sync(
-            settings=config,
-            call=call,
-            tools=tools,
-            correlation_override=correlation,
-        )
-        finish = reasoning_finish_reason(resp)
-        if finish == "length":
-            log.warning(
-                "llm_finish_reason_length",
-                attempt=length_attempt + 1,
-                max_attempts=length_max_attempts,
-            )
-            length_attempt += 1
-            if length_attempt >= length_max_attempts:
-                raise ReasoningStageError(
-                    "LLM completion truncated (finish_reason=length) after recovery retry"
-                )
-            length_recovery_extra.append(length_recovery_system)
-            continue
+    # «Плохой» исход одного completion → НЕ in-place retry, а быстрый цикл через enrich_fast
+    # (см. :func:`_error_relay_to_enrich_fast`): новое письмо → новый thread_len, терминирование по
+    # хоп-бюджету. Корректирующий текст для relay = те же mode-notices, что показал бы прежний in-place
+    # retry (budget/gate), с фолбэком на базовый system.
+    finish = reasoning_finish_reason(resp)
+    if finish == "length":
+        log.warning("llm_finish_reason_length_relay_enrich_fast")
+        return _error_relay_to_enrich_fast(msg, length_recovery_system)
 
-        if remaining >= 1:
-            require_tool_calls_response(resp, context="reasoning")
+    if remaining >= 1:
+        require_tool_calls_response(resp, context="reasoning")
 
-        assistant = reasoning_assistant_message(resp)
-        tc = reasoning_first_tool_call(assistant)
-        if tc is None:
-            if remaining < 1:
-                wrong_tool_retries += 1
-                if wrong_tool_retries > _MAX_WRONG_TOOL_RETRIES:
-                    raise ReasoningStageError(
-                        "hop budget exhausted: no tool_call after max retries"
-                    )
-                log.warning(
-                    "restricted_mode_no_tool_call",
-                    retry_count=wrong_tool_retries,
-                    mode="force_finalize",
-                )
-                continue
-            return _route_from_assistant(assistant, schemas)
+    assistant = reasoning_assistant_message(resp)
+    error_body = "\n\n".join(b for b in notices if b and b.strip()) or system
 
-        name = ReasoningToolFunctionName.parse_tool_call(tc)
-        route = name.target_stage()
-        if restricted and route not in allowed:
-            wrong_tool_retries += 1
-            if wrong_tool_retries > _MAX_WRONG_TOOL_RETRIES:
-                raise ReasoningStageError(
-                    f"wrong tool {name.value!r} after max retries "
-                    f"(allowed={[s.value for s in allowed]})"
-                )
-            log.warning(
-                "wrong_tool_rejected",
-                got=name.value,
-                retry_count=wrong_tool_retries,
-                allowed=[s.value for s in allowed],
-                formal_reason_gate_active=gate_active,
-            )
-            continue
-
-        if remaining < 1 and route != FsmStage.RESPONSE_FINALIZE:
-            wrong_tool_retries += 1
-            if wrong_tool_retries > _MAX_WRONG_TOOL_RETRIES:
-                raise ReasoningStageError(
-                    f"hop budget exhausted: got {name.value!r} after max retries"
-                )
-            log.warning(
-                "force_finalize_wrong_tool",
-                retry_count=wrong_tool_retries,
-                got=name.value,
-            )
-            continue
-
+    tc = reasoning_first_tool_call(assistant)
+    if tc is None:
         if remaining < 1:
-            log.info("force_finalize_resolved", retry_count=wrong_tool_retries)
+            log.warning("restricted_mode_no_tool_call_relay", mode="force_finalize")
+            return _error_relay_to_enrich_fast(msg, error_body)
         return _route_from_assistant(assistant, schemas)
+
+    name = ReasoningToolFunctionName.parse_tool_call(tc)
+    route = name.target_stage()
+    if restricted and route not in allowed:
+        log.warning(
+            "wrong_tool_relay",
+            got=name.value,
+            allowed=[s.value for s in allowed],
+            formal_reason_gate_active=gate_active,
+        )
+        return _error_relay_to_enrich_fast(msg, error_body)
+
+    if remaining < 1 and route != FsmStage.RESPONSE_FINALIZE:
+        log.warning("force_finalize_wrong_tool_relay", got=name.value)
+        return _error_relay_to_enrich_fast(msg, error_body)
+
+    if remaining < 1:
+        log.info("force_finalize_resolved")
+    return _route_from_assistant(assistant, schemas)
 
 
 def main(

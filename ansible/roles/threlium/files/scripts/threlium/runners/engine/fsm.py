@@ -8,10 +8,14 @@ from pathlib import Path
 from structlog.contextvars import bind_contextvars, reset_contextvars
 
 from threlium.delivery import run_fdm
-from threlium.irt_chain import stage_materialization_cache
+from threlium.irt_chain import (
+    iter_in_reply_to_ancestors_from_inner_id,
+    stage_materialization_cache,
+)
 from threlium.logutil import logger
 from threlium.mail import email_message_from_bytes, serialize_rfc822_for_wire
 from threlium.settings import ThreliumSettings
+from threlium.litellm_client import LITELLM_THREAD_LEN_SLOT
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers
 from threlium.litellm_route_context import (
     e2e_route_wire_tail,
@@ -107,16 +111,28 @@ def _run_stage(
             else:
                 corr = build_litellm_correlation_headers(msg, call_site=LitellmCallSite.FSM)
                 snap = LitellmCorrelationSnapshot.from_mapping(corr)
-                _log.debug(
+                corr_dict = snap.as_dict()
+                # Сквозной номер вызова LLM в треде (база req_seq) = длина IRT-цепочки на момент стадии,
+                # из УЖЕ кэш-материализованной цепочки (``stage_materialization_cache`` активен выше) —
+                # без отдельного notmuch-обхода. Internal-слот, в wire не уходит (см. litellm_client).
+                start_inner = NotmuchMessageIdInner.from_optional_wire(mid_w)
+                if start_inner is not None:
+                    corr_dict[LITELLM_THREAD_LEN_SLOT] = str(
+                        len(iter_in_reply_to_ancestors_from_inner_id(start_inner))
+                    )
+                # INFO (не debug): ``thread_len`` = база ``X-Threlium-Litellm-Req-Seq`` — постоянный
+                # сигнал для e2e-диагностики/маппинга reasoning-хопов на seq (см. litellm_client).
+                _log.info(
                     "e2e_fsm_corr_set",
                     thread=threading.current_thread().name,
                     ident=threading.get_ident(),
                     route_tail=e2e_route_wire_tail(snap.route_wire),
                     call_site=snap.call_site,
+                    thread_len=corr_dict.get(LITELLM_THREAD_LEN_SLOT),
                 )
                 # ContextVar (а не TLS): на синхронном FSM-потоке ведёт себя как thread-local (set→read на
                 # одном потоке), а token-reset гарантирует per-message-скоуп при переиспользовании потока.
-                token = set_litellm_correlation_ctxvar(snap.as_dict())
+                token = set_litellm_correlation_ctxvar(corr_dict)
                 try:
                     out_msg = handler(msg, stage_vo, config=settings)
                 finally:
