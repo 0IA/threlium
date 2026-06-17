@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "summarize_response_buffer"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "7"
       }
     },
     "bodyPatterns": [
@@ -19,7 +22,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "phase_observe"
+        "hasProperty": "active"
       }
     }
   },

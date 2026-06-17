@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "3"
       }
     },
     "bodyPatterns": [
@@ -25,8 +28,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_append"
+        "hasProperty": "active"
       }
     }
   },
@@ -67,15 +69,6 @@
       "name": "recordState",
       "parameters": {
         "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_append": "1"
-        }
-      }
-    },
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "list": {
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
@@ -86,14 +79,66 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "saw_seed": "{{#if (contains request.body 'E2E-ROLE-INGRESS-SEED')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_seed' default='0'}}{{/if}}",
-          "saw_turn2": "{{#if (contains request.body 'E2E-ROLE-INGRESS-TURN2')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_turn2' default='0'}}{{/if}}",
-          "saw_observed": "{{#if (contains request.body 'E2E-OBSERVED-CHUNK')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_observed' default='0'}}{{/if}}",
-          "hist_user_intent": "{{#if (contains (regexExtract (jsonPath request.body '$.messages.[-1].content') '(?s)<conversation_history>.*?</conversation_history>') '## User intent')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='hist_user_intent' default='0'}}{{/if}}",
-          "hist_observed": "{{#if (contains (regexExtract (jsonPath request.body '$.messages.[-1].content') '(?s)<conversation_history>.*?</conversation_history>') 'E2E-OBSERVED-CHUNK')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='hist_observed' default='0'}}{{/if}}",
-          "hist_leak": "{{#if (contains (regexExtract (jsonPath request.body '$.messages.[-1].content') '(?s)<conversation_history>.*?</conversation_history>') 'enrich_fast@localhost')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='hist_leak' default='0'}}{{/if}}"
+        "context": "{{#if (contains request.body 'E2E-ROLE-INGRESS-SEED')}}saw-seed-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_seed{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'E2E-ROLE-INGRESS-TURN2')}}saw-turn2-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_turn2{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'E2E-OBSERVED-CHUNK')}}saw-observed-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_observed{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains (regexExtract (jsonPath request.body '$.messages.[-1].content') '(?s)<conversation_history>.*?</conversation_history>') '## User intent')}}hist-user-intent-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_hist_user_intent{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains (regexExtract (jsonPath request.body '$.messages.[-1].content') '(?s)<conversation_history>.*?</conversation_history>') 'E2E-OBSERVED-CHUNK')}}hist-observed-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_hist_observed{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains (regexExtract (jsonPath request.body '$.messages.[-1].content') '(?s)<conversation_history>.*?</conversation_history>') 'enrich_fast@localhost')}}hist-leak-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_hist_leak{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     }

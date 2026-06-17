@@ -31,7 +31,7 @@ from .toolkit import (
 )
 from .wiremock_client import (
     wiremock_public_base,
-    wiremock_state_thread_root_property,
+    wiremock_state_thread_root_list_size,
 )
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
@@ -109,23 +109,27 @@ def test_unified_context_roles_two_turn(e2e_runtime: E2EComposeRuntime) -> None:
             # Detag (§3.6.2): без journal-скана. Reasoning-стабы (pure thread-root) на лету пишут
             # липкие STATE-флаги: whole-body наличие маркеров + СЕКЦИОННЫЕ (regexExtract секции
             # <conversation_history>) — точность «внутри секции» сохранена (см. E2E.md §3.6.2).
-            def _flag(name: str) -> str:
-                return wiremock_state_thread_root_property(wm_base, correlation_key, name)
+            # Detag §3.6.7/§3.6.8: additive presence — каждый reasoning-хоп addLast в
+            # <kebab>-<thread-root> при наличии маркера в теле; читаем размер списка (>=1 / ==0).
+            def _flag(name: str) -> int:
+                return wiremock_state_thread_root_list_size(
+                    wm_base, f"{name.replace('_', '-')}-{correlation_key}"
+                )
 
-            assert _flag("saw_seed") == "1", "turn1 ingress marker missing from reasoning (state saw_seed)"
-            assert _flag("saw_turn2") == "1", "turn2 ingress marker missing from reasoning (state saw_turn2)"
-            assert _flag("saw_observed") == "1", "observe chunk missing from reasoning context (state saw_observed)"
+            assert _flag("saw_seed") >= 1, "turn1 ingress marker missing from reasoning (state saw_seed)"
+            assert _flag("saw_turn2") >= 1, "turn2 ingress marker missing from reasoning (state saw_turn2)"
+            assert _flag("saw_observed") >= 1, "observe chunk missing from reasoning context (state saw_observed)"
             # conversation_history несёт ingress-distill заголовки (## User intent) — секционно.
-            assert _flag("hist_user_intent") == "1", (
+            assert _flag("hist_user_intent") >= 1, (
                 "conversation_history must carry ingress distill headings from <history> parts (state hist_user_intent)"
             )
             # enrich_fast relay blob НЕ должен попасть в conversation_history (content-CID dedup; To: не рендерится).
-            assert _flag("hist_leak") == "0", (
+            assert _flag("hist_leak") == 0, (
                 "enrich_fast relay blob must not appear in <conversation_history> (state hist_leak)"
             )
             # Durability: turn-1 observe-chunk обязан выжить в <conversation_history> (full enrich turn2
             # собирает его из <history>-частей треда), а не только в fast-cycle <conversation_delta>.
-            assert _flag("hist_observed") == "1", (
+            assert _flag("hist_observed") >= 1, (
                 "turn-1 observe output missing from <conversation_history>: full enrich did not collect "
                 "it from thread <history>-parts (state hist_observed)"
             )
