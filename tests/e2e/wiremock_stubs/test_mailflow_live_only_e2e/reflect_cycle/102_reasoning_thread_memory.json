@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "3"
       }
     },
     "bodyPatterns": [
@@ -22,8 +25,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "live_reflect_nested"
+        "hasProperty": "active"
       }
     }
   },

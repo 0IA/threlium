@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "11"
       }
     },
     "bodyPatterns": [
@@ -22,8 +25,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "phase_l1_subagent_attempted",
-        "hasNotProperty": "phase_l1_done"
+        "hasProperty": "active"
       }
     }
   },
@@ -63,23 +65,11 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_l1_done": "1"
-        }
-      }
-    },
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "context": "{{#if (contains request.body 'hop-budget for this thread is exhausted')}}saw-budget-exhausted-notice-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_budget_exhausted_notice{{/if}}",
         "list": {
           "addLast": {
-            "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+            "hit": "1"
           }
-        },
-        "state": {
-          "saw_budget_exhausted_notice": "{{#if (contains request.body 'hop-budget for this thread is exhausted')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_budget_exhausted_notice' default='0'}}{{/if}}"
         }
       }
     }

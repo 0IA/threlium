@@ -101,6 +101,7 @@ from .wiremock_client import (
     prepare_wiremock_scenario,
     wiremock_admin_base,
     wiremock_public_base,
+    wiremock_state_thread_root_list_size,
     wiremock_state_thread_root_property,
 )
 
@@ -596,7 +597,7 @@ def test_live_subagent_table_shallow_chain_on_running_stack(e2e_runtime: E2EComp
         # существует» (доказывает, что результат субагента вернулся в родительский контур). Прямое чтение
         # после ответа GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_subagent_result") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-subagent-result-{correlation_key}") >= 1
         ), "L1 subagent POP result must reach L0 reasoning prompt (state saw_subagent_result)"
     finally:
         # Контекст WM не удалять здесь — см. two_turn finally.
@@ -664,8 +665,10 @@ def test_live_subagent_budget_exhausted_on_running_stack(e2e_runtime: E2ECompose
         # journal find_wiremock_requests_by_body_contains, но дёшево из state. Прямое чтение после ответа
         # GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_budget_exhausted_notice")
-            == "1"
+            wiremock_state_thread_root_list_size(
+                wm_base, f"saw-budget-exhausted-notice-{correlation_key}"
+            )
+            >= 1
         ), "budget exhausted notice must reach L1 reasoning prompt (state saw_budget_exhausted_notice)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
@@ -735,7 +738,7 @@ def test_live_memory_table_thread_memory_on_running_stack(e2e_runtime: E2ECompos
         # Маршрут ingress→thread_memory→reasoning→finalize→egress→archive enforced фазовыми стабами +
         # unmatched-guard + ответным письмом выше. Прямое чтение после ответа GreenMail — time-independent.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_thread_memory_note") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-thread-memory-note-{correlation_key}") >= 1
         ), "thread_memory note must reach reasoning prompt (state saw_thread_memory_note)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
@@ -798,7 +801,7 @@ def test_live_memory_table_global_memory_on_running_stack(e2e_runtime: E2ECompos
         # content-flag saw_global_memory_note, строго СИЛЬНЕЕ «GLOBAL_MEMORY-папка существует». Прямое
         # чтение после ответа GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_global_memory_note") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-global-memory-note-{correlation_key}") >= 1
         ), "global_memory note must reach reasoning prompt (state saw_global_memory_note)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
@@ -861,7 +864,7 @@ def test_live_reflect_then_egress_on_running_stack(e2e_runtime: E2EComposeRuntim
         # СИЛЬНЕЕ «REFLECT-папка существует» (доказывает, что reflect-итог вернулся в контур). Прямое чтение
         # после ответа GreenMail (контур завершён) — time-independent; маршрут enforced unmatched-guard.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_reflect_summary") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-reflect-summary-{correlation_key}") >= 1
         ), "reflect summary must reach the second reasoning hop (state saw_reflect_summary)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)
@@ -1079,7 +1082,7 @@ def test_live_cli_intent_allow_echo_on_running_stack(e2e_runtime: E2EComposeRunt
         # стабами (egress gated hasProperty round1_ledger_done) + unmatched-guard + ответным письмом выше.
         # Прямое чтение: ассерт после ответа GreenMail (контур завершён) — time-independent.
         assert (
-            wiremock_state_thread_root_property(wm_base, correlation_key, "saw_cli_echo") == "1"
+            wiremock_state_thread_root_list_size(wm_base, f"saw-cli-echo-{correlation_key}") >= 1
         ), "cli_exec echo output must reach reasoning (state saw_cli_echo)"
     finally:
         assert_wiremock_zero_unmatched_requests(wm_base)

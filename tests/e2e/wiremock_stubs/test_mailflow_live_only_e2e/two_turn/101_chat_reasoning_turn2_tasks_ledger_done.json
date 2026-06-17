@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "13"
       }
     },
     "bodyPatterns": [
@@ -25,7 +28,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasNotProperty": "phase_turn2_tasks_ledger_done"
+        "hasProperty": "active"
       }
     }
   },
@@ -62,15 +65,6 @@
     }
   },
   "serveEventListeners": [
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_turn2_tasks_ledger_done": "1"
-        }
-      }
-    },
     {
       "name": "recordState",
       "parameters": {
