@@ -19,9 +19,6 @@
       },
       {
         "contains": "E2E-FSM-HANDLER-FAILURE-BODY"
-      },
-      {
-        "doesNotContain": "E2E-FSM-HANDLER-FAILURE-RECOVERY"
       }
     ],
     "customMatcher": {
@@ -64,6 +61,15 @@
     }
   },
   "serveEventListeners": [
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "fsm-fail-{{request.headers.[X-Threlium-Thread-Root]}}",
+        "state": {
+          "armed": "1"
+        }
+      }
+    },
     {
       "name": "recordState",
       "parameters": {

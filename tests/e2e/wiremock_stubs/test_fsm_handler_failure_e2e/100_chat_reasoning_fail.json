@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "3"
       }
     },
     "bodyPatterns": [
@@ -19,17 +22,13 @@
       },
       {
         "contains": "E2E-FSM-HANDLER-FAILURE-BODY"
-      },
-      {
-        "doesNotContain": "E2E-FSM-HANDLER-FAILURE-RECOVERY"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "active",
-        "hasNotProperty": "phase_failure_seen"
+        "hasContext": "fsm-fail-{{request.headers.[X-Threlium-Thread-Root]}}",
+        "listSizeEqualTo": "0"
       }
     }
   },
@@ -49,9 +48,11 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_failure_seen": "1"
+        "context": "fsm-fail-{{request.headers.[X-Threlium-Thread-Root]}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     },
