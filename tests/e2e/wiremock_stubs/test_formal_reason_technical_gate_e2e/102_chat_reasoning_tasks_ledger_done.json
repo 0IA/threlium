@@ -5,6 +5,9 @@
     "headers": {
       "X-Threlium-Call-Site": {
         "equalTo": "reasoning"
+      },
+      "X-Threlium-Litellm-Req-Seq": {
+        "equalTo": "13"
       }
     },
     "bodyPatterns": [
@@ -28,8 +31,7 @@
       "name": "state-matcher",
       "parameters": {
         "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "hasProperty": "phase_tech_retry_done",
-        "hasNotProperty": "phase_tech_ledger_done"
+        "hasProperty": "active"
       }
     }
   },
@@ -70,15 +72,6 @@
       "name": "recordState",
       "parameters": {
         "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "phase_tech_ledger_done": "1"
-        }
-      }
-    },
-    {
-      "name": "recordState",
-      "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
         "list": {
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
@@ -89,12 +82,44 @@
     {
       "name": "recordState",
       "parameters": {
-        "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
-        "state": {
-          "saw_gate_active": "{{#if (contains request.body 'Gate retry counter:')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_gate_active' default='0'}}{{/if}}",
-          "saw_query_error": "{{#if (contains request.body 'QUERY ERROR')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_query_error' default='0'}}{{/if}}",
-          "saw_query_result": "{{#if (contains request.body 'query_result:')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='saw_query_result' default='0'}}{{/if}}",
-          "gated_has_finalize": "{{#if (contains request.body 'Gate retry counter:')}}{{#if (contains (jsonPath request.body '$.tools') 'response_finalize')}}1{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='gated_has_finalize' default='0'}}{{/if}}{{else}}{{state context=request.headers.[X-Threlium-Thread-Root] property='gated_has_finalize' default='0'}}{{/if}}"
+        "context": "{{#if (contains request.body 'Gate retry counter:')}}saw-gate-active-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_gate_active{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'QUERY ERROR')}}saw-query-error-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_query_error{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'query_result:')}}saw-query-result-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_saw_query_result{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'Gate retry counter:')}}{{#if (contains (jsonPath request.body '$.tools') 'response_finalize')}}gated-has-finalize-{{request.headers.[X-Threlium-Thread-Root]}}{{else}}_no_gated_has_finalize{{/if}}{{else}}_no_gated_has_finalize{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
+          }
         }
       }
     }

@@ -21,7 +21,7 @@ from .toolkit import (
     mailflow_inject_and_wait,
     REPO_ROOT,
 )
-from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_property
+from .wiremock_client import wiremock_public_base, wiremock_state_thread_root_list_size
 
 _WIREMOCK_STUBS_ROOT = Path(__file__).resolve().parent / "wiremock_stubs"
 E2E_FORMAL_REASON_TECH_GATE_BODY = "E2E-FORMAL-REASON-TECH-GATE-BODY"
@@ -71,27 +71,28 @@ def test_formal_reason_technical_gate_full_pipeline(
             )
             rt = discover_runtime(project, repo_root=REPO_ROOT)
             wm_base = wiremock_public_base(rt.wiremock_host, rt.wiremock_port)
-            # Detag (§3.6.2): без journal/stub_tag — детерминированный gate-цикл по STATE.
-            # NB: гейт-хопы обслуживают ПЕР-ДИР стабы (100-103, sticky-property saw_*), ещё НЕ
-            # переведённые на additive presence — здесь читаем property; конверсия каталога отложена.
-            def _flag(name: str) -> str:
-                return wiremock_state_thread_root_property(wm_base, correlation_key, name)
+            # Detag (§3.6.8): гейт-хопы по (call-site + req_seq); saw_*/gate_* — additive presence
+            # (стаб делает addLast в `<kebab>-<thread-root>` при маркере в теле), читаем размер списка.
+            def _seen(name: str) -> int:
+                return wiremock_state_thread_root_list_size(
+                    wm_base, f"{name.replace('_', '-')}-{correlation_key}"
+                )
 
             # 1-й reasoning (фаза 0) — ДО активации гейта (гейт ещё не вставлен).
-            assert _flag("gate_at_phase0") == "0", (
+            assert _seen("gate_at_phase0") == 0, (
                 "first FSM reasoning must be ungated (state gate_at_phase0)"
             )
             # QUERY ERROR от невалидного SPARQL дошёл до reasoning И активировал гейт.
-            assert _flag("saw_query_error") == "1", "QUERY ERROR must reach reasoning (state saw_query_error)"
-            assert _flag("saw_gate_active") == "1", (
+            assert _seen("saw_query_error") >= 1, "QUERY ERROR must reach reasoning (state saw_query_error)"
+            assert _seen("saw_gate_active") >= 1, (
                 "QUERY ERROR must activate the formal_reason gate (state saw_gate_active)"
             )
             # Под активным гейтом finalize НЕ предлагается (owner-выбор: gated → нет finalize).
-            assert _flag("gated_has_finalize") == "0", (
+            assert _seen("gated_has_finalize") == 0, (
                 "gated reasoning must NOT offer response_finalize (state gated_has_finalize)"
             )
             # Исправленный запрос вернул query_result → ungated finalize.
-            assert _flag("saw_query_result") == "1", (
+            assert _seen("saw_query_result") >= 1, (
                 "corrected formal_reason query_result must reach reasoning (state saw_query_result)"
             )
         except Exception:
