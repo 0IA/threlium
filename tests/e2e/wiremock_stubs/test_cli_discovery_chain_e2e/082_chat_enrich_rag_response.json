@@ -48,7 +48,7 @@
                 "type": "function",
                 "function": {
                   "name": "generate_rag_answer",
-                  "arguments": "{\"answer\": \"E2e RAG context response (nonce {{randomValue length=16 type='ALPHANUMERIC'}}). No relevant graph data found for this query scope.\"}"
+                  "arguments": "{\"answer\": \"E2e shared deterministic RAG answer used for all e2e tests. No relevant graph data found for this query.\"}"
                 }
               }
             ]

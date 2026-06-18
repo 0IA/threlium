@@ -42,7 +42,7 @@
                 "type": "function",
                 "function": {
                   "name": "summarize_thread_context",
-                  "arguments": "{\"summary\": \"E2e generic thread-context summary (nonce {{randomValue length=16 type='ALPHANUMERIC'}}).\"}"
+                  "arguments": "{\"summary\": \"E2e generic thread-context summary (nonce GENERICSUMMARY00).\"}"
                 }
               }
             ]

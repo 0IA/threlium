@@ -10,6 +10,9 @@
     "bodyPatterns": [
       {
         "contains": "\"tools\""
+      },
+      {
+        "contains": "E2E-RESPONSE-BUFFER-BODY"
       }
     ],
     "customMatcher": {

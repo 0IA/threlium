@@ -20,7 +20,7 @@
         "message": { "role": "assistant", "content": null,
           "tool_calls": [ { "id": "call_lightrag_generic_extract_query_keywords", "type": "function",
             "function": { "name": "extract_query_keywords",
-              "arguments": "{\"high_level_keywords\": [\"e2e_{{randomValue length=8 type='ALPHANUMERIC'}}\"], \"low_level_keywords\": [\"stub_{{randomValue length=8 type='ALPHANUMERIC'}}\"]}" } } ] } } ] }
+              "arguments": "{\"high_level_keywords\": [\"e2e_FIXEDKW1\"], \"low_level_keywords\": [\"stub_FIXEDKW2\"]}" } } ] } } ] }
   },
   "serveEventListeners": [ { "name": "recordState",
     "parameters": { "context": "{{request.headers.[X-Threlium-Thread-Root]}}",
