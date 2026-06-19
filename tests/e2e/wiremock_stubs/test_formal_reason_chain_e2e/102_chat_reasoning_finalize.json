@@ -35,7 +35,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "stub-formal-reason-chain-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "active"
       }
     }

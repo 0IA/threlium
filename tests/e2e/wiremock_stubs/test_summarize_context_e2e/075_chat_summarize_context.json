@@ -10,12 +10,15 @@
     "bodyPatterns": [
       {
         "contains": "\"tools\""
+      },
+      {
+        "contains": "summarize context overflow"
       }
     ],
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}"
+        "hasContext": "stub-summarize-context-e2e-01::{{request.headers.[X-Threlium-Thread-Root]}}"
       }
     }
   },

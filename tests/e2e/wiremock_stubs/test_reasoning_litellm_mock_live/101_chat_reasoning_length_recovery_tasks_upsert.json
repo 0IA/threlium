@@ -24,7 +24,7 @@
     "customMatcher": {
       "name": "state-matcher",
       "parameters": {
-        "hasContext": "{{request.headers.[X-Threlium-Thread-Root]}}",
+        "hasContext": "stub-reasoning-litellm-live-01::{{request.headers.[X-Threlium-Thread-Root]}}",
         "hasProperty": "phase_length_recovery_e2e"
       }
     }

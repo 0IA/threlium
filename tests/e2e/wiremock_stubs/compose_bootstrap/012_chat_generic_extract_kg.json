@@ -42,7 +42,7 @@
                 "type": "function",
                 "function": {
                   "name": "extract_knowledge_graph",
-                  "arguments": "{\"entities\": [{\"name\": \"E2e Generic Index Entity\", \"type\": \"concept\", \"description\": \"Synthetic entity for generic lightrag indexing e2e.\"}], \"relationships\": []}"
+                  "arguments": "{\"entities\": [{\"name\": \"E2e Generic Index Entity\", \"type\": \"concept\", \"description\": \"Synthetic entity for generic lightrag indexing e2e.\"}, {\"name\": \"ZZNODEALPHA\", \"type\": \"concept\", \"description\": \"Generic deterministic graph marker node alpha (cozo adapter e2e).\"}, {\"name\": \"ZZNODEBETA\", \"type\": \"concept\", \"description\": \"Generic deterministic graph marker node beta (cozo adapter e2e).\"}], \"relationships\": [{\"source\": \"ZZNODEALPHA\", \"target\": \"ZZNODEBETA\", \"keywords\": \"ZZRELMARKER\", \"description\": \"ZZRELMARKER edge alpha-beta (cozo adapter e2e).\"}]}"
                 }
               }
             ]
@@ -59,6 +59,17 @@
         "list": {
           "addLast": {
             "cs": "{{request.headers.[X-Threlium-Call-Site]}}"
+          }
+        }
+      }
+    },
+    {
+      "name": "recordState",
+      "parameters": {
+        "context": "{{#if (contains request.body 'ZZRELMARKER')}}cozo-extract-zzrelmarker{{else}}_no_zzrelmarker{{/if}}",
+        "list": {
+          "addLast": {
+            "hit": "1"
           }
         }
       }
