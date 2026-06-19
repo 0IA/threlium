@@ -5,13 +5,12 @@ import asyncio
 import hashlib
 import time
 from dataclasses import dataclass
-from pathlib import Path
 
 import notmuch2  # pyright: ignore[reportMissingImports]
 
 from lightrag import LightRAG
 
-from threlium.irt_chain import snapshot_from_nm_message
+from threlium.irt_chain import IrtAncestorSnapshot, snapshot_from_nm_message
 from threlium.litellm_correlation_headers import build_litellm_correlation_headers_from_snapshot
 from threlium.litellm_route_context import (
     e2e_route_wire_tail,
@@ -20,7 +19,6 @@ from threlium.litellm_route_context import (
 )
 from threlium.lightrag_drain_query import lightrag_drain_pending_search
 from threlium.logutil import logger
-from threlium.mail import email_message_from_path
 from threlium.mime_reform import message_has_history
 from threlium.lightrag_ingest import render_lightrag_ingest_document
 from threlium.nm import (
@@ -121,14 +119,22 @@ def _effective_batch_size(settings: ThreliumSettings) -> int:
 class _DrainPendingItem:
     """Иммутабельный снимок pending-письма drain'а — материализуется РАЗ в collect-проходе.
 
-    Снимок-подход (как :class:`~threlium.irt_chain.IrtAncestorSnapshot`): живой ``notmuch2.Message``
-    не покидает открытый ``with notmuch_database`` — наружу только frozen-VO. Корреляция снимается в
-    ТОМ ЖЕ сеансе, что и письмо (без второго ``db.get`` живого Message)."""
+    Снимок-подход: живой ``notmuch2.Message`` не покидает открытый ``with notmuch_database`` — наружу
+    только frozen-VO (:class:`~threlium.irt_chain.IrtAncestorSnapshot`). Корреляция снимается в ТОМ ЖЕ
+    сеансе, что и письмо (без второго ``db.get`` живого Message). Тело читаем ПОЗЖЕ (вне сессии) через
+    ``snap.email_message`` — он резолвит живой файл по неизменному base (устойчив к ``nm_settle``
+    ``new/``→``cur/``) и кэширует контент; замороженный путь для чтения НЕ используем."""
 
-    path: Path
-    message_id_inner: NotmuchMessageIdInner
-    thread_scope: NotmuchThreadScopeId  # инвариант notmuch: всегда present (из снапшота)
+    snap: IrtAncestorSnapshot
     correlation: "LitellmCorrelationSnapshot | None"
+
+    @property
+    def message_id_inner(self) -> NotmuchMessageIdInner:
+        return self.snap.message_id_inner
+
+    @property
+    def thread_scope(self) -> NotmuchThreadScopeId:  # инвариант notmuch: всегда present (из снапшота)
+        return self.snap.thread_scope
 
 
 _COLLECT_RESUME_MAX_NOPROGRESS = 5
@@ -141,15 +147,16 @@ def _collect_one(
 
     Граница: ``db.find`` → живой ``msg`` → ``snapshot_from_nm_message`` (snapshot-API) + threadid; дальше
     БИЗНЕС-логика (корреляция) — на ``IrtAncestorSnapshot``, не на ``msg``. ``None`` — письмо ушло из
-    индекса (``db.find`` LookupError→None) или файла нет (genuine skip). Discard ревизии (``XapianError`` /
-    cffi-NULL ``RuntimeError`` на ``db.find``/``msg.path``/route-resolve) — ПРОБРАСЫВАЕТСЯ resume-циклу
-    (переоткроет БД и повторит ЭТОТ элемент); в ``out`` ничего не попадает до полного успеха (атомарность)."""
+    индекса (``db.find`` LookupError→None). Existence-of-file НЕ проверяем здесь: прежний ``is_file()`` был
+    TOCTOU-проверкой (мог пройти, а чтение позже падало на ``nm_settle``) — реальная проверка = само
+    чтение тела в ``_ainsert_batch`` (``snap.email_message`` резолвит живой файл; нет файла → skip там).
+    Discard ревизии (``XapianError`` / cffi-NULL ``RuntimeError`` на ``db.find``/``msg.path``/route-resolve)
+    — ПРОБРАСЫВАЕТСЯ resume-циклу (переоткроет БД и повторит ЭТОТ элемент); в ``out`` ничего не попадает
+    до полного успеха (атомарность)."""
     msg = first_notmuch_message_for_inner_id(db, mid_inner)
     if msg is None:
         return None
     snap = snapshot_from_nm_message(msg, mid_inner)  # граница: живой msg → иммутабельный снимок (ВСЕ поля)
-    if not snap.path.is_file():
-        return None
     corr = (
         LitellmCorrelationSnapshot.from_mapping(
             build_litellm_correlation_headers_from_snapshot(
@@ -159,7 +166,7 @@ def _collect_one(
         if with_correlation
         else None
     )
-    return _DrainPendingItem(snap.path, snap.message_id_inner, snap.thread_scope, corr)
+    return _DrainPendingItem(snap, corr)
 
 
 def _collect_batch(limit: int, *, with_correlation: bool) -> list["_DrainPendingItem"]:
@@ -268,14 +275,17 @@ async def _ainsert_batch(
     skip_tag_ids: list[NotmuchMessageIdInner] = []
 
     for item in pending:
-        fp, mid_inner, tid = item.path, item.message_id_inner, item.thread_scope
+        snap, mid_inner, tid = item.snap, item.message_id_inner, item.thread_scope
+        citation = str(snap.path)  # identity-метка для lightrag file_paths/логов (не источник чтения)
         try:
-            msg = email_message_from_path(fp)
+            # Тело резолвится по неизменному base в МОМЕНТ чтения (устойчиво к ``nm_settle``
+            # ``new/``→``cur/``) и кэшируется на снимке; нет файла → genuine skip (письмо удалено).
+            msg = snap.email_message
         except Exception as exc:
             log.error(
                 "index_skip",
                 reason=LightragDrainSkipReason.RENDER_FAILED.value,
-                path=str(fp),
+                path=citation,
                 exc_type=type(exc).__name__,
                 exc_msg=str(exc),
             )
@@ -290,7 +300,7 @@ async def _ainsert_batch(
             log.info(
                 "index_skip",
                 reason=LightragDrainSkipReason.NO_HISTORY.value,
-                path=str(fp),
+                path=citation,
                 to_stage=to_stage.value if to_stage is not None else None,
             )
             skip_tag_ids.append(mid_inner)
@@ -302,7 +312,7 @@ async def _ainsert_batch(
             log.error(
                 "index_skip",
                 reason=LightragDrainSkipReason.RENDER_FAILED.value,
-                path=str(fp),
+                path=citation,
                 exc_type=type(exc).__name__,
                 exc_msg=str(exc),
             )
@@ -311,7 +321,7 @@ async def _ainsert_batch(
         texts.append(text)
         ids.append(_lightrag_doc_id(mid_inner))
         tag_ids.append(mid_inner)
-        file_paths.append(str(fp))
+        file_paths.append(citation)
         correlations.append(item.correlation)
 
     if skip_tag_ids:
@@ -326,7 +336,7 @@ async def _ainsert_batch(
         if not skip_tag_ids:
             raise RuntimeError(
                 "lightrag: pending batch produced no texts "
-                f"(paths={[str(it.path) for it in pending]!r})"
+                f"(paths={[str(it.snap.path) for it in pending]!r})"
             )
         return
 

@@ -1,6 +1,7 @@
 """Wire RFC822: parse/serialize/IMAP literal — единая политика stdlib ``email``."""
 from __future__ import annotations
 
+import glob
 import imaplib
 from email import policy
 from email.message import EmailMessage
@@ -35,6 +36,41 @@ def email_message_from_bytes(data: bytes) -> EmailMessage:
 def email_message_from_path(path: Path | str) -> EmailMessage:
     """``read_bytes`` + :func:`parse_rfc822`."""
     return parse_rfc822(Path(path).read_bytes())
+
+
+def resolve_maildir_file(path: Path | str) -> Path | None:
+    """Найти живой файл maildir-письма по неизменному base в ``{cur,new}``; ``None`` если файла нет.
+
+    ``nm_settle`` (``unread``→seen) = атомарный notmuch-rename ``new/<base>`` → ``cur/<base>:2,S``:
+    меняются только папка (``new``/``cur``) и суффикс ``:2,<flags>``, а base ``<time>.<unique>.<host>``
+    неизменен. Поэтому замороженный в снимке путь может устареть между материализацией и чтением —
+    резолвим живой файл по base. ``cur`` первой: к моменту чтения письмо обычно уже settled."""
+    p = Path(path)
+    base = p.name.split(":", 1)[0]
+    maildir = p.parent.parent
+    for sub in ("cur", "new"):
+        for hit in glob.glob(glob.escape(str(maildir / sub / base)) + "*"):
+            name = Path(hit).name
+            # точное совпадение base: ``<base>`` (new) или ``<base>:2,<flags>`` (cur) — НЕ prefix
+            # другого письма (``startswith(base)`` без разделителя — чужой файл).
+            if name == base or name.startswith(base + ":"):
+                return Path(hit)
+    return None
+
+
+def email_message_from_maildir(path: Path | str) -> EmailMessage:
+    """:func:`email_message_from_path`, устойчивый к атомарному maildir-переносу ``new/``→``cur/``.
+
+    Морозить путь для чтения нельзя (см. :func:`resolve_maildir_file`): читаем по переданному пути,
+    пока он валиден (stat-fast-path — горячий путь без glob), иначе резолвим живой файл по base.
+    Кэшировать следует РЕЗУЛЬТАТ (контент ``EmailMessage``), а не путь."""
+    p = Path(path)
+    target = p if p.exists() else resolve_maildir_file(p)
+    if target is None:
+        raise FileNotFoundError(
+            f"maildir message gone: base={p.name.split(':', 1)[0]} dir={p.parent.parent}"
+        )
+    return email_message_from_path(target)
 
 
 def canonicalize_mime(msg: EmailMessage) -> EmailMessage:

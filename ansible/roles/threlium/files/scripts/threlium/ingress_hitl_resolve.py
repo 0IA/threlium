@@ -33,10 +33,9 @@ def find_cli_intent_snapshot_from_in_reply_to_ancestors(
         if snap.is_addressed_to_fsm_stage(FsmStage.CLI_RESUME):
             return None
         if snap.is_addressed_to_fsm_stage(FsmStage.CLI_INTENT):
-            if not snap.path.is_file():
-                raise RuntimeError(
-                    "FSM-инвариант: файл письма cli_intent отсутствует на диске по пути из индекса "
-                    f"path={snap.path!r}"
-                )
+            # Прежний ``snap.path.is_file()`` убран: это была TOCTOU-проверка по ЗАМОРОЖЕННОМУ пути
+            # (мог пройти, а чтение позже падало на ``nm_settle`` ``new/``→``cur/``). Реальная проверка —
+            # само чтение тела потребителем (``snap.email_message`` резолвит живой файл по base и уже
+            # под ``try/except``, см. ``cli_resume``); отдельный eager-зонд лишний и давал ложную гарантию.
             return snap
     return None

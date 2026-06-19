@@ -86,9 +86,12 @@ class IrtAncestorSnapshot:
         снимок). Единственному мутатору (``build_unified_email_messages`` ``set_payload``)
         брать собственную копию (``canonicalize_mime``) перед изменением.
         """
-        from threlium.mail import email_message_from_path
+        from threlium.mail import email_message_from_maildir
 
-        return email_message_from_path(self.path)
+        # ``self.path`` заморожен на материализации и может устареть от ``nm_settle`` (атомарный
+        # ``new/``→``cur/``); резолвим живой файл по неизменному base в МОМЕНТ чтения, а кэшируем
+        # РЕЗУЛЬТАТ (контент) — этот ``cached_property``, НЕ путь.
+        return email_message_from_maildir(self.path)
 
     def subagent_marker(self) -> IrtSubagentMarker:
         """Маркер субагента на этом снимке (единая точка классификации для баланса).

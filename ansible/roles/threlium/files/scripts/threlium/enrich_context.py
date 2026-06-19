@@ -11,7 +11,7 @@ from threlium import nm
 from threlium.logutil import logger
 from threlium.settings import ThreliumSettings
 from threlium.thread_context_filter import iter_irt_ancestors_filtered
-from threlium.mail import email_message_from_path
+from threlium.mail import email_message_from_maildir
 from threlium.ingress_bridge_user_query import enrich_user_query_from_bridge_system
 from threlium.mime_reform import (
     EnrichContentId,
@@ -151,7 +151,9 @@ def _load_paths(paths: list[Path]) -> list[EmailMessage]:
     skipped = 0
     for p in paths:
         try:
-            loaded.append(email_message_from_path(p))
+            # resolve-by-base в момент чтения (устойчиво к ``nm_settle`` ``new/``→``cur/``);
+            # genuinely-gone → ``FileNotFoundError`` (подкласс ``OSError``) → skip ниже.
+            loaded.append(email_message_from_maildir(p))
         except OSError as exc:
             log.warning("load_path_skipped", path=str(p), exc_msg=str(exc))
             skipped += 1
@@ -190,8 +192,11 @@ def build_unified_email_messages(
     gm_q = NotmuchQueryField.TO.term(FsmStage.GLOBAL_MEMORY.rfc822_mailbox)
     gm_paths = nm.message_paths(gm_q, limit=n_gm, sort_newest_first=True)
 
-    memory_path_keys: set[str] = {
-        str(p.resolve()) for p in itertools.chain(tm_paths, gm_paths)
+    # Дедуп memory-vs-chain по НЕИЗМЕННОМУ maildir-base (``<time>.<unique>.<host>``), а не по
+    # realpath: ``nm_settle`` (``new/``→``cur/``) меняет папку+флаги пути, и realpath-ключ разъезжается
+    # (chain-snap заморожен в ``new/``, memory-путь уже в ``cur/``) → дубль протекал в unified.
+    memory_base_keys: set[str] = {
+        p.name.split(":", 1)[0] for p in itertools.chain(tm_paths, gm_paths)
     }
 
     # Проход по снимкам IRT **старые→новые** (tail_snaps идёт лист→корень = новые→старые,
@@ -224,7 +229,7 @@ def build_unified_email_messages(
     for snap in reversed(tail_snaps):
         if _summarized_tag in snap.tags:
             continue
-        if str(snap.path.resolve()) in memory_path_keys:
+        if snap.path.name.split(":", 1)[0] in memory_base_keys:
             continue
         if snap.message_id_inner.value in seen_mids:
             continue
